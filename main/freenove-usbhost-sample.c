@@ -309,6 +309,16 @@ static void midi_out_transfer_callback(usb_transfer_t *transfer)
 
 static void midi_in_transfer_callback(usb_transfer_t *transfer)
 {
+    // Check for device disconnection first
+    if (transfer->status == USB_TRANSFER_STATUS_CANCELED ||
+        transfer->status == USB_TRANSFER_STATUS_NO_DEVICE ||
+        transfer->status == USB_TRANSFER_STATUS_ERROR) {
+
+        ESP_LOGI(TAG, "MIDI IN transfer ended (status: %d) - device disconnected", transfer->status);
+        usb_host_transfer_free(transfer);
+        return; // Don't resubmit
+    }
+
     // Always log callback invocation for debugging
     static uint32_t callback_count = 0;
     callback_count++;
@@ -334,23 +344,47 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
                 }
             }
         }
+
+        // Only resubmit if transfer completed successfully
+        esp_err_t ret = usb_host_transfer_submit(transfer);
+        if (ret != ESP_OK) {
+            if (ret == ESP_ERR_INVALID_STATE) {
+                ESP_LOGI(TAG, "MIDI IN stopped - device disconnected");
+            } else {
+                ESP_LOGE(TAG, "Failed to resubmit MIDI IN: %s", esp_err_to_name(ret));
+            }
+            usb_host_transfer_free(transfer);
+        }
     } else {
         ESP_LOGW(TAG, "MIDI IN transfer failed with status: %d", transfer->status);
-    }
-
-    // Resubmit transfer for continuous listening
-    esp_err_t ret = usb_host_transfer_submit(transfer);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to resubmit MIDI IN transfer: %s", esp_err_to_name(ret));
+        usb_host_transfer_free(transfer);
     }
 }
 
 static void action_send_note(class_driver_t *driver_obj)
 {
-    assert(driver_obj->dev_hdl != NULL);
+    // Skip if no device is connected
+    if (driver_obj->dev_hdl == NULL) {
+        return;
+    }
 
     // Start MIDI IN transfer for receiving data
     static usb_transfer_t *in_transfer = NULL;
+    static bool transfer_cleanup_done = false;
+
+    // Reset transfer if device was disconnected
+    if (driver_obj->dev_hdl == NULL && in_transfer != NULL && !transfer_cleanup_done) {
+        ESP_LOGI(TAG, "Cleaning up MIDI IN transfer after device disconnect");
+        // Don't free here - let the callback handle it when it fails
+        in_transfer = NULL;
+        transfer_cleanup_done = true;
+    }
+
+    // Reset cleanup flag when new device connects
+    if (driver_obj->dev_hdl != NULL && transfer_cleanup_done) {
+        transfer_cleanup_done = false;
+    }
+
     if (in_transfer == NULL) {
         if (driver_obj->midi_in_ep == 0) {
             ESP_LOGW(TAG, "MIDI IN endpoint not found (0x%02x), cannot start MIDI IN transfer", driver_obj->midi_in_ep);
@@ -396,9 +430,15 @@ static void action_send_note(class_driver_t *driver_obj)
 
     // Send Roland J-6 MIDI enable command first (only once)
     static bool midi_enabled = false;
-    if (!midi_enabled && driver_obj->midi_out_ep != 0) {
-        ESP_LOGI(TAG, "Sending MIDI enable command to Roland J-6");
+    static uint8_t last_dev_addr = 0;
 
+    // Reset MIDI enabled state if device was disconnected or changed
+    if (driver_obj->dev_hdl == NULL || driver_obj->dev_addr != last_dev_addr) {
+        midi_enabled = false;
+        last_dev_addr = driver_obj->dev_addr;
+    }
+
+    if (!midi_enabled && driver_obj->midi_out_ep != 0 && driver_obj->dev_hdl != NULL) {
         // Send All Sound Off / Reset All Controllers to ensure device is ready
         usb_transfer_t *enable_transfer;
         esp_err_t ret = usb_host_transfer_alloc(4, 0, &enable_transfer);
@@ -429,8 +469,10 @@ static void action_send_note(class_driver_t *driver_obj)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    // Send NOTE ON only if OUT endpoint is available and MIDI is enabled
-    if (driver_obj->midi_out_ep == 0) {
+    // Send NOTE ON only if device is connected, OUT endpoint is available and MIDI is enabled
+    if (driver_obj->dev_hdl == NULL) {
+        ESP_LOGW(TAG, "No device connected, skipping MIDI send");
+    } else if (driver_obj->midi_out_ep == 0) {
         ESP_LOGW(TAG, "No MIDI OUT endpoint available, skipping MIDI send");
     } else if (!midi_enabled) {
         // Skip note send until MIDI is enabled
@@ -455,7 +497,11 @@ static void action_send_note(class_driver_t *driver_obj)
 
             ret = usb_host_transfer_submit(note_on_transfer);
             if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "NOTE ON failed: %s", esp_err_to_name(ret));
+                if (ret == ESP_ERR_INVALID_STATE) {
+                    ESP_LOGW(TAG, "NOTE ON skipped (device disconnected)");
+                } else {
+                    ESP_LOGE(TAG, "NOTE ON failed: %s", esp_err_to_name(ret));
+                }
                 usb_host_transfer_free(note_on_transfer);
             }
         }
@@ -481,7 +527,11 @@ static void action_send_note(class_driver_t *driver_obj)
 
             ret = usb_host_transfer_submit(note_off_transfer);
             if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "NOTE OFF failed: %s", esp_err_to_name(ret));
+                if (ret == ESP_ERR_INVALID_STATE) {
+                    ESP_LOGW(TAG, "NOTE OFF skipped (device disconnected)");
+                } else {
+                    ESP_LOGE(TAG, "NOTE OFF failed: %s", esp_err_to_name(ret));
+                }
                 usb_host_transfer_free(note_off_transfer);
             }
         }
@@ -501,12 +551,32 @@ static void action_send_note(class_driver_t *driver_obj)
 
 static void action_close_dev(class_driver_t *driver_obj)
 {
-    ESP_LOGI(TAG, "Closing device");
-    ESP_ERROR_CHECK(usb_host_device_close(driver_obj->client_hdl, driver_obj->dev_hdl));
-    driver_obj->dev_hdl = NULL;
+    ESP_LOGI(TAG, "Device disconnected - cleaning up");
+
+    // Clean up MIDI transfers first
+    // Note: Static transfer pointers in action_send_note will be reset
+
+    // Close the device
+    if (driver_obj->dev_hdl != NULL) {
+        esp_err_t ret = usb_host_device_close(driver_obj->client_hdl, driver_obj->dev_hdl);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Device close failed (expected during disconnect): %s", esp_err_to_name(ret));
+        }
+        driver_obj->dev_hdl = NULL;
+    }
+
+    // Reset all device-related state
     driver_obj->dev_addr = 0;
+    driver_obj->midi_in_ep = 0;
+    driver_obj->midi_out_ep = 0;
+    driver_obj->is_midi_device = false;
+    driver_obj->note_counter = 60; // Reset to middle C
+    driver_obj->num_interfaces = 0;
+
+    // Clear action and prepare for new device
     driver_obj->actions &= ~ACTION_CLOSE_DEV;
-    driver_obj->actions |= ACTION_EXIT;
+
+    ESP_LOGI(TAG, "Cleanup complete - monitoring for new device connections");
 }
 
 static void class_driver_task(void *arg)
@@ -527,8 +597,9 @@ static void class_driver_task(void *arg)
     xSemaphoreGive(signaling_sem);
     vTaskDelay(10);
 
-    bool exit_loop = false;
-    while (!exit_loop) {
+    // Continuous loop for USB device hot-plug support
+    uint32_t monitor_cycles = 0;
+    while (true) {
         // Always handle events with short timeout to ensure callbacks are processed
         usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
 
@@ -554,13 +625,22 @@ static void class_driver_task(void *arg)
             action_setup_midi(&driver_obj);
         }
         if (driver_obj.actions & ACTION_SEND_NOTE) {
-            action_send_note(&driver_obj);
+            // Only send notes if device is still connected
+            if (driver_obj.dev_hdl != NULL) {
+                action_send_note(&driver_obj);
+            } else {
+                // Clear action if device is disconnected
+                driver_obj.actions &= ~ACTION_SEND_NOTE;
+            }
         }
         if (driver_obj.actions & ACTION_CLOSE_DEV) {
             action_close_dev(&driver_obj);
         }
-        if (driver_obj.actions & ACTION_EXIT) {
-            exit_loop = true;
+
+        // Monitor for new device connections every 5 seconds
+        monitor_cycles++;
+        if (monitor_cycles % 500 == 0 && driver_obj.dev_hdl == NULL) { // Every 5 seconds when no device
+            ESP_LOGI(TAG, "Monitoring for USB device connections...");
         }
 
         vTaskDelay(10);
@@ -594,15 +674,18 @@ void app_main(void)
 
     while (1) {
         uint32_t event_flags;
-        usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+        usb_host_lib_handle_events(pdMS_TO_TICKS(100), &event_flags);
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
             ESP_LOGI(TAG, "No more clients");
             usb_host_device_free_all();
         }
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
-            ESP_LOGI(TAG, "All devices freed");
-            break;
+            ESP_LOGI(TAG, "All devices freed - ready for new connections");
+            // Don't break here - continue waiting for new devices
         }
+
+        // Add small delay to prevent tight loop
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     ESP_LOGI(TAG, "Uninstalling USB Host Library");
