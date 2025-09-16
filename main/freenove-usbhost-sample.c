@@ -31,6 +31,7 @@ typedef struct {
     uint8_t midi_out_ep;
     bool is_midi_device;
     uint8_t note_counter;
+    uint8_t num_interfaces; // Store interface count for complex device detection
 } class_driver_t;
 
 static void client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg)
@@ -178,7 +179,24 @@ static void action_setup_midi(class_driver_t *driver_obj)
     const usb_config_desc_t *config_desc;
     ESP_ERROR_CHECK(usb_host_get_active_config_descriptor(driver_obj->dev_hdl, &config_desc));
 
-    // Find MIDI streaming interface and its endpoints
+    // First pass: Show ALL interfaces for analysis
+    ESP_LOGI(TAG, "=== ANALYZING ALL INTERFACES ===");
+    for (int intf_num = 0; intf_num < config_desc->bNumInterfaces; intf_num++) {
+        int offset = 0;
+        const usb_intf_desc_t *intf_desc = usb_parse_interface_descriptor(config_desc, intf_num, 0, &offset);
+        if (intf_desc != NULL) {
+            ESP_LOGI(TAG, "Interface %d: Class=0x%02x, SubClass=0x%02x, Protocol=0x%02x, AltSetting=%d, NumEP=%d",
+                    intf_desc->bInterfaceNumber,
+                    intf_desc->bInterfaceClass,
+                    intf_desc->bInterfaceSubClass,
+                    intf_desc->bInterfaceProtocol,
+                    intf_desc->bAlternateSetting,
+                    intf_desc->bNumEndpoints);
+        }
+    }
+
+    // Second pass: Find and claim MIDI streaming interface
+    ESP_LOGI(TAG, "=== SEARCHING FOR MIDI INTERFACE ===");
     for (int intf_num = 0; intf_num < config_desc->bNumInterfaces; intf_num++) {
         int offset = 0;
         const usb_intf_desc_t *intf_desc = usb_parse_interface_descriptor(config_desc, intf_num, 0, &offset);
@@ -190,34 +208,72 @@ static void action_setup_midi(class_driver_t *driver_obj)
             ESP_LOGI(TAG, "Found MIDI interface %d with %d endpoints",
                     intf_desc->bInterfaceNumber, intf_desc->bNumEndpoints);
 
-            // Claim the MIDI interface
+            // Store interface count for later use
+            driver_obj->num_interfaces = config_desc->bNumInterfaces;
+
+            // For Roland J-6: Check if this is a complex Composite device
+            if (config_desc->bNumInterfaces > 2) {
+                ESP_LOGW(TAG, "Complex Composite device detected (%d interfaces)", config_desc->bNumInterfaces);
+                ESP_LOGW(TAG, "This may cause issues with ESP32-S3 USB Host limitations");
+                ESP_LOGW(TAG, "Attempting MIDI-only operation...");
+            }
+
+            // Try to claim the MIDI interface
+            ESP_LOGI(TAG, "Attempting to claim MIDI interface %d (alt setting %d)",
+                    intf_desc->bInterfaceNumber, intf_desc->bAlternateSetting);
+
             esp_err_t ret = usb_host_interface_claim(driver_obj->client_hdl, driver_obj->dev_hdl,
                                                    intf_desc->bInterfaceNumber,
                                                    intf_desc->bAlternateSetting);
             if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to claim MIDI interface: %s", esp_err_to_name(ret));
-                continue;
-            }
-            ESP_LOGI(TAG, "Successfully claimed MIDI interface %d", intf_desc->bInterfaceNumber);
+                ESP_LOGE(TAG, "Failed to claim MIDI interface %d: %s",
+                        intf_desc->bInterfaceNumber, esp_err_to_name(ret));
 
-            // Parse endpoints - reset offset for endpoint parsing
-            int ep_offset = 0;
-            for (int ep_idx = 0; ep_idx < intf_desc->bNumEndpoints; ep_idx++) {
-                const usb_ep_desc_t *ep_desc = usb_parse_endpoint_descriptor_by_index(intf_desc, ep_idx, config_desc->wTotalLength, &ep_offset);
-                if (ep_desc != NULL) {
-                    ESP_LOGI(TAG, "Endpoint %d: Address=0x%02x, Type=%d, MaxPacket=%d",
-                            ep_idx, ep_desc->bEndpointAddress, ep_desc->bmAttributes & 0x03, ep_desc->wMaxPacketSize);
-
-                    if ((ep_desc->bEndpointAddress & 0x80) == 0) { // OUT endpoint
-                        driver_obj->midi_out_ep = ep_desc->bEndpointAddress;
-                        ESP_LOGI(TAG, "MIDI OUT endpoint: 0x%02x", driver_obj->midi_out_ep);
-                    } else { // IN endpoint
-                        driver_obj->midi_in_ep = ep_desc->bEndpointAddress;
-                        ESP_LOGI(TAG, "MIDI IN endpoint: 0x%02x", driver_obj->midi_in_ep);
+                // Try with different alternate setting
+                if (intf_desc->bAlternateSetting == 0) {
+                    ESP_LOGI(TAG, "Trying alternate setting 1 for interface %d", intf_desc->bInterfaceNumber);
+                    ret = usb_host_interface_claim(driver_obj->client_hdl, driver_obj->dev_hdl,
+                                                 intf_desc->bInterfaceNumber, 1);
+                    if (ret != ESP_OK) {
+                        ESP_LOGE(TAG, "Failed to claim MIDI interface with alt setting 1: %s", esp_err_to_name(ret));
+                        continue;
+                    } else {
+                        ESP_LOGI(TAG, "Successfully claimed MIDI interface %d with alt setting 1", intf_desc->bInterfaceNumber);
                     }
                 } else {
-                    ESP_LOGW(TAG, "Failed to parse endpoint %d", ep_idx);
+                    continue;
                 }
+            } else {
+                ESP_LOGI(TAG, "Successfully claimed MIDI interface %d with alt setting %d",
+                        intf_desc->bInterfaceNumber, intf_desc->bAlternateSetting);
+            }
+
+            // Parse endpoints - use sequential parsing
+            ESP_LOGI(TAG, "Parsing %d endpoints for MIDI interface", intf_desc->bNumEndpoints);
+
+            // Get all endpoints in the interface
+            const uint8_t *desc_ptr = (const uint8_t *)intf_desc;
+            desc_ptr += intf_desc->bLength; // Skip interface descriptor
+
+            for (int ep_idx = 0; ep_idx < intf_desc->bNumEndpoints; ep_idx++) {
+                // Find endpoint descriptor
+                while (desc_ptr[1] != USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+                    desc_ptr += desc_ptr[0]; // Move to next descriptor
+                }
+
+                const usb_ep_desc_t *ep_desc = (const usb_ep_desc_t *)desc_ptr;
+                ESP_LOGI(TAG, "Endpoint %d: Address=0x%02x, Type=%d, MaxPacket=%d",
+                        ep_idx, ep_desc->bEndpointAddress, ep_desc->bmAttributes & 0x03, ep_desc->wMaxPacketSize);
+
+                if ((ep_desc->bEndpointAddress & 0x80) == 0) { // OUT endpoint
+                    driver_obj->midi_out_ep = ep_desc->bEndpointAddress;
+                    ESP_LOGI(TAG, "MIDI OUT endpoint: 0x%02x", driver_obj->midi_out_ep);
+                } else { // IN endpoint
+                    driver_obj->midi_in_ep = ep_desc->bEndpointAddress;
+                    ESP_LOGI(TAG, "MIDI IN endpoint: 0x%02x", driver_obj->midi_in_ep);
+                }
+
+                desc_ptr += ep_desc->bLength; // Move to next descriptor
             }
 
             // Check if we found both endpoints
@@ -231,6 +287,10 @@ static void action_setup_midi(class_driver_t *driver_obj)
         }
     }
 
+    ESP_LOGI(TAG, "MIDI setup complete:");
+    ESP_LOGI(TAG, "  OUT endpoint: 0x%02x", driver_obj->midi_out_ep);
+    ESP_LOGI(TAG, "  IN endpoint: 0x%02x", driver_obj->midi_in_ep);
+
     driver_obj->note_counter = 60; // Start with middle C
     driver_obj->actions &= ~ACTION_SETUP_MIDI;
     driver_obj->actions |= ACTION_SEND_NOTE;
@@ -238,12 +298,9 @@ static void action_setup_midi(class_driver_t *driver_obj)
 
 static void midi_out_transfer_callback(usb_transfer_t *transfer)
 {
-    ESP_LOGI(TAG, "MIDI OUT transfer callback - Status: %d", transfer->status);
-
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
-        ESP_LOGI(TAG, "MIDI OUT transfer completed successfully");
-    } else {
-        ESP_LOGE(TAG, "MIDI OUT transfer failed with status: %d", transfer->status);
+    // Minimal OUT transfer logging
+    if (transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGE(TAG, "MIDI OUT failed: %d", transfer->status);
     }
 
     // Free the transfer after completion
@@ -252,34 +309,33 @@ static void midi_out_transfer_callback(usb_transfer_t *transfer)
 
 static void midi_in_transfer_callback(usb_transfer_t *transfer)
 {
-    ESP_LOGI(TAG, "MIDI IN transfer callback - Status: %d, Length: %d",
-             transfer->status, transfer->actual_num_bytes);
+    // Always log callback invocation for debugging
+    static uint32_t callback_count = 0;
+    callback_count++;
 
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0) {
-        ESP_LOGI(TAG, "*** MIDI PACKET RECEIVED ***");
-        ESP_LOG_BUFFER_HEX(TAG, transfer->data_buffer, transfer->actual_num_bytes);
+    // Minimal callback logging
+    ESP_LOGI(TAG, "MIDI IN #%lu: %d bytes", callback_count, transfer->actual_num_bytes);
 
-        // Parse USB MIDI packet (4 bytes per packet)
-        for (int i = 0; i < transfer->actual_num_bytes; i += 4) {
-            if (i + 3 < transfer->actual_num_bytes) {
-                uint8_t cin = transfer->data_buffer[i] & 0x0F;
-                uint8_t midi1 = transfer->data_buffer[i + 1];
-                uint8_t midi2 = transfer->data_buffer[i + 2];
-                uint8_t midi3 = transfer->data_buffer[i + 3];
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+        if (transfer->actual_num_bytes > 0) {
+            // Parse USB MIDI packet (4 bytes per packet) - minimal logging
+            for (int i = 0; i < transfer->actual_num_bytes; i += 4) {
+                if (i + 3 < transfer->actual_num_bytes) {
+                    uint8_t midi1 = transfer->data_buffer[i + 1];
+                    uint8_t midi2 = transfer->data_buffer[i + 2];
+                    uint8_t midi3 = transfer->data_buffer[i + 3];
 
-                ESP_LOGI(TAG, "MIDI: CIN=0x%x, Data=[0x%02x 0x%02x 0x%02x]",
-                         cin, midi1, midi2, midi3);
-
-                // Decode MIDI message
-                if ((midi1 & 0xF0) == 0x90 && midi3 > 0) {
-                    ESP_LOGI(TAG, "NOTE ON: Channel=%d, Note=%d, Velocity=%d",
-                             midi1 & 0x0F, midi2, midi3);
-                } else if ((midi1 & 0xF0) == 0x80 || ((midi1 & 0xF0) == 0x90 && midi3 == 0)) {
-                    ESP_LOGI(TAG, "NOTE OFF: Channel=%d, Note=%d",
-                             midi1 & 0x0F, midi2);
+                    // Only log decoded MIDI messages
+                    if ((midi1 & 0xF0) == 0x90 && midi3 > 0) {
+                        ESP_LOGI(TAG, "NOTE ON: Ch%d, Note%d, Vel%d", midi1 & 0x0F, midi2, midi3);
+                    } else if ((midi1 & 0xF0) == 0x80 || ((midi1 & 0xF0) == 0x90 && midi3 == 0)) {
+                        ESP_LOGI(TAG, "NOTE OFF: Ch%d, Note%d", midi1 & 0x0F, midi2);
+                    }
                 }
             }
         }
+    } else {
+        ESP_LOGW(TAG, "MIDI IN transfer failed with status: %d", transfer->status);
     }
 
     // Resubmit transfer for continuous listening
@@ -295,32 +351,90 @@ static void action_send_note(class_driver_t *driver_obj)
 
     // Start MIDI IN transfer for receiving data
     static usb_transfer_t *in_transfer = NULL;
-    if (in_transfer == NULL && driver_obj->midi_in_ep != 0) {
-        esp_err_t ret = usb_host_transfer_alloc(64, 0, &in_transfer);
-        if (ret == ESP_OK) {
-            in_transfer->device_handle = driver_obj->dev_hdl;
-            in_transfer->callback = midi_in_transfer_callback;
-            in_transfer->context = driver_obj;
-            in_transfer->bEndpointAddress = driver_obj->midi_in_ep;
-            in_transfer->timeout_ms = 0;
-            in_transfer->num_bytes = 64;
-
-            ret = usb_host_transfer_submit(in_transfer);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "MIDI IN transfer started");
-            } else {
-                ESP_LOGE(TAG, "Failed to submit MIDI IN transfer: %s", esp_err_to_name(ret));
-            }
+    if (in_transfer == NULL) {
+        if (driver_obj->midi_in_ep == 0) {
+            ESP_LOGW(TAG, "MIDI IN endpoint not found (0x%02x), cannot start MIDI IN transfer", driver_obj->midi_in_ep);
         } else {
-            ESP_LOGE(TAG, "Failed to allocate MIDI IN transfer: %s", esp_err_to_name(ret));
+            ESP_LOGI(TAG, "Starting MIDI IN transfer on endpoint 0x%02x", driver_obj->midi_in_ep);
+            esp_err_t ret = usb_host_transfer_alloc(64, 0, &in_transfer);
+            if (ret == ESP_OK) {
+                in_transfer->device_handle = driver_obj->dev_hdl;
+                in_transfer->callback = midi_in_transfer_callback;
+                in_transfer->context = driver_obj;
+                in_transfer->bEndpointAddress = driver_obj->midi_in_ep;
+                // Roland J-6 may need longer timeout due to complex audio interfaces
+                in_transfer->timeout_ms = (driver_obj->num_interfaces > 2) ? 5000 : 1000;
+                in_transfer->num_bytes = 64;
+
+                ESP_LOGI(TAG, "MIDI IN transfer setup:");
+                ESP_LOGI(TAG, "  Device handle: %p", in_transfer->device_handle);
+                ESP_LOGI(TAG, "  Callback: %p", in_transfer->callback);
+                ESP_LOGI(TAG, "  Endpoint: 0x%02x", in_transfer->bEndpointAddress);
+                ESP_LOGI(TAG, "  Timeout: %lu ms", in_transfer->timeout_ms);
+                ESP_LOGI(TAG, "  Buffer size: %d bytes", in_transfer->num_bytes);
+
+                ret = usb_host_transfer_submit(in_transfer);
+                if (ret == ESP_OK) {
+                    ESP_LOGI(TAG, "MIDI IN transfer submitted successfully");
+                } else {
+                    ESP_LOGE(TAG, "Failed to submit MIDI IN transfer: %s", esp_err_to_name(ret));
+                    usb_host_transfer_free(in_transfer);
+                    in_transfer = NULL;
+                }
+            } else {
+                ESP_LOGE(TAG, "Failed to allocate MIDI IN transfer: %s", esp_err_to_name(ret));
+            }
+        }
+    } else {
+        // MIDI IN transfer already running, check if it's still active
+        static uint32_t monitor_count = 0;
+        monitor_count++;
+        if (monitor_count % 50 == 0) { // Every 50 calls (100 seconds)
+            ESP_LOGI(TAG, "MIDI monitoring: %lu cycles", monitor_count);
         }
     }
 
-    // Send NOTE ON only if OUT endpoint is available
+    // Send Roland J-6 MIDI enable command first (only once)
+    static bool midi_enabled = false;
+    if (!midi_enabled && driver_obj->midi_out_ep != 0) {
+        ESP_LOGI(TAG, "Sending MIDI enable command to Roland J-6");
+
+        // Send All Sound Off / Reset All Controllers to ensure device is ready
+        usb_transfer_t *enable_transfer;
+        esp_err_t ret = usb_host_transfer_alloc(4, 0, &enable_transfer);
+        if (ret == ESP_OK) {
+            // All Sound Off on all channels (CC 120)
+            enable_transfer->data_buffer[0] = 0x0B; // Cable 0, Control Change
+            enable_transfer->data_buffer[1] = 0xB0; // Control Change, Channel 1
+            enable_transfer->data_buffer[2] = 120;  // All Sound Off
+            enable_transfer->data_buffer[3] = 0x00; // Value 0
+
+            enable_transfer->device_handle = driver_obj->dev_hdl;
+            enable_transfer->bEndpointAddress = driver_obj->midi_out_ep;
+            enable_transfer->num_bytes = 4;
+            enable_transfer->timeout_ms = 1000;
+            enable_transfer->callback = midi_out_transfer_callback;
+            enable_transfer->context = driver_obj;
+
+            ret = usb_host_transfer_submit(enable_transfer);
+            if (ret == ESP_OK) {
+                midi_enabled = true;
+            } else {
+                ESP_LOGE(TAG, "Failed to send MIDI enable: %s", esp_err_to_name(ret));
+                usb_host_transfer_free(enable_transfer);
+            }
+        }
+
+        // Wait before sending notes
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    // Send NOTE ON only if OUT endpoint is available and MIDI is enabled
     if (driver_obj->midi_out_ep == 0) {
         ESP_LOGW(TAG, "No MIDI OUT endpoint available, skipping MIDI send");
+    } else if (!midi_enabled) {
+        // Skip note send until MIDI is enabled
     } else {
-        ESP_LOGI(TAG, "Sending NOTE ON: Note=%d", driver_obj->note_counter);
 
         // Send NOTE ON
         usb_transfer_t *note_on_transfer;
@@ -340,10 +454,8 @@ static void action_send_note(class_driver_t *driver_obj)
             note_on_transfer->context = driver_obj;
 
             ret = usb_host_transfer_submit(note_on_transfer);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "NOTE ON submitted successfully");
-            } else {
-                ESP_LOGE(TAG, "Failed to submit NOTE ON: %s", esp_err_to_name(ret));
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "NOTE ON failed: %s", esp_err_to_name(ret));
                 usb_host_transfer_free(note_on_transfer);
             }
         }
@@ -355,7 +467,6 @@ static void action_send_note(class_driver_t *driver_obj)
         usb_transfer_t *note_off_transfer;
         ret = usb_host_transfer_alloc(4, 0, &note_off_transfer);
         if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "Sending NOTE OFF: Note=%d", driver_obj->note_counter);
             note_off_transfer->data_buffer[0] = 0x08; // Cable 0, Note Off
             note_off_transfer->data_buffer[1] = 0x80; // Note Off, Channel 1
             note_off_transfer->data_buffer[2] = driver_obj->note_counter; // Note number
@@ -369,10 +480,8 @@ static void action_send_note(class_driver_t *driver_obj)
             note_off_transfer->context = driver_obj;
 
             ret = usb_host_transfer_submit(note_off_transfer);
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "NOTE OFF submitted successfully");
-            } else {
-                ESP_LOGE(TAG, "Failed to submit NOTE OFF: %s", esp_err_to_name(ret));
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "NOTE OFF failed: %s", esp_err_to_name(ret));
                 usb_host_transfer_free(note_off_transfer);
             }
         }
@@ -420,9 +529,8 @@ static void class_driver_task(void *arg)
 
     bool exit_loop = false;
     while (!exit_loop) {
-        if (driver_obj.actions == 0) {
-            usb_host_client_handle_events(driver_obj.client_hdl, portMAX_DELAY);
-        }
+        // Always handle events with short timeout to ensure callbacks are processed
+        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
 
         if (driver_obj.actions & ACTION_OPEN_DEV) {
             action_open_dev(&driver_obj);
