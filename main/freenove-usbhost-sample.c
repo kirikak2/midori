@@ -509,6 +509,8 @@ static void action_send_note(class_driver_t *driver_obj)
                     ESP_LOGE(TAG, "NOTE ON failed: %s", esp_err_to_name(ret));
                 }
                 usb_host_transfer_free(note_on_transfer);
+            } else {
+                ESP_LOGI(TAG, "NOTE ON sent: note=%d", driver_obj->note_counter);
             }
         }
 
@@ -539,6 +541,8 @@ static void action_send_note(class_driver_t *driver_obj)
                     ESP_LOGE(TAG, "NOTE OFF failed: %s", esp_err_to_name(ret));
                 }
                 usb_host_transfer_free(note_off_transfer);
+            } else {
+                ESP_LOGI(TAG, "NOTE OFF sent: note=%d", driver_obj->note_counter);
             }
         }
     }
@@ -580,15 +584,49 @@ static void reset_midi_static_vars(void)
 static void action_close_dev(class_driver_t *driver_obj)
 {
     ESP_LOGI(TAG, "Device disconnected - cleaning up");
+    ESP_LOGI(TAG, "  dev_hdl: %p, dev_addr: %d, is_midi_device: %d",
+             driver_obj->dev_hdl, driver_obj->dev_addr, driver_obj->is_midi_device);
 
     // Clean up MIDI transfers first
     // Note: Static transfer pointers in action_send_note will be reset
 
+    // Release MIDI interface if we claimed it
+    if (driver_obj->dev_hdl != NULL && driver_obj->is_midi_device) {
+        ESP_LOGI(TAG, "Releasing MIDI interface...");
+        // Find and release the MIDI interface
+        const usb_config_desc_t *config_desc;
+        esp_err_t ret = usb_host_get_active_config_descriptor(driver_obj->dev_hdl, &config_desc);
+        if (ret == ESP_OK) {
+            for (int intf_num = 0; intf_num < config_desc->bNumInterfaces; intf_num++) {
+                int offset = 0;
+                const usb_intf_desc_t *intf_desc = usb_parse_interface_descriptor(config_desc, intf_num, 0, &offset);
+                if (intf_desc != NULL &&
+                    intf_desc->bInterfaceClass == 0x01 &&
+                    intf_desc->bInterfaceSubClass == 0x03) {
+                    ESP_LOGI(TAG, "Releasing interface %d", intf_desc->bInterfaceNumber);
+                    ret = usb_host_interface_release(driver_obj->client_hdl, driver_obj->dev_hdl,
+                                                     intf_desc->bInterfaceNumber);
+                    if (ret != ESP_OK) {
+                        ESP_LOGW(TAG, "Interface release failed: %s", esp_err_to_name(ret));
+                    } else {
+                        ESP_LOGI(TAG, "Interface %d released successfully", intf_desc->bInterfaceNumber);
+                    }
+                    break;
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "Could not get config descriptor for interface release: %s", esp_err_to_name(ret));
+        }
+    }
+
     // Close the device
     if (driver_obj->dev_hdl != NULL) {
+        ESP_LOGI(TAG, "Closing device handle...");
         esp_err_t ret = usb_host_device_close(driver_obj->client_hdl, driver_obj->dev_hdl);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Device close failed (expected during disconnect): %s", esp_err_to_name(ret));
+        } else {
+            ESP_LOGI(TAG, "Device closed successfully");
         }
         driver_obj->dev_hdl = NULL;
     }
