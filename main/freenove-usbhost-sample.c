@@ -37,6 +37,7 @@ typedef struct {
 static void client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg)
 {
     class_driver_t *driver_obj = (class_driver_t *)arg;
+    ESP_LOGI(TAG, "client_event_callback called - Event: %d", event_msg->event);
     switch (event_msg->event) {
         case USB_HOST_CLIENT_EVENT_NEW_DEV:
             if (driver_obj->dev_addr == 0) {
@@ -45,8 +46,14 @@ static void client_event_callback(const usb_host_client_event_msg_t *event_msg, 
             }
             break;
         case USB_HOST_CLIENT_EVENT_DEV_GONE:
-            if (driver_obj->dev_hdl != NULL) {
+            ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_DEV_GONE received");
+            ESP_LOGI(TAG, "Device address: %d, dev_hdl: %p", driver_obj->dev_addr, driver_obj->dev_hdl);
+            // Always trigger cleanup when device is gone, regardless of dev_hdl state
+            if (driver_obj->dev_addr != 0) {
+                ESP_LOGI(TAG, "Setting ACTION_CLOSE_DEV flag");
                 driver_obj->actions |= ACTION_CLOSE_DEV;
+            } else {
+                ESP_LOGW(TAG, "Device gone event but no device address recorded");
             }
             break;
         default:
@@ -361,6 +368,12 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
     }
 }
 
+// Static variables for MIDI state management - moved to file scope for reset capability
+static usb_transfer_t *g_in_transfer = NULL;
+static bool g_transfer_cleanup_done = false;
+static bool g_midi_enabled = false;
+static uint8_t g_last_dev_addr = 0;
+
 static void action_send_note(class_driver_t *driver_obj)
 {
     // Skip if no device is connected
@@ -368,52 +381,48 @@ static void action_send_note(class_driver_t *driver_obj)
         return;
     }
 
-    // Start MIDI IN transfer for receiving data
-    static usb_transfer_t *in_transfer = NULL;
-    static bool transfer_cleanup_done = false;
-
     // Reset transfer if device was disconnected
-    if (driver_obj->dev_hdl == NULL && in_transfer != NULL && !transfer_cleanup_done) {
+    if (driver_obj->dev_hdl == NULL && g_in_transfer != NULL && !g_transfer_cleanup_done) {
         ESP_LOGI(TAG, "Cleaning up MIDI IN transfer after device disconnect");
         // Don't free here - let the callback handle it when it fails
-        in_transfer = NULL;
-        transfer_cleanup_done = true;
+        g_in_transfer = NULL;
+        g_transfer_cleanup_done = true;
     }
 
     // Reset cleanup flag when new device connects
-    if (driver_obj->dev_hdl != NULL && transfer_cleanup_done) {
-        transfer_cleanup_done = false;
+    if (driver_obj->dev_hdl != NULL && g_transfer_cleanup_done) {
+        g_transfer_cleanup_done = false;
     }
 
-    if (in_transfer == NULL) {
+    if (g_in_transfer == NULL) {
         if (driver_obj->midi_in_ep == 0) {
             ESP_LOGW(TAG, "MIDI IN endpoint not found (0x%02x), cannot start MIDI IN transfer", driver_obj->midi_in_ep);
         } else {
             ESP_LOGI(TAG, "Starting MIDI IN transfer on endpoint 0x%02x", driver_obj->midi_in_ep);
-            esp_err_t ret = usb_host_transfer_alloc(64, 0, &in_transfer);
+            esp_err_t ret = usb_host_transfer_alloc(64, 0, &g_in_transfer);
             if (ret == ESP_OK) {
-                in_transfer->device_handle = driver_obj->dev_hdl;
-                in_transfer->callback = midi_in_transfer_callback;
-                in_transfer->context = driver_obj;
-                in_transfer->bEndpointAddress = driver_obj->midi_in_ep;
+                g_in_transfer->device_handle = driver_obj->dev_hdl;
+                g_in_transfer->callback = midi_in_transfer_callback;
+                g_in_transfer->context = driver_obj;
+                g_in_transfer->bEndpointAddress = driver_obj->midi_in_ep;
                 // Roland J-6 may need longer timeout due to complex audio interfaces
-                in_transfer->timeout_ms = (driver_obj->num_interfaces > 2) ? 5000 : 1000;
-                in_transfer->num_bytes = 64;
+                g_in_transfer->timeout_ms = (driver_obj->num_interfaces > 2) ? 5000 : 1000;
+                g_in_transfer->num_bytes = 64;
 
                 ESP_LOGI(TAG, "MIDI IN transfer setup:");
-                ESP_LOGI(TAG, "  Device handle: %p", in_transfer->device_handle);
-                ESP_LOGI(TAG, "  Callback: %p", in_transfer->callback);
-                ESP_LOGI(TAG, "  Endpoint: 0x%02x", in_transfer->bEndpointAddress);
-                ESP_LOGI(TAG, "  Timeout: %lu ms", in_transfer->timeout_ms);
-                ESP_LOGI(TAG, "  Buffer size: %d bytes", in_transfer->num_bytes);
+                ESP_LOGI(TAG, "  Device handle: %p", g_in_transfer->device_handle);
+                ESP_LOGI(TAG, "  Callback: %p", g_in_transfer->callback);
+                ESP_LOGI(TAG, "  Endpoint: 0x%02x", g_in_transfer->bEndpointAddress);
+                ESP_LOGI(TAG, "  Timeout: %lu ms", g_in_transfer->timeout_ms);
+                ESP_LOGI(TAG, "  Buffer size: %d bytes", g_in_transfer->num_bytes);
 
-                ret = usb_host_transfer_submit(in_transfer);
+                ret = usb_host_transfer_submit(g_in_transfer);
                 if (ret == ESP_OK) {
                     ESP_LOGI(TAG, "MIDI IN transfer submitted successfully");
                 } else {
                     ESP_LOGE(TAG, "Failed to submit MIDI IN transfer: %s", esp_err_to_name(ret));
-                    usb_host_transfer_free(in_transfer);
-                    in_transfer = NULL;
+                    usb_host_transfer_free(g_in_transfer);
+                    g_in_transfer = NULL;
                 }
             } else {
                 ESP_LOGE(TAG, "Failed to allocate MIDI IN transfer: %s", esp_err_to_name(ret));
@@ -429,16 +438,13 @@ static void action_send_note(class_driver_t *driver_obj)
     }
 
     // Send Roland J-6 MIDI enable command first (only once)
-    static bool midi_enabled = false;
-    static uint8_t last_dev_addr = 0;
-
     // Reset MIDI enabled state if device was disconnected or changed
-    if (driver_obj->dev_hdl == NULL || driver_obj->dev_addr != last_dev_addr) {
-        midi_enabled = false;
-        last_dev_addr = driver_obj->dev_addr;
+    if (driver_obj->dev_hdl == NULL || driver_obj->dev_addr != g_last_dev_addr) {
+        g_midi_enabled = false;
+        g_last_dev_addr = driver_obj->dev_addr;
     }
 
-    if (!midi_enabled && driver_obj->midi_out_ep != 0 && driver_obj->dev_hdl != NULL) {
+    if (!g_midi_enabled && driver_obj->midi_out_ep != 0 && driver_obj->dev_hdl != NULL) {
         // Send All Sound Off / Reset All Controllers to ensure device is ready
         usb_transfer_t *enable_transfer;
         esp_err_t ret = usb_host_transfer_alloc(4, 0, &enable_transfer);
@@ -458,7 +464,7 @@ static void action_send_note(class_driver_t *driver_obj)
 
             ret = usb_host_transfer_submit(enable_transfer);
             if (ret == ESP_OK) {
-                midi_enabled = true;
+                g_midi_enabled = true;
             } else {
                 ESP_LOGE(TAG, "Failed to send MIDI enable: %s", esp_err_to_name(ret));
                 usb_host_transfer_free(enable_transfer);
@@ -474,7 +480,7 @@ static void action_send_note(class_driver_t *driver_obj)
         ESP_LOGW(TAG, "No device connected, skipping MIDI send");
     } else if (driver_obj->midi_out_ep == 0) {
         ESP_LOGW(TAG, "No MIDI OUT endpoint available, skipping MIDI send");
-    } else if (!midi_enabled) {
+    } else if (!g_midi_enabled) {
         // Skip note send until MIDI is enabled
     } else {
 
@@ -549,6 +555,28 @@ static void action_send_note(class_driver_t *driver_obj)
     driver_obj->actions |= ACTION_SEND_NOTE;
 }
 
+// Helper function to reset static variables in action_send_note
+static void reset_midi_static_vars(void)
+{
+    // Reset static variables in action_send_note to ensure clean state for reconnection
+    // This function will be called from action_close_dev
+    ESP_LOGI(TAG, "Resetting MIDI static variables for device reconnection");
+
+    // Reset transfer state
+    if (g_in_transfer != NULL) {
+        ESP_LOGW(TAG, "Force cleanup: MIDI IN transfer still exists during disconnect");
+        // Don't free here as callback might still be processing - just mark as null
+        g_in_transfer = NULL;
+    }
+    g_transfer_cleanup_done = false;
+
+    // Reset MIDI enable state
+    g_midi_enabled = false;
+    g_last_dev_addr = 0;
+
+    ESP_LOGI(TAG, "MIDI static variables reset complete");
+}
+
 static void action_close_dev(class_driver_t *driver_obj)
 {
     ESP_LOGI(TAG, "Device disconnected - cleaning up");
@@ -572,6 +600,9 @@ static void action_close_dev(class_driver_t *driver_obj)
     driver_obj->is_midi_device = false;
     driver_obj->note_counter = 60; // Reset to middle C
     driver_obj->num_interfaces = 0;
+
+    // Reset static variables in action_send_note
+    reset_midi_static_vars();
 
     // Clear action and prepare for new device
     driver_obj->actions &= ~ACTION_CLOSE_DEV;
@@ -600,8 +631,8 @@ static void class_driver_task(void *arg)
     // Continuous loop for USB device hot-plug support
     uint32_t monitor_cycles = 0;
     while (true) {
-        // Always handle events with short timeout to ensure callbacks are processed
-        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
+        // Always handle events with longer timeout to ensure callbacks are processed
+        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(100));
 
         if (driver_obj.actions & ACTION_OPEN_DEV) {
             action_open_dev(&driver_obj);
@@ -634,6 +665,7 @@ static void class_driver_task(void *arg)
             }
         }
         if (driver_obj.actions & ACTION_CLOSE_DEV) {
+            ESP_LOGI(TAG, "ACTION_CLOSE_DEV detected in main loop");
             action_close_dev(&driver_obj);
         }
 
@@ -672,9 +704,17 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Waiting for USB devices to be connected");
 
+    static uint32_t lib_monitor_cycles = 0;
     while (1) {
         uint32_t event_flags;
         usb_host_lib_handle_events(pdMS_TO_TICKS(100), &event_flags);
+
+        // Debug event flags periodically
+        lib_monitor_cycles++;
+        if (lib_monitor_cycles % 100 == 0) { // Every 10 seconds
+            ESP_LOGI(TAG, "USB Host Lib: event_flags=0x%08lx", event_flags);
+        }
+
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
             ESP_LOGI(TAG, "No more clients");
             usb_host_device_free_all();
