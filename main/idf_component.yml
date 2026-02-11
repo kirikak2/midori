@@ -1,0 +1,5 @@
+dependencies:
+  # M5Unified includes M5GFX and handles all M5Stack hardware
+  # Always downloaded but only compiled when CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 is set
+  m5stack/m5unified:
+    version: ">=0.2.0"

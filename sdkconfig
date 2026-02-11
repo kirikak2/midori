@@ -596,6 +596,20 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
+# USB MIDI Host Configuration
+#
+# CONFIG_USB_MIDI_BOARD_FREENOVE is not set
+CONFIG_USB_MIDI_BOARD_M5STACK_CORES3=y
+
+#
+# M5Stack Display Settings
+#
+CONFIG_USB_MIDI_LCD_FONT_SIZE=1
+CONFIG_USB_MIDI_LCD_BACKLIGHT_LEVEL=200
+# end of M5Stack Display Settings
+# end of USB MIDI Host Configuration
+
+#
 # Compiler options
 #
 CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
