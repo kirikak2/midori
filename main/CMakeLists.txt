@@ -17,4 +17,6 @@ endif()
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS ${INCLUDE_DIRS}
+    REQUIRES picoruby-esp32
+    PRIV_REQUIRES usb
 )

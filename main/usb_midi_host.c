@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "usb/usb_host.h"
 #include "platform.h"
+#include "picoruby-esp32.h"
 
 static const char *TAG = "USB_HOST_SAMPLE";
 
@@ -724,6 +725,16 @@ static void class_driver_task(void *arg)
     vTaskSuspend(NULL);
 }
 
+// PicoRuby task - runs the Ruby shell on a separate core
+static void picoruby_task(void *arg)
+{
+    ESP_LOGI(TAG, "Starting PicoRuby shell...");
+    picoruby_esp32();
+    // picoruby_esp32() is blocking, so this won't be reached unless shell exits
+    ESP_LOGI(TAG, "PicoRuby shell exited");
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
     // Initialize platform (LCD on M5Stack, no-op on Freenove)
@@ -741,6 +752,16 @@ void app_main(void)
 
     task_created = xTaskCreatePinnedToCore(class_driver_task, "class", 4096, signaling_sem, 2, NULL, 0);
     assert(task_created == pdTRUE);
+
+    // Start PicoRuby shell on Core 1 (separate from USB Host on Core 0)
+    // Note: PicoRuby shell uses serial console, works on Freenove but not on M5Stack CoreS3 SE
+    // when USB Host is active (shared USB-C port)
+    task_created = xTaskCreatePinnedToCore(picoruby_task, "picoruby", 8192, NULL, 1, NULL, 1);
+    if (task_created != pdTRUE) {
+        ESP_LOGW(TAG, "Failed to create PicoRuby task");
+    } else {
+        ESP_LOGI(TAG, "PicoRuby task started on Core 1");
+    }
 
     xSemaphoreTake(signaling_sem, portMAX_DELAY);
 
