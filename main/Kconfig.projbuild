@@ -39,4 +39,60 @@ menu "USB MIDI Host Configuration"
 
     endmenu
 
+    menu "SD Card Settings"
+        config USB_MIDI_SDCARD_ENABLED
+            bool "Enable SD Card"
+            default y
+            help
+                Enable SD card support for loading app.rb script.
+
+        menu "M5Stack CoreS3 SD Card Pins"
+            depends on USB_MIDI_BOARD_M5STACK_CORES3 && USB_MIDI_SDCARD_ENABLED
+
+            config USB_MIDI_SDCARD_M5_CLK
+                int "SD CLK GPIO"
+                default 36
+            config USB_MIDI_SDCARD_M5_MOSI
+                int "SD MOSI GPIO"
+                default 37
+            config USB_MIDI_SDCARD_M5_MISO
+                int "SD MISO GPIO"
+                default 35
+            config USB_MIDI_SDCARD_M5_CS
+                int "SD CS GPIO"
+                default 4
+        endmenu
+
+        menu "Freenove SD Card Pins"
+            depends on USB_MIDI_BOARD_FREENOVE && USB_MIDI_SDCARD_ENABLED
+
+            config USB_MIDI_SDCARD_FREENOVE_CLK
+                int "SD CLK GPIO"
+                default 12
+            config USB_MIDI_SDCARD_FREENOVE_MOSI
+                int "SD MOSI GPIO"
+                default 11
+            config USB_MIDI_SDCARD_FREENOVE_MISO
+                int "SD MISO GPIO"
+                default 13
+            config USB_MIDI_SDCARD_FREENOVE_CS
+                int "SD CS GPIO"
+                default 10
+        endmenu
+
+        config USB_MIDI_SDCARD_MOUNT_POINT
+            string "SD Card Mount Point"
+            default "/sdcard"
+            depends on USB_MIDI_SDCARD_ENABLED
+            help
+                Mount point for the SD card filesystem.
+
+        config USB_MIDI_APP_SCRIPT_PATH
+            string "Ruby Script Path"
+            default "/sdcard/app.rb"
+            depends on USB_MIDI_SDCARD_ENABLED
+            help
+                Path to the Ruby script to execute on startup.
+    endmenu
+
 endmenu

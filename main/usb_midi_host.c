@@ -726,8 +726,12 @@ static void class_driver_task(void *arg)
 }
 
 // PicoRuby task - runs the Ruby shell on a separate core
+// Note: PicoRuby has its own FAT filesystem. To load app.rb from SD card,
+// use PicoRuby's file operations: File.read("/sdcard/app.rb") or require in the shell
 static void picoruby_task(void *arg)
 {
+    // Start the R2P2 shell (blocking)
+    // The shell can load /sdcard/app.rb using: eval(File.read("/sdcard/app.rb"))
     ESP_LOGI(TAG, "Starting PicoRuby shell...");
     picoruby_esp32();
     // picoruby_esp32() is blocking, so this won't be reached unless shell exits
