@@ -45,6 +45,13 @@ void lcd_console_set_midi_indicator(bool active);
  */
 void lcd_console_clear(void);
 
+/**
+ * @brief Redirect stdout to LCD console using ESP-IDF VFS
+ * This allows PicoRuby puts/print to output to the LCD
+ * @return ESP_OK on success
+ */
+esp_err_t lcd_console_redirect_stdout(void);
+
 #ifdef __cplusplus
 }
 #endif

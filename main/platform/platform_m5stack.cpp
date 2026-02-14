@@ -44,6 +44,13 @@ extern "C" esp_err_t platform_init(void)
     // Redirect ESP logs to LCD
     s_original_vprintf = esp_log_set_vprintf(lcd_console_vprintf);
 
+    // Redirect stdout to LCD (for PicoRuby puts/print)
+    ret = lcd_console_redirect_stdout();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to redirect stdout to LCD");
+        // Continue anyway - ESP logs will still work
+    }
+
     // Log startup message (this will go to LCD)
     ESP_LOGI(TAG, "Platform: M5Stack CoreS3 SE");
     ESP_LOGI(TAG, "Logging to LCD display");

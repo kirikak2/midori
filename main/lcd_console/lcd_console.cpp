@@ -4,6 +4,11 @@
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include "esp_vfs.h"
+#include "esp_log.h"
 
 // Screen dimensions for M5Stack CoreS3 SE (2.0" IPS)
 static constexpr int SCREEN_WIDTH = 320;
@@ -153,4 +158,103 @@ extern "C" void lcd_console_clear(void)
     M5.Lcd.setCursor(0, LOG_AREA_Y);
 
     portEXIT_CRITICAL(&s_log_mutex);
+}
+
+// ============================================================================
+// VFS driver for redirecting stdout to LCD
+// ============================================================================
+
+static const char *TAG = "LCD_VFS";
+
+// Buffer for accumulating partial writes
+static char s_line_buffer[256];
+static size_t s_line_pos = 0;
+
+/**
+ * @brief VFS write function - outputs to LCD console
+ */
+static ssize_t lcd_vfs_write(int fd, const void *data, size_t size)
+{
+    const char *str = (const char *)data;
+
+    for (size_t i = 0; i < size; i++) {
+        char c = str[i];
+
+        if (c == '\n' || s_line_pos >= sizeof(s_line_buffer) - 1) {
+            // Flush the line to LCD
+            s_line_buffer[s_line_pos] = '\0';
+            if (s_line_pos > 0) {
+                lcd_console_write(s_line_buffer);
+            }
+            if (c == '\n') {
+                lcd_console_write("\n");
+            }
+            s_line_pos = 0;
+        } else if (c != '\r') {
+            // Accumulate character (skip CR)
+            s_line_buffer[s_line_pos++] = c;
+        }
+    }
+
+    return size;
+}
+
+/**
+ * @brief VFS open function (stub)
+ */
+static int lcd_vfs_open(const char *path, int flags, int mode)
+{
+    // Return a dummy fd (we only support stdout)
+    return 0;
+}
+
+/**
+ * @brief VFS close function (stub)
+ */
+static int lcd_vfs_close(int fd)
+{
+    return 0;
+}
+
+/**
+ * @brief VFS fstat function (stub)
+ */
+static int lcd_vfs_fstat(int fd, struct stat *st)
+{
+    memset(st, 0, sizeof(*st));
+    st->st_mode = S_IFCHR;
+    return 0;
+}
+
+extern "C" esp_err_t lcd_console_redirect_stdout(void)
+{
+    // Register VFS driver that will handle stdout (fd 1)
+    // We use esp_vfs_register_fd_range to directly claim fd 1
+    esp_vfs_t vfs = {};
+    vfs.flags = ESP_VFS_FLAG_DEFAULT;
+    vfs.write = &lcd_vfs_write;
+    vfs.open = &lcd_vfs_open;
+    vfs.close = &lcd_vfs_close;
+    vfs.fstat = &lcd_vfs_fstat;
+
+    // Register VFS for /dev/lcd path first
+    esp_err_t ret = esp_vfs_register("/dev/lcd", &vfs, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register LCD VFS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Use freopen to redirect stdout to our VFS
+    // This is supported in ESP-IDF's newlib implementation
+    FILE *new_stdout = freopen("/dev/lcd", "w", stdout);
+    if (new_stdout == NULL) {
+        ESP_LOGE(TAG, "Failed to freopen stdout to LCD");
+        return ESP_FAIL;
+    }
+
+    // Disable buffering for immediate output
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    ESP_LOGI(TAG, "stdout redirected to LCD console");
+    return ESP_OK;
 }
