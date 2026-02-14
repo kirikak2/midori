@@ -25,3 +25,6 @@ CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 # Compiler optimization for size
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# USB-OTG settings - increase transfer size for large Configuration descriptors
+CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=4096
