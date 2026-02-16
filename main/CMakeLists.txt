@@ -2,7 +2,13 @@
 set(SRCS "usb_midi_host.c")
 
 # Include directories
-set(INCLUDE_DIRS "." "platform" "lcd_console" "sd_card")
+set(INCLUDE_DIRS
+    "."
+    "platform"
+    "lcd_console"
+    "sd_card"
+    "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include"
+)
 
 # Platform-specific sources
 if(CONFIG_USB_MIDI_BOARD_FREENOVE)
