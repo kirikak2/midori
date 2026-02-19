@@ -11,6 +11,7 @@
 
 /* PicoRuby USB-MIDI integration */
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include/usb_midi.h"
+#include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/include/midi.h"
 
 static const char *TAG = "USB_HOST_SAMPLE";
 
@@ -336,33 +337,38 @@ static void action_setup_midi(class_driver_t *driver_obj)
             }
         }
 
-        USB_MIDI_notify_connected(&midi_info);
-    }
-
-    // Set up MIDI IN transfer for receiving data
-    if (driver_obj->midi_in_ep != 0 && g_in_transfer == NULL) {
-        ESP_LOGI(TAG, "Starting MIDI IN transfer on endpoint 0x%02x", driver_obj->midi_in_ep);
-        esp_err_t ret = usb_host_transfer_alloc(64, 0, &g_in_transfer);
-        if (ret == ESP_OK) {
-            g_in_transfer->device_handle = driver_obj->dev_hdl;
-            g_in_transfer->callback = midi_in_transfer_callback;
-            g_in_transfer->context = driver_obj;
-            g_in_transfer->bEndpointAddress = driver_obj->midi_in_ep;
-            // Roland J-6 may need longer timeout due to complex audio interfaces
-            g_in_transfer->timeout_ms = (driver_obj->num_interfaces > 2) ? 5000 : 1000;
-            g_in_transfer->num_bytes = 64;
-
-            ret = usb_host_transfer_submit(g_in_transfer);
+        // Set up MIDI IN transfer for receiving data BEFORE notifying connection
+        if (driver_obj->midi_in_ep != 0 && g_in_transfer == NULL) {
+            ESP_LOGI(TAG, "Starting MIDI IN transfer on endpoint 0x%02x", driver_obj->midi_in_ep);
+            esp_err_t ret = usb_host_transfer_alloc(64, 0, &g_in_transfer);
             if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "MIDI IN transfer submitted successfully");
+                g_in_transfer->device_handle = driver_obj->dev_hdl;
+                g_in_transfer->callback = midi_in_transfer_callback;
+                g_in_transfer->context = driver_obj;
+                g_in_transfer->bEndpointAddress = driver_obj->midi_in_ep;
+                // Roland J-6 may need longer timeout due to complex audio interfaces
+                g_in_transfer->timeout_ms = (driver_obj->num_interfaces > 2) ? 5000 : 1000;
+                g_in_transfer->num_bytes = 64;
+
+                ret = usb_host_transfer_submit(g_in_transfer);
+                if (ret == ESP_OK) {
+                    ESP_LOGI(TAG, "MIDI IN transfer submitted successfully");
+                    // Wait for USB host to be ready to receive data
+                    // This helps when reconnecting to an already-running MIDI device
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    ESP_LOGI(TAG, "MIDI IN transfer ready after stabilization delay");
+                } else {
+                    ESP_LOGE(TAG, "Failed to submit MIDI IN transfer: %s", esp_err_to_name(ret));
+                    usb_host_transfer_free(g_in_transfer);
+                    g_in_transfer = NULL;
+                }
             } else {
-                ESP_LOGE(TAG, "Failed to submit MIDI IN transfer: %s", esp_err_to_name(ret));
-                usb_host_transfer_free(g_in_transfer);
-                g_in_transfer = NULL;
+                ESP_LOGE(TAG, "Failed to allocate MIDI IN transfer: %s", esp_err_to_name(ret));
             }
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate MIDI IN transfer: %s", esp_err_to_name(ret));
         }
+
+        // Notify connection AFTER MIDI IN transfer is ready
+        USB_MIDI_notify_connected(&midi_info);
     }
 
     driver_obj->actions &= ~ACTION_SETUP_MIDI;
@@ -526,6 +532,15 @@ static void action_close_dev(class_driver_t *driver_obj)
 static void process_midi_tx_queue(class_driver_t *driver_obj)
 {
     if (driver_obj->dev_hdl == NULL || driver_obj->midi_out_ep == 0) {
+        /* Device not available - drain and discard any pending packets */
+        uint8_t discard[4];
+        int discarded = 0;
+        while (USB_MIDI_pop_tx_packet(discard)) {
+            discarded++;
+        }
+        if (discarded > 0) {
+            ESP_LOGD(TAG, "Discarded %d TX packets (device unavailable)", discarded);
+        }
         return;
     }
 
@@ -549,7 +564,21 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
         ret = usb_host_transfer_submit(transfer);
         if (ret != ESP_OK) {
             usb_host_transfer_free(transfer);
-            if (ret != ESP_ERR_INVALID_STATE) {
+            if (ret == ESP_ERR_INVALID_STATE) {
+                /* Device disconnected - stop MIDI clock and input immediately */
+                if (MIDI_Clock_is_running()) {
+                    MIDI_Clock_stop();
+                }
+                if (MIDI_Input_is_running()) {
+                    MIDI_Input_stop();
+                }
+                /* Drain remaining packets */
+                int discarded = 1;  /* Count current packet */
+                while (USB_MIDI_pop_tx_packet(packet)) {
+                    discarded++;
+                }
+                ESP_LOGI(TAG, "Device disconnected during TX, stopped MIDI, discarded %d packets", discarded);
+            } else {
                 ESP_LOGW(TAG, "TX submit failed: %s", esp_err_to_name(ret));
             }
             break;
@@ -610,8 +639,9 @@ static void class_driver_task(void *arg)
             action_close_dev(&driver_obj);
         }
 
-        // Process MIDI TX queue from PicoRuby
-        if (driver_obj.dev_hdl != NULL && driver_obj.is_midi_device) {
+        // Process MIDI TX queue from PicoRuby (skip if device is being closed)
+        if (driver_obj.dev_hdl != NULL && driver_obj.is_midi_device &&
+            !(driver_obj.actions & ACTION_CLOSE_DEV)) {
             process_midi_tx_queue(&driver_obj);
         }
 
