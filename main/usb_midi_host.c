@@ -388,12 +388,19 @@ static void midi_out_transfer_callback(usb_transfer_t *transfer)
 
 static void midi_in_transfer_callback(usb_transfer_t *transfer)
 {
+    class_driver_t *driver_obj = (class_driver_t *)transfer->context;
+
     // Check for device disconnection first
     if (transfer->status == USB_TRANSFER_STATUS_CANCELED ||
         transfer->status == USB_TRANSFER_STATUS_NO_DEVICE ||
         transfer->status == USB_TRANSFER_STATUS_ERROR) {
 
         ESP_LOGI(TAG, "MIDI IN transfer ended (status: %d) - device disconnected", transfer->status);
+        // Trigger device cleanup
+        if (driver_obj != NULL && driver_obj->dev_addr != 0) {
+            ESP_LOGI(TAG, "Setting ACTION_CLOSE_DEV from MIDI IN callback");
+            driver_obj->actions |= ACTION_CLOSE_DEV;
+        }
         usb_host_transfer_free(transfer);
         return; // Don't resubmit
     }
@@ -432,6 +439,11 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
         if (ret != ESP_OK) {
             if (ret == ESP_ERR_INVALID_STATE) {
                 ESP_LOGI(TAG, "MIDI IN stopped - device disconnected");
+                // Trigger device cleanup
+                if (driver_obj != NULL && driver_obj->dev_addr != 0) {
+                    ESP_LOGI(TAG, "Setting ACTION_CLOSE_DEV from MIDI IN resubmit failure");
+                    driver_obj->actions |= ACTION_CLOSE_DEV;
+                }
             } else {
                 ESP_LOGE(TAG, "Failed to resubmit MIDI IN: %s", esp_err_to_name(ret));
             }
@@ -439,6 +451,11 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
         }
     } else {
         ESP_LOGW(TAG, "MIDI IN transfer failed with status: %d", transfer->status);
+        // Trigger device cleanup for unexpected failures
+        if (driver_obj != NULL && driver_obj->dev_addr != 0) {
+            ESP_LOGI(TAG, "Setting ACTION_CLOSE_DEV from MIDI IN failure");
+            driver_obj->actions |= ACTION_CLOSE_DEV;
+        }
         usb_host_transfer_free(transfer);
     }
 }
@@ -648,7 +665,8 @@ static void class_driver_task(void *arg)
         // Monitor for new device connections every 5 seconds
         monitor_cycles++;
         if (monitor_cycles % 500 == 0 && driver_obj.dev_hdl == NULL) { // Every 5 seconds when no device
-            ESP_LOGI(TAG, "Monitoring for USB device connections...");
+            ESP_LOGI(TAG, "Monitoring for USB device connections... (dev_addr=%d, actions=0x%lx)",
+                     driver_obj.dev_addr, (unsigned long)driver_obj.actions);
         }
 
         vTaskDelay(10);
