@@ -185,6 +185,9 @@ static void action_check_midi(class_driver_t *driver_obj)
 // Forward declarations for MIDI transfer handling
 static usb_transfer_t *g_in_transfer = NULL;
 static void midi_in_transfer_callback(usb_transfer_t *transfer);
+uint32_t g_midi_in_callback_count = 0;  // Global counter for IN callbacks
+static volatile bool g_tx_pending = false;  // Track if OUT transfer is in progress
+static uint32_t g_tx_submit_count = 0;  // Track total TX submissions
 
 static void action_setup_midi(class_driver_t *driver_obj)
 {
@@ -377,6 +380,9 @@ static void action_setup_midi(class_driver_t *driver_obj)
 
 static void midi_out_transfer_callback(usb_transfer_t *transfer)
 {
+    // Clear pending flag to allow next OUT transfer
+    g_tx_pending = false;
+
     // Minimal OUT transfer logging
     if (transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
         ESP_LOGE(TAG, "MIDI OUT failed: %d", transfer->status);
@@ -406,11 +412,10 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
     }
 
     // Always log callback invocation for debugging
-    static uint32_t callback_count = 0;
-    callback_count++;
+    g_midi_in_callback_count++;
 
     // Minimal callback logging
-    ESP_LOGI(TAG, "MIDI IN #%lu: %d bytes", callback_count, transfer->actual_num_bytes);
+    ESP_LOGD(TAG, "MIDI IN #%lu: %d bytes", g_midi_in_callback_count, transfer->actual_num_bytes);
 
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
         if (transfer->actual_num_bytes > 0) {
@@ -426,9 +431,9 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
 
                     // Only log decoded MIDI messages
                     if ((midi1 & 0xF0) == 0x90 && midi3 > 0) {
-                        ESP_LOGI(TAG, "NOTE ON: Ch%d, Note%d, Vel%d", midi1 & 0x0F, midi2, midi3);
+                        ESP_LOGD(TAG, "NOTE ON: Ch%d, Note%d, Vel%d", midi1 & 0x0F, midi2, midi3);
                     } else if ((midi1 & 0xF0) == 0x80 || ((midi1 & 0xF0) == 0x90 && midi3 == 0)) {
-                        ESP_LOGI(TAG, "NOTE OFF: Ch%d, Note%d", midi1 & 0x0F, midi2);
+                        ESP_LOGD(TAG, "NOTE OFF: Ch%d, Note%d", midi1 & 0x0F, midi2);
                     }
                 }
             }
@@ -472,6 +477,9 @@ static void reset_midi_static_vars(void)
         // Don't free here as callback might still be processing - just mark as null
         g_in_transfer = NULL;
     }
+
+    // Reset TX state
+    g_tx_pending = false;
 
     ESP_LOGI(TAG, "MIDI static variables reset complete");
 }
@@ -561,13 +569,20 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
         return;
     }
 
+    /* CRITICAL: Only submit one OUT transfer at a time to avoid blocking IN transfers.
+     * The previous implementation could submit multiple OUT transfers in quick succession,
+     * which seemed to prevent the USB host from processing IN transfers properly. */
+    if (g_tx_pending) {
+        return;  // Wait for current OUT transfer to complete
+    }
+
     uint8_t packet[4];
-    while (USB_MIDI_pop_tx_packet(packet)) {
+    if (USB_MIDI_pop_tx_packet(packet)) {
         usb_transfer_t *transfer;
         esp_err_t ret = usb_host_transfer_alloc(4, 0, &transfer);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to alloc TX transfer");
-            break;
+            return;
         }
 
         memcpy(transfer->data_buffer, packet, 4);
@@ -578,8 +593,10 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
         transfer->callback = midi_out_transfer_callback;
         transfer->context = driver_obj;
 
+        g_tx_pending = true;  // Mark OUT transfer as pending
         ret = usb_host_transfer_submit(transfer);
         if (ret != ESP_OK) {
+            g_tx_pending = false;  // Clear pending flag on failure
             usb_host_transfer_free(transfer);
             if (ret == ESP_ERR_INVALID_STATE) {
                 /* Device disconnected - stop MIDI clock and input immediately */
@@ -598,8 +615,10 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
             } else {
                 ESP_LOGW(TAG, "TX submit failed: %s", esp_err_to_name(ret));
             }
-            break;
+            return;
         }
+        g_tx_submit_count++;
+        ESP_LOGD(TAG, "TX: submitted packet (total: %lu)", g_tx_submit_count);
     }
 }
 
@@ -627,8 +646,16 @@ static void class_driver_task(void *arg)
     // Continuous loop for USB device hot-plug support
     uint32_t monitor_cycles = 0;
     while (true) {
-        // Always handle events with longer timeout to ensure callbacks are processed
-        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(100));
+        // Process MIDI TX queue - one packet at a time to avoid blocking IN transfers
+        if (driver_obj.dev_hdl != NULL && driver_obj.is_midi_device &&
+            !(driver_obj.actions & ACTION_CLOSE_DEV)) {
+            process_midi_tx_queue(&driver_obj);
+        }
+
+        // Handle events - process both IN and OUT callbacks
+        // Use shorter timeout and call multiple times to balance IN/OUT processing
+        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
+        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
 
         if (driver_obj.actions & ACTION_OPEN_DEV) {
             action_open_dev(&driver_obj);
@@ -656,20 +683,25 @@ static void class_driver_task(void *arg)
             action_close_dev(&driver_obj);
         }
 
-        // Process MIDI TX queue from PicoRuby (skip if device is being closed)
-        if (driver_obj.dev_hdl != NULL && driver_obj.is_midi_device &&
-            !(driver_obj.actions & ACTION_CLOSE_DEV)) {
-            process_midi_tx_queue(&driver_obj);
-        }
-
-        // Monitor for new device connections every 5 seconds
+        // Monitor for new device connections every ~5 seconds
+        // Loop iteration is ~25ms (10+10+5), so 200 iterations ≈ 5 seconds
         monitor_cycles++;
-        if (monitor_cycles % 500 == 0 && driver_obj.dev_hdl == NULL) { // Every 5 seconds when no device
-            ESP_LOGI(TAG, "Monitoring for USB device connections... (dev_addr=%d, actions=0x%lx)",
-                     driver_obj.dev_addr, (unsigned long)driver_obj.actions);
+        if (monitor_cycles % 200 == 0) { // Every ~5 seconds
+            if (driver_obj.dev_hdl == NULL) {
+                ESP_LOGI(TAG, "Monitoring for USB device connections... (dev_addr=%d, actions=0x%lx)",
+                         driver_obj.dev_addr, (unsigned long)driver_obj.actions);
+            } else {
+                // When device is connected, log detailed status
+                extern uint32_t g_tx_submit_count;
+                static uint32_t last_in_callback_count = 0;
+                ESP_LOGI(TAG, "Status: in_transfer=%p, TX_total=%lu, IN_callbacks=%lu (delta=%lu)",
+                         (void*)g_in_transfer, g_tx_submit_count,
+                         g_midi_in_callback_count, g_midi_in_callback_count - last_in_callback_count);
+                last_in_callback_count = g_midi_in_callback_count;
+            }
         }
 
-        vTaskDelay(10);
+        vTaskDelay(pdMS_TO_TICKS(5));  // Shorter delay for faster event processing
     }
 
     ESP_LOGI(TAG, "Deregistering client");
