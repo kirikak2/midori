@@ -7,6 +7,7 @@ set(INCLUDE_DIRS
     "platform"
     "lcd_console"
     "sd_card"
+    "ui"
     "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include"
 )
 
@@ -17,6 +18,14 @@ elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3)
     list(APPEND SRCS
         "platform/platform_m5stack.cpp"
         "lcd_console/lcd_console.cpp"
+        "ui/ui_common.cpp"
+        "ui/ui_manager.cpp"
+        "ui/screen_log.cpp"
+        "ui/screen_main.cpp"
+        "ui/screen_pad.cpp"
+        "ui/screen_midi_info.cpp"
+        "ui/screen_script.cpp"
+        "ui/screen_settings.cpp"
     )
 endif()
 

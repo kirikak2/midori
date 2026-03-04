@@ -1,5 +1,8 @@
 #include "platform.h"
 #include "lcd_console.h"
+#include "ui_manager.h"
+#include "ui_common.h"
+#include "screen_log.h"
 #include "sdkconfig.h"
 
 #include <M5Unified.h>
@@ -7,11 +10,18 @@
 
 static const char *TAG = "PLATFORM";
 
-// Store original vprintf function for potential restoration
-static vprintf_like_t s_original_vprintf = NULL;
+// Store original serial vprintf function (before any LCD redirect)
+static vprintf_like_t s_serial_vprintf = NULL;
+
+// Flag to track if UI is initialized
+static bool s_ui_initialized = false;
 
 extern "C" esp_err_t platform_init(void)
 {
+    // Save the real serial vprintf FIRST (before any modifications)
+    s_serial_vprintf = esp_log_set_vprintf(NULL);
+    esp_log_set_vprintf(s_serial_vprintf);  // Restore it immediately
+
     // Initialize M5Stack hardware
     auto cfg = M5.config();
 
@@ -35,41 +45,47 @@ extern "C" esp_err_t platform_init(void)
     M5.Lcd.setBrightness(200);
 #endif
 
-    // Initialize LCD console
+    // Initialize LCD console (for boot messages before UI is ready)
     esp_err_t ret = lcd_console_init();
     if (ret != ESP_OK) {
         return ret;
     }
 
-    // Redirect ESP logs to LCD
-    s_original_vprintf = esp_log_set_vprintf(lcd_console_vprintf);
+    // Redirect ESP logs to LCD for boot messages
+    esp_log_set_vprintf(lcd_console_vprintf);
 
-    // Redirect stdout to LCD (for PicoRuby puts/print)
-    ret = lcd_console_redirect_stdout();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to redirect stdout to LCD");
-        // Continue anyway - ESP logs will still work
+    // Initialize UI system
+    ret = ui_init();
+    if (ret == ESP_OK) {
+        s_ui_initialized = true;
+        // Route ESP logs to Screen Log buffer + serial (bypass LCD console)
+        ui_log_hook_init_with_serial(s_serial_vprintf);
+    } else {
+        ESP_LOGW(TAG, "Failed to initialize UI system");
+        // If UI fails, redirect stdout to LCD for PicoRuby
+        lcd_console_redirect_stdout();
     }
-
-    // Log startup message (this will go to LCD)
-    ESP_LOGI(TAG, "Platform: M5Stack CoreS3 SE");
-    ESP_LOGI(TAG, "Logging to LCD display");
 
     return ESP_OK;
 }
 
 extern "C" void platform_deinit(void)
 {
-    // Restore original vprintf if set
-    if (s_original_vprintf != NULL) {
-        esp_log_set_vprintf(s_original_vprintf);
-        s_original_vprintf = NULL;
+    // Restore original serial vprintf if set
+    if (s_serial_vprintf != NULL) {
+        esp_log_set_vprintf(s_serial_vprintf);
+        s_serial_vprintf = NULL;
     }
 }
 
 extern "C" void platform_update(void)
 {
     M5.update();
+
+    // Update UI if initialized
+    if (s_ui_initialized) {
+        ui_update();
+    }
 }
 
 extern "C" void platform_show_status(const char *status)
