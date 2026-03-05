@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-ESP32-S3向けのESP-IDF USB Host MIDIサンプルプロジェクト。USB MIDIデバイス（例：Roland J-6）を検出し通信するUSBホスト機能を実装。FreeRTOSによるマルチタスク構成。
+**Midori** - ESP32-S3向けUSB MIDIホストファームウェア。USB MIDIデバイス（例：Roland J-6）を検出し通信するUSBホスト機能を実装。FreeRTOSによるマルチタスク構成。
 
 ## ビルドコマンド
 
@@ -25,7 +25,7 @@ source ~/esp-idf/export.sh
 
 ### アクションベースのステートマシン
 
-メインアプリケーション（`main/freenove-usbhost-sample.c`）は、`driver_obj.actions`にビットマスクで保留中の操作を格納し、ループで処理するパターンを使用：
+メインアプリケーション（`main/usb_midi_host.c`）は、`driver_obj.actions`にビットマスクで保留中の操作を格納し、ループで処理するパターンを使用：
 
 ```
 ACTION_OPEN_DEV → ACTION_GET_DEV_INFO → ACTION_GET_DEV_DESC →

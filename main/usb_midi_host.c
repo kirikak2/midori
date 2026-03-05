@@ -685,10 +685,8 @@ static void class_driver_task(void *arg)
             process_midi_tx_queue(&driver_obj);
         }
 
-        // Handle events - process both IN and OUT callbacks
-        // Use shorter timeout and call multiple times to balance IN/OUT processing
-        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
-        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(10));
+        // Handle events - use short timeout for responsive UI
+        usb_host_client_handle_events(driver_obj.client_hdl, pdMS_TO_TICKS(5));
 
         if (driver_obj.actions & ACTION_OPEN_DEV) {
             action_open_dev(&driver_obj);
@@ -751,7 +749,7 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(usb_host_install(&host_config));
 
-    task_created = xTaskCreatePinnedToCore(class_driver_task, "class", 4096, signaling_sem, 2, NULL, 0);
+    task_created = xTaskCreatePinnedToCore(class_driver_task, "class", 4096, signaling_sem, 1, NULL, 0);
     assert(task_created == pdTRUE);
 
     // Start PicoRuby shell on Core 1 (separate from USB Host on Core 0)
@@ -771,7 +769,7 @@ void app_main(void)
 
     while (1) {
         uint32_t event_flags;
-        usb_host_lib_handle_events(pdMS_TO_TICKS(100), &event_flags);
+        usb_host_lib_handle_events(pdMS_TO_TICKS(10), &event_flags);
 
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
             ESP_LOGI(TAG, "No more clients");
