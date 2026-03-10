@@ -6,12 +6,73 @@
 
 ### タスク構成
 
-| タスク名 | コア | 優先度 | 役割 |
-|----------|------|--------|------|
-| `class_driver_task` | Core 0 | 2 | USB Hostイベント処理、MIDI IN/OUT転送 |
-| `midi_input_task` | Core 0 | 2 | RXバッファからイベントキューへの変換 |
-| `picoruby_task` | Core 1 | 1 | mrubyc VM実行 |
-| `app_main` | - | - | USB Host Libイベントループ |
+| タスク名 | コア | 優先度 | スタック | 役割 |
+|----------|------|--------|----------|------|
+| `app_main` | Core 0 | 1 | 3584 | USB Host Libイベントループ（メインタスク） |
+| `class_driver_task` | Core 0 | 1 | 4096 | USB Hostイベント処理、MIDI IN/OUT転送 |
+| `sam2695_input` | Core 0 | 1 | 4096 | SAM2695 UART RX処理 |
+| `picoruby_task` | Core 1 | 3 | 16384 | PicoRuby VM実行 |
+| `midi_input_task` | Core 1 | 1 | 4096 | USB-MIDI RXバッファからイベントキューへの変換 |
+| `Tmr Svc` | Any | 1 | 2048 | FreeRTOSタイマーサービス（システム） |
+
+**注:** SAM2695へのMIDI送信は`uart_write_bytes`で直接行い、受信は`sam2695_input`タスクがUARTイベントを監視する。
+
+### 優先度設計ガイドライン
+
+ESP-IDF/FreeRTOSでは優先度0～24が使用可能（数値が大きいほど高優先度）。
+
+#### 優先度の基本原則
+
+1. **リアルタイム性が必要なタスクを高優先度に**
+   - USBやUART等のハードウェアI/Oは、バッファオーバーフローを防ぐため比較的高い優先度が必要
+
+2. **UIをブロックしないよう注意**
+   - UI描画やユーザー入力処理は、ユーザー体験のため適度な優先度が必要
+   - 低優先度タスクがUIをブロックしないよう、定期的に`vTaskDelay`や`taskYIELD`を呼ぶ
+
+3. **CPUバウンドなタスクは低優先度に**
+   - 長時間CPUを占有するタスク（スクリプト実行等）は低めに設定
+   - ただしCore分離で対処する方が望ましい場合もある
+
+4. **同一コアでの優先度競合を避ける**
+   - 同じコアに割り当てられたタスク間で、高優先度タスクが低優先度タスクをスターブさせないよう注意
+
+#### 推奨優先度レベル
+
+| 優先度 | 用途 | 例 |
+|--------|------|-----|
+| 10+ | ハードウェア割り込み相当 | 緊急I/O、高頻度受信 |
+| 5-9 | リアルタイムI/O | USB転送処理 |
+| 2-4 | アプリケーション処理 | スクリプト実行、UI更新 |
+| 1 | バックグラウンド処理 | ログ出力、統計収集 |
+| 0 | アイドル相当 | 優先度最低のポーリング |
+
+#### 現在の設計における考慮点
+
+```
+Core 0: ハードウェアI/O処理
+├── class_driver_task (優先度 1) - USB enumeration、転送管理
+├── sam2695_input (優先度 1) - SAM2695 UART RX処理
+└── app_main (優先度 1) - USB Host Libイベントループ
+
+Core 1: アプリケーション処理
+├── picoruby_task (優先度 3) - Rubyスクリプト実行
+└── midi_input_task (優先度 1) - USB-MIDIパケットパース
+```
+
+**設計理由:**
+- `class_driver_task`と`sam2695_input`を`app_main`と同じ優先度1で動作（優先度を上げるとUIがフリーズする）
+- `midi_input_task`はCore 1に配置し、イベント消費者（PicoRuby）と同じコアで動作させることでキャッシュ効率を向上
+- Core 0はハードウェアI/O専用、Core 1はデータ処理・アプリケーション用に役割分離
+- UI機能を追加する場合は、Core 1で`picoruby_task`と同等またはやや高い優先度で実行
+
+#### 備考: SAM2695との通信
+
+SAM2695（MIDIシンセサイザー）との通信:
+- **送信**: `uart_write_bytes`で同期的に送信（`picoruby_task`から直接呼び出し）
+- **受信**: `sam2695_input`タスク（Core 0、優先度1）がUARTイベントを監視
+
+受信タスクは`class_driver_task`と同じ優先度・コアに配置。
 
 ### データフロー
 
@@ -267,4 +328,5 @@ MIDI.sleep_ms(500)  # 500ms待機、MIDI入力も処理
 - `main/usb_midi_host.c`: USB Hostドライバ、転送処理
 - `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/ports/esp32/midi.c`: MIDI入力タスク、イベントパース
 - `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/ports/esp32/usb_midi.c`: USB-MIDIブリッジ（TX Queue, RX Ring Buffer）
+- `components/picoruby-esp32/picoruby/mrbgems/picoruby-sam2695/ports/esp32/sam2695.c`: SAM2695 UART通信、入力タスク
 - `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/mrblib/midi_input.rb`: Ruby側のMIDI入力API
