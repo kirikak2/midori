@@ -29,11 +29,9 @@ elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3)
     )
 endif()
 
-# SD card sources are disabled - PicoRuby has its own FAT filesystem
-# that conflicts with ESP-IDF's fatfs. Use PicoRuby's file operations instead.
-# if(CONFIG_USB_MIDI_SDCARD_ENABLED)
-#     list(APPEND SRCS "sd_card/sd_card.c")
-# endif()
+# SD card access is handled by PicoRuby's FAT filesystem
+# We cannot use ESP-IDF's fatfs because it conflicts with PicoRuby's FatFs library
+# Instead, PicoRuby notifies C side about available scripts via API
 
 idf_component_register(
     SRCS ${SRCS}

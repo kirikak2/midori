@@ -74,3 +74,31 @@ typedef struct {
 4バイトパケット：`[ケーブル番号 + CIN][MIDIバイト1][MIDIバイト2][MIDIバイト3]`
 - Note On CIN: 0x09
 - Note Off CIN: 0x08
+
+## PicoRuby関連
+
+### 重要：main_task.rbは自動生成ファイル
+
+`components/picoruby-esp32/mrblib/main_task.rb`はCMakeによって自動生成されるファイル。**直接編集しないこと。**
+
+修正する場合は以下のソースファイルを編集：
+- `components/picoruby-esp32/mrblib/main_task_base.rb` - メインのRubyコード
+- `components/picoruby-esp32/board_config.rb.in` - ボード設定テンプレート
+
+ビルド時にこれらが結合されて`main_task.rb`が生成される。
+
+### ESP32環境でのDir操作
+
+ESP32環境では`picoruby-dir` gemではなく`picoruby-filesystem-fat`が使用される。そのため：
+- `Dir.entries(path)` は**使用不可**
+- 代わりに `Dir.open(path) { |dir| dir.read }` を使用する
+
+```ruby
+# NG: Dir.entries("/sd")
+# OK:
+Dir.open("/sd") do |dir|
+  while entry = dir.read
+    # 処理
+  end
+end
+```

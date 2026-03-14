@@ -4,6 +4,10 @@
 #include <cstdio>
 #include "esp_log.h"
 
+extern "C" {
+#include "../../components/picoruby-esp32/picoruby-esp32.h"
+}
+
 static const char* TAG = "SCREEN_SCRIPT";
 
 // Global instance
@@ -17,6 +21,8 @@ ScreenScripts& getScreenScripts()
 // Layout constants
 static constexpr int LIST_START_Y = UI_CONTENT_Y + 5;
 static constexpr int LIST_MARGIN = 8;
+static constexpr int REFRESH_BUTTON_HEIGHT = 30;
+static constexpr int REFRESH_BUTTON_MARGIN = 5;
 
 ScreenScripts::ScreenScripts()
     : m_scriptCount(0)
@@ -24,17 +30,19 @@ ScreenScripts::ScreenScripts()
     , m_scrollOffset(0)
     , m_isActive(false)
     , m_needsRedraw(false)
+    , m_refreshButtonPressed(false)
 {
     memset(m_scripts, 0, sizeof(m_scripts));
     m_currentScript[0] = '\0';
-
-    // Add default script for testing
-    addScript("app.rb");
 }
 
 void ScreenScripts::enter()
 {
     m_isActive = true;
+
+    // Don't auto-refresh - let user press Refresh button after SD card is mounted
+    // This avoids race condition with PicoRuby's SD card mounting
+
     ui_clear_content_area();
     draw();
 }
@@ -77,6 +85,20 @@ void ScreenScripts::drawScriptList()
         M5.Lcd.setCursor(60, LIST_START_Y + 60);
         M5.Lcd.print("No scripts found on SD card");
     }
+
+    // Draw refresh button at the bottom
+    drawRefreshButton();
+}
+
+void ScreenScripts::drawRefreshButton()
+{
+    int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
+    int buttonX = (UI_SCREEN_WIDTH - 100) / 2;  // Center horizontally
+    int buttonW = 100;
+    int buttonH = REFRESH_BUTTON_HEIGHT;
+
+    ui_draw_button(buttonX, buttonY, buttonW, buttonH, "Refresh",
+                   UI_COLOR_BLUE, UI_COLOR_WHITE, m_refreshButtonPressed);
 }
 
 void ScreenScripts::drawScriptItem(int index, int y)
@@ -138,6 +160,35 @@ int ScreenScripts::hitTestItem(int y)
 
 void ScreenScripts::onTouch(int x, int y, bool pressed)
 {
+    // Check if refresh button was touched
+    int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
+    int buttonX = (UI_SCREEN_WIDTH - 100) / 2;
+    int buttonW = 100;
+    int buttonH = REFRESH_BUTTON_HEIGHT;
+
+    if (x >= buttonX && x <= buttonX + buttonW &&
+        y >= buttonY && y <= buttonY + buttonH) {
+        if (pressed) {
+            m_refreshButtonPressed = true;
+            m_needsRedraw = true;
+        } else {
+            // Release - trigger refresh
+            if (m_refreshButtonPressed) {
+                ESP_LOGI(TAG, "Refresh button clicked");
+                refreshFromSD();
+                m_refreshButtonPressed = false;
+                m_needsRedraw = true;
+            }
+        }
+        return;
+    }
+
+    // Reset button state if touch is outside button
+    if (!pressed && m_refreshButtonPressed) {
+        m_refreshButtonPressed = false;
+        m_needsRedraw = true;
+    }
+
     if (!pressed) return;
 
     int itemIndex = hitTestItem(y);
@@ -161,9 +212,18 @@ void ScreenScripts::onNavCenter()
 
         ESP_LOGI(TAG, "Requesting to run script: %s", filename);
 
-        // TODO: Send script change request to PicoRuby task
-        // For now, just update the display
-        setCurrentScript(filename);
+        // Build full path
+        char full_path[256];
+        snprintf(full_path, sizeof(full_path), "%s/%s",
+                 CONFIG_USB_MIDI_SDCARD_MOUNT_POINT, filename);
+
+        // Request script change from PicoRuby task
+        if (picoruby_esp32_request_script_change(full_path)) {
+            ESP_LOGI(TAG, "Script change request sent: %s", full_path);
+            setCurrentScript(filename);
+        } else {
+            ESP_LOGE(TAG, "Failed to request script change");
+        }
     }
 }
 
@@ -216,6 +276,42 @@ void ScreenScripts::clearScripts()
     }
 }
 
+void ScreenScripts::refreshFromSD()
+{
+#ifdef CONFIG_USB_MIDI_SDCARD_ENABLED
+    // Clear current list
+    clearScripts();
+
+    // Check if PicoRuby has notified us about available scripts
+    if (!picoruby_esp32_script_list_ready()) {
+        ESP_LOGW(TAG, "Script list not ready yet. PicoRuby is still initializing SD card.");
+        ESP_LOGW(TAG, "Wait a few seconds and try Refresh again.");
+        return;
+    }
+
+    // Get scripts from PicoRuby's script list
+    int count = picoruby_esp32_get_script_count();
+    for (int i = 0; i < count && m_scriptCount < MAX_SCRIPTS; i++) {
+        const char* name = picoruby_esp32_get_script_name(i);
+        if (name != NULL) {
+            addScript(name);
+        }
+    }
+
+    ESP_LOGI(TAG, "Found %d script(s) from PicoRuby", m_scriptCount);
+
+    // Auto-select first script if none selected
+    if (m_scriptCount > 0 && m_selectedIndex < 0) {
+        m_selectedIndex = 0;
+    }
+#else
+    ESP_LOGW(TAG, "SD card support not enabled");
+    // Add a test script for development
+    addScript("app.rb");
+    m_selectedIndex = 0;
+#endif
+}
+
 // C API implementation
 extern "C" {
 
@@ -232,6 +328,11 @@ void ui_script_add(const char* filename)
 void ui_script_clear_list(void)
 {
     getScreenScripts().clearScripts();
+}
+
+void ui_script_refresh(void)
+{
+    getScreenScripts().refreshFromSD();
 }
 
 } // extern "C"

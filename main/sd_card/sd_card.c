@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -167,6 +168,46 @@ esp_err_t sd_card_read_file(const char *path, char **buffer, size_t *size)
     (*buffer)[*size] = '\0';
 
     ESP_LOGI(TAG, "File read successfully");
+    return ESP_OK;
+}
+
+esp_err_t sd_card_list_files(const char *dir_path, sd_card_file_cb_t callback, void *user_data)
+{
+    if (!s_mounted) {
+        ESP_LOGE(TAG, "SD card not mounted");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (dir_path == NULL || callback == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Listing files in: %s", dir_path);
+
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) {
+        ESP_LOGE(TAG, "Failed to open directory: %s", dir_path);
+        return ESP_FAIL;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip "." and ".."
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        bool is_dir = (entry->d_type == DT_DIR);
+
+        // Call callback
+        if (!callback(entry->d_name, is_dir, user_data)) {
+            // Callback returned false, stop enumeration
+            break;
+        }
+    }
+
+    closedir(dir);
+    ESP_LOGI(TAG, "Directory enumeration complete");
     return ESP_OK;
 }
 

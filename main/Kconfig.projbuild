@@ -82,14 +82,14 @@ menu "USB MIDI Host Configuration"
 
         config USB_MIDI_SDCARD_MOUNT_POINT
             string "SD Card Mount Point"
-            default "/sdcard"
+            default "/sd"
             depends on USB_MIDI_SDCARD_ENABLED
             help
-                Mount point for the SD card filesystem.
+                Mount point for the SD card filesystem (PicoRuby uses /sd).
 
         config USB_MIDI_APP_SCRIPT_PATH
             string "Ruby Script Path"
-            default "/sdcard/app.rb"
+            default "/sd/app.rb"
             depends on USB_MIDI_SDCARD_ENABLED
             help
                 Path to the Ruby script to execute on startup.

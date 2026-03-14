@@ -1025,3 +1025,111 @@ typedef struct {
 - `main/lcd_console/lcd_console.cpp`: 現在のログ出力実装
 - `main/usb_midi_host.c`: USB MIDIデバイス情報取得
 - `components/picoruby-esp32/`: PicoRuby統合
+
+## 実装状況・トラブルシューティング
+
+### Phase 6: スクリプト選択画面 実装状況
+
+#### 完了した実装
+
+1. **ScreenScripts クラス** (`main/ui/screen_script.cpp`, `main/ui/screen_script.h`)
+   - SDカード内の.rbファイルを一覧表示
+   - タッチによるスクリプト選択
+   - Refreshボタンによるリスト再読み込み
+   - Runボタンによるスクリプト実行リクエスト
+
+2. **PicoRuby → C スクリプト通知機構**
+   - ESP-IDFのfatfsとPicoRubyのFatFsライブラリの競合を回避するアーキテクチャ
+   - PicoRuby側でSDカードをマウントし、スクリプト一覧をC側に通知
+
+3. **ScriptManager クラス** (`components/picoruby-esp32/picoruby-esp32.c`)
+   ```c
+   // C側API
+   void picoruby_esp32_clear_script_list(void);
+   bool picoruby_esp32_add_script(const char *filename);
+   int picoruby_esp32_get_script_count(void);
+   const char* picoruby_esp32_get_script_name(int index);
+   bool picoruby_esp32_script_list_ready(void);
+   void picoruby_esp32_set_script_list_ready(bool ready);
+   ```
+
+4. **Ruby側通知関数** (`components/picoruby-esp32/mrblib/main_task_base.rb`)
+   ```ruby
+   def notify_scripts_to_c
+     sm = ScriptManager.new
+     sm.clear
+     Dir.entries("/sd").each do |entry|
+       next if entry == "." || entry == ".."
+       next unless entry.end_with?(".rb")
+       sm.add(entry)
+     end
+     sm.set_ready
+   end
+   ```
+
+#### 技術的な課題と解決策
+
+##### 1. FatFsライブラリの競合問題
+
+**問題**: ESP-IDFのfatfsコンポーネントとPicoRubyのFatFsライブラリが同じシンボル（`f_mount`, `f_open`等）を定義しており、リンク時に多重定義エラーが発生。
+
+**解決策**: ESP-IDFのfatfsを使用せず、PicoRuby側でファイルシステムをマウントし、スクリプト一覧をC側に通知するアーキテクチャを採用。
+
+##### 2. VFSの分離問題
+
+**問題**: PicoRubyのVFSとESP-IDFのVFSは別システムのため、C側から`opendir("/sd")`を呼んでもPicoRubyがマウントしたSDカードにアクセスできない。
+
+**解決策**: PicoRuby（Ruby側）でDir.entriesを実行し、結果をC関数経由でC側のグローバル配列に格納。
+
+##### 3. main_task.rbが実行されない問題
+
+**問題**: `picoruby_task`が`picoruby_esp32_init()`のみを呼び出し、`main_task.rb`（SDカードマウント・スクリプト通知を行う）を実行していなかった。
+
+**修正内容**:
+- `usb_midi_host.c`: `picoruby_esp32_init()` → `picoruby_esp32()` に変更
+- `picoruby-esp32.c`: `picoruby_esp32()`にScriptManager登録とg_vm_initialized設定を追加
+
+##### 4. クラスメソッド vs インスタンスメソッド
+
+**問題**: `mrbc_define_method`はインスタンスメソッドを定義するが、Ruby側で`ScriptManager.clear`のようにクラスメソッドとして呼び出していた。
+
+**解決策**: Ruby側を`ScriptManager.new.clear`のようにインスタンスメソッド呼び出しに変更。
+
+#### 現在の問題（未解決）
+
+**症状**: Refreshボタンを押しても「Script list not ready yet」が表示され続ける。
+
+**調査ポイント**:
+1. `picoruby_esp32()`内で`mrbc_run()`が正常に完了しているか
+2. `main_task.rb`内の`notify_scripts_to_c`が呼び出されているか
+3. `Dir.entries("/sd")`がSDカードのファイルを正しく列挙できているか
+4. ScriptManagerのインスタンスメソッドが正しく呼び出されているか
+
+**デバッグ方法**:
+```bash
+idf.py flash monitor
+```
+ログで以下を確認:
+- `ScriptManager class registered` - ScriptManager登録成功
+- `Script list ready: yes (N scripts)` - スクリプト一覧通知成功
+- `Scripts notified to C side` - Ruby側の通知関数完了
+
+#### ファイル変更一覧
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `main/CMakeLists.txt` | fatfs依存を削除、sd_card.cを除外 |
+| `main/Kconfig.projbuild` | マウントポイントを`/sdcard`→`/sd`に変更 |
+| `main/usb_midi_host.c` | picoruby_taskで`picoruby_esp32()`を呼び出すよう変更 |
+| `main/ui/screen_script.cpp` | PicoRubyのスクリプトリストAPIを使用 |
+| `main/ui/screen_script.h` | refreshFromSD()メソッド追加 |
+| `components/picoruby-esp32/picoruby-esp32.c` | ScriptManager登録、スクリプトリスト管理API追加 |
+| `components/picoruby-esp32/picoruby-esp32.h` | スクリプトリスト管理API宣言追加 |
+| `components/picoruby-esp32/mrblib/main_task_base.rb` | `notify_scripts_to_c`関数追加 |
+
+#### 次のステップ
+
+1. シリアルモニタでログを確認し、どの段階で処理が止まっているか特定
+2. `Dir.entries`がPicoRubyで正しく動作するか確認
+3. ScriptManagerのインスタンスメソッド呼び出しが正しく機能するか確認
+4. 必要に応じてScriptManagerをモジュールとして再実装（クラスメソッド対応）

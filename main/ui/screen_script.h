@@ -28,6 +28,9 @@ public:
     // Clear the script list
     void clearScripts();
 
+    // Refresh script list from SD card
+    void refreshFromSD();
+
 private:
     static constexpr int MAX_SCRIPTS = 20;
     static constexpr int MAX_FILENAME_LEN = 32;
@@ -41,9 +44,11 @@ private:
     char m_currentScript[MAX_FILENAME_LEN];
     bool m_isActive;
     bool m_needsRedraw;
+    bool m_refreshButtonPressed;
 
     void drawScriptList();
     void drawScriptItem(int index, int y);
+    void drawRefreshButton();
     int hitTestItem(int y);
 };
 
@@ -57,6 +62,7 @@ extern "C" {
 void ui_script_set_current(const char* filename);
 void ui_script_add(const char* filename);
 void ui_script_clear_list(void);
+void ui_script_refresh(void);
 
 #ifdef __cplusplus
 }
