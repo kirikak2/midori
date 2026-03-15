@@ -726,100 +726,19 @@ static void class_driver_task(void *arg)
     vTaskSuspend(NULL);
 }
 
-// PicoRuby task - runs Ruby scripts with hot-reload support
+// PicoRuby task - runs Ruby VM with script selection loop
 static void picoruby_task(void *arg)
 {
     ESP_LOGI(TAG, "Starting PicoRuby task...");
 
-#ifdef CONFIG_USB_MIDI_SDCARD_ENABLED
-    // Run initialization task (mounts SD card, notifies scripts to C side)
-    // This calls main_task.rb which sets up filesystem and populates script list
-    ESP_LOGI(TAG, "Running PicoRuby initialization (SD card mount, script enumeration)...");
+    // Run main_task.rb which:
+    // 1. Mounts SD card and flash
+    // 2. Notifies C side about available scripts
+    // 3. Enters script selection loop (polls for UI requests, loads scripts via PicoRuby VFS)
     picoruby_esp32();
-    ESP_LOGI(TAG, "PicoRuby initialization complete, entering script selection loop");
 
-    // Script execution loop with hot-reload support
-    while (1) {
-        const char* script_path = picoruby_esp32_get_current_script();
-
-        if (script_path == NULL) {
-            // No script to run, wait for script selection
-            ESP_LOGI(TAG, "No script loaded. Waiting for script selection...");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
-
-        ESP_LOGI(TAG, "Loading script: %s", script_path);
-
-        // Read script from SD card using POSIX API
-        FILE *f = fopen(script_path, "r");
-        if (f == NULL) {
-            ESP_LOGE(TAG, "Failed to open script file: %s", script_path);
-            vTaskDelay(pdMS_TO_TICKS(5000));
-            continue;
-        }
-
-        // Get file size
-        fseek(f, 0, SEEK_END);
-        long file_size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-
-        if (file_size <= 0) {
-            ESP_LOGE(TAG, "Invalid file size: %ld", file_size);
-            fclose(f);
-            vTaskDelay(pdMS_TO_TICKS(5000));
-            continue;
-        }
-
-        // Allocate buffer
-        char *script_buffer = (char *)malloc(file_size + 1);
-        if (script_buffer == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate memory for script");
-            fclose(f);
-            vTaskDelay(pdMS_TO_TICKS(5000));
-            continue;
-        }
-
-        // Read file
-        size_t bytes_read = fread(script_buffer, 1, file_size, f);
-        fclose(f);
-
-        if (bytes_read != file_size) {
-            ESP_LOGE(TAG, "Failed to read script: expected %ld, got %zu", file_size, bytes_read);
-            free(script_buffer);
-            vTaskDelay(pdMS_TO_TICKS(5000));
-            continue;
-        }
-
-        script_buffer[file_size] = '\0';
-
-        // Execute script
-        ESP_LOGI(TAG, "Executing script (%ld bytes)", file_size);
-        bool success = picoruby_esp32_run_script(script_buffer, file_size, script_path);
-
-        // Free script buffer
-        free(script_buffer);
-
-        if (!success) {
-            ESP_LOGE(TAG, "Script execution failed");
-        }
-
-        // After script ends, perform MIDI cleanup
-        ESP_LOGI(TAG, "Script ended, performing cleanup...");
-        picoruby_esp32_midi_cleanup();
-
-        // Clear stop flag for next script
-        picoruby_esp32_clear_stop_flag();
-
-        // Wait before next iteration
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-#else
-    // No SD card, run default shell
-    ESP_LOGI(TAG, "SD card not enabled, running default shell...");
-    picoruby_esp32();
-#endif
-
+    // main_task.rb has an infinite loop, so this should not be reached
+    ESP_LOGW(TAG, "PicoRuby task unexpectedly ended");
     vTaskDelete(NULL);
 }
 

@@ -423,96 +423,126 @@ SDカード内のRubyスクリプトファイルを一覧表示し、選択実�
 
 #### スクリプト切り替え処理
 
-スクリプト切り替え時のクリーンアップはC側で自動的に行う。Rubyスクリプト側での処理漏れを防ぐため、`at_exit`等のユーザー実装には依存しない。
+**実装方式**: Ruby側でスクリプトロードを管理し、C側はstop_requestedフラグとMIDIクリーンアップを担当。
 
-```c
-// スクリプト切り替えのフロー
-1. 現在実行中のスクリプトに終了シグナルを送信
-2. PicoRuby VMの終了処理を待機（タイムアウト付き）
-3. **自動クリーンアップ処理（C側で実行）**
-4. VMをリセット
-5. 新しいスクリプトファイルをロード
-6. VM実行を開始
+**最新の実装状況 (2026-03-15)**:
+- Ruby側ポーリングループでスクリプトリクエストを監視: ✅ 実装済み
+- C側MIDI自動クリーンアップ: ✅ 実装済み
+- `MIDI.bpm_loop` stop_requested検出: ✅ 実装済み
+- **問題**: スクリプト切り替えが正しく動作しない（原因調査中）
+
+詳細は `CLAUDE.md` の「スクリプト切り替え機能」セクションを参照。
+
+#### スクリプト切り替えフロー（実装済み）
+
+```
+1. UIでスクリプト選択 → [Run]ボタン
+   ↓
+2. C側: picoruby_esp32_request_script_change(path)
+   - g_stop_requested = true
+   - g_script_change_requested = true
+   - g_requested_script = path
+   ↓
+3. MIDI Clock タイマーが stop_requested を検出
+   - picoruby_esp32_midi_cleanup() 自動実行
+     * All Sound Off (CC#120) → 全チャンネル
+     * All Notes Off (CC#123) → 全チャンネル
+     * MIDI Stop (0xFC)
+     * USB_MIDI と SAM2695 両方に送信
+   - タイマー停止
+   ↓
+4. MIDI Input タスクが stop_requested を検出
+   - タスク終了
+   ↓
+5. Ruby: MIDI.bpm_loop が ScriptManager#stop_requested? を検出
+   - send_stop (必要に応じて)
+   - loop を break
+   ↓
+6. main_task_base.rb のメインループに戻る
+   - ScriptManager#get_requested で新パス取得
+   - clear_request でフラグクリア
+   - load で新スクリプト実行
+   - GC.start でメモリ解放
 ```
 
-#### 自動クリーンアップ処理（C側実装）
-
-スクリプト終了時に以下のMIDIメッセージを全接続デバイスに自動送信:
+#### 自動クリーンアップ処理（実装済み）
 
 ```c
-// クリーンアップで送信するMIDIメッセージ
-typedef struct {
-    bool send_all_notes_off;     // CC #123 (All Notes Off)
-    bool send_all_sound_off;     // CC #120 (All Sound Off)
-    bool send_reset_all_ctrl;    // CC #121 (Reset All Controllers)
-    bool send_stop;              // 0xFC (MIDI Stop)
-} midi_cleanup_config_t;
-
-// デフォルト設定
-static const midi_cleanup_config_t DEFAULT_CLEANUP = {
-    .send_all_notes_off = true,
-    .send_all_sound_off = true,
-    .send_reset_all_ctrl = false,  // 必要に応じて有効化
-    .send_stop = true,
-};
-
-// クリーンアップ実行
-void midi_cleanup_on_script_change(void)
+// picoruby-esp32.c: picoruby_esp32_midi_cleanup()
+void picoruby_esp32_midi_cleanup(void)
 {
-    // 全MIDIチャンネル(1-16)に対して送信
-    for (uint8_t ch = 0; ch < 16; ch++) {
-        if (g_cleanup_config.send_all_notes_off) {
-            midi_send_cc(ch, 123, 0);  // All Notes Off
-        }
-        if (g_cleanup_config.send_all_sound_off) {
-            midi_send_cc(ch, 120, 0);  // All Sound Off
-        }
-        if (g_cleanup_config.send_reset_all_ctrl) {
-            midi_send_cc(ch, 121, 0);  // Reset All Controllers
-        }
-    }
+  // 全MIDIチャンネル(0-15)に対して送信
+  for (uint8_t ch = 0; ch < 16; ch++) {
+    uint8_t status_cc = 0xB0 | ch;  // Control Change
 
-    if (g_cleanup_config.send_stop) {
-        midi_send_realtime(0xFC);  // MIDI Stop
-    }
+    // All Sound Off (CC #120)
+    USB_MIDI_send_packet(0, 0x0B, status_cc, 120, 0);
+    SAM2695_send_packet(0, 0x0B, status_cc, 120, 0);
 
-    // UIパッドの状態もリセット
-    ui_pad_clear_all();
+    // All Notes Off (CC #123)
+    USB_MIDI_send_packet(0, 0x0B, status_cc, 123, 0);
+    SAM2695_send_packet(0, 0x0B, status_cc, 123, 0);
+  }
+
+  // Send MIDI Stop (0xFC)
+  USB_MIDI_send_packet(0, 0x05, 0xFC, 0, 0);
+  SAM2695_send_packet(0, 0x05, 0xFC, 0, 0);
 }
 ```
 
-#### クリーンアップのタイミング
-
-| タイミング | 処理 |
-|------------|------|
-| スクリプト切り替え時 | 自動クリーンアップ実行 |
-| USBデバイス切断時 | 不要（デバイス側で処理） |
-| システム再起動時 | 自動クリーンアップ実行 |
-| Rubyスクリプトからの明示的な終了 | 自動クリーンアップ実行 |
-
-#### Ruby側でのループ終了パターン
+#### Ruby側でのループ終了パターン（実装済み）
 
 ```ruby
-# MIDI.stop_requested?でループを抜けるだけでOK
-# クリーンアップはC側で自動実行される
+# ScriptManager を使って stop_requested を監視
+# MIDI.bpm_loop が自動的に監視する
 MIDI.bpm_loop(UI.bpm, output: device) do
-  break if MIDI.stop_requested?
+  # stop_requested? が true になると自動的にループを抜ける
+  # C側のクリーンアップは既に完了している
+end
+
+# 手動でチェックする場合
+sm = ScriptManager.new
+loop do
+  break if sm.stop_requested?
   # 通常処理
 end
-# ← ここでC側の自動クリーンアップが実行される
 ```
 
-#### C API
+#### C API（実装済み）
 
 ```c
-// クリーンアップ設定の変更（必要に応じて）
-void midi_set_cleanup_config(const midi_cleanup_config_t* config);
+// スクリプト変更リクエスト（UIから呼び出し）
+bool picoruby_esp32_request_script_change(const char *script_path);
 
-// 手動でクリーンアップを実行（通常は不要）
-void midi_cleanup_now(void);
+// 停止要求
+void picoruby_esp32_request_stop(void);
 
-// クリーンアップの有効/無効切り替え
-void midi_set_auto_cleanup(bool enabled);
+// 停止要求フラグ確認
+bool picoruby_esp32_stop_requested(void);
+
+// 停止フラグクリア
+void picoruby_esp32_clear_stop_flag(void);
+
+// MIDIクリーンアップ実行
+void picoruby_esp32_midi_cleanup(void);
+```
+
+#### Ruby API（実装済み）
+
+```ruby
+# ScriptManager でスクリプト切り替えを管理
+sm = ScriptManager.new
+
+# UI からリクエストされたスクリプトパスを取得
+script_path = sm.get_requested  # => "/sd/app.rb" or nil
+
+# リクエストフラグをクリア
+sm.clear_request
+
+# 停止要求フラグをチェック
+if sm.stop_requested?
+  # 停止処理（通常は MIDI.bpm_loop が自動処理）
+end
 ```
 
 ### 6. 設定画面（Settings Screen）
@@ -1095,24 +1125,58 @@ typedef struct {
 
 **解決策**: Ruby側を`ScriptManager.new.clear`のようにインスタンスメソッド呼び出しに変更。
 
+#### 完了した実装（2026-03-15追記）
+
+5. **スクリプト切り替え機能**
+   - C側: `picoruby_esp32_request_script_change()` でstop_requestedフラグをセット
+   - C側: MIDI Clock/Input タスクが自動的に停止を検出しクリーンアップ
+   - Ruby側: `main_task_base.rb` でポーリングループ実装
+   - Ruby側: `ScriptManager#get_requested` / `clear_request` / `stop_requested?` メソッド
+   - Ruby側: `MIDI.bpm_loop` が `stop_requested?` をチェック
+   - Ruby側: `MIDI::Clock#running?` が C側タイマー状態を確認
+
+6. **MIDI自動クリーンアップ**
+   - `picoruby_esp32_midi_cleanup()` 実装
+   - All Sound Off (CC#120) を全チャンネルに送信
+   - All Notes Off (CC#123) を全チャンネルに送信
+   - MIDI Stop (0xFC) を送信
+   - USB_MIDI と SAM2695 両方に対応
+
+7. **Dir操作の修正**
+   - `Dir.entries` は ESP32 環境で使用不可（picoruby-filesystem-fat）
+   - `Dir.open` + `read` パターンに変更
+
 #### 現在の問題（未解決）
 
-**症状**: Refreshボタンを押しても「Script list not ready yet」が表示され続ける。
+**症状**: スクリプト実行中に別のスクリプトを選択して [Run] を押しても、スクリプトが切り替わらない。
+
+**ログ出力**:
+```
+PICORUBY: Script change requested /sd/app.rb
+SCREEN_SCRIPT: Script change request sent /sd/app.rb
+```
+- ログには表示されるが、実際のスクリプト切り替えが発生しない
+- All Notes Off などのクリーンアップも実行されていない様子
 
 **調査ポイント**:
-1. `picoruby_esp32()`内で`mrbc_run()`が正常に完了しているか
-2. `main_task.rb`内の`notify_scripts_to_c`が呼び出されているか
-3. `Dir.entries("/sd")`がSDカードのファイルを正しく列挙できているか
-4. ScriptManagerのインスタンスメソッドが正しく呼び出されているか
+1. `ScriptManager#stop_requested?` が正しく `true` を返すか
+   - C側で `g_stop_requested = true` がセットされているか確認
+2. `MIDI.bpm_loop` のループが実際に `break` するか
+   - 毎イテレーションで `stop_requested?` をチェックしているか
+3. `main_task_base.rb` のメインループが `get_requested` を正しくポーリングしているか
+   - 100ms間隔でポーリングしているが、スクリプト実行中は `load` がブロックする
+4. `picoruby_esp32_clear_stop_flag()` の呼び出しタイミング
+   - クリア後に再度フラグがセットされない可能性
 
 **デバッグ方法**:
 ```bash
 idf.py flash monitor
 ```
 ログで以下を確認:
-- `ScriptManager class registered` - ScriptManager登録成功
-- `Script list ready: yes (N scripts)` - スクリプト一覧通知成功
-- `Scripts notified to C side` - Ruby側の通知関数完了
+- `Script change requested: /sd/xxx.rb` - リクエスト受信
+- `Stop requested, performing cleanup...` - MIDIクリーンアップ実行
+- `Stop requested, exiting input task` - Input タスク終了
+- `Loading script: /sd/xxx.rb` - 新スクリプトロード開始
 
 #### ファイル変更一覧
 

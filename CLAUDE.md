@@ -102,3 +102,226 @@ Dir.open("/sd") do |dir|
   end
 end
 ```
+
+### スクリプト切り替え機能
+
+UI（またはC側）からのスクリプト変更リクエストを処理し、実行中のスクリプトを停止して新しいスクリプトをロードする機能。
+
+#### アーキテクチャ
+
+**C側（picoruby-esp32.c）:**
+- `g_stop_requested` フラグ：スクリプト停止要求を示す（volatile bool）
+- `g_script_change_requested` フラグ：新規スクリプトロード要求を示す
+- `g_requested_script[256]` バッファ：リクエストされたスクリプトのパス
+
+**Ruby側（main_task_base.rb）:**
+- `ScriptManager` クラスを通じてC側と通信
+- メインループで `get_requested` をポーリング
+- スクリプトロード後に `clear_request` でフラグをクリア
+
+#### スクリプト切り替えフロー
+
+1. **停止リクエスト**
+   - UI（またはC側）が `picoruby_esp32_request_script_change(path)` を呼び出し
+   - `g_stop_requested = true` と `g_script_change_requested = true` がセット
+
+2. **MIDI クリーンアップ（C側自動）**
+   - MIDI Clock タイマーコールバック（`clock_timer_callback`）が `stop_requested` を検出
+   - `picoruby_esp32_midi_cleanup()` を自動実行：
+     - 全チャンネル（0-15）に All Sound Off (CC#120) 送信
+     - 全チャンネル（0-15）に All Notes Off (CC#123) 送信
+     - MIDI Stop (0xFC) 送信
+     - USB_MIDI と SAM2695 両方に送信
+   - タイマー停止、`g_running = false`
+
+3. **MIDI Input タスク停止（C側自動）**
+   - `midi_input_task` ループが `stop_requested` を検出
+   - タスク終了
+
+4. **Ruby スクリプト終了**
+   - `MIDI.bpm_loop` が各イテレーションで `ScriptManager#stop_requested?` をチェック
+   - `true` の場合、`send_stop` を送信（必要に応じて）してループを `break`
+   - `MIDI::Clock#running?` は C側の `_timer_running?` を確認（自動同期）
+
+5. **新スクリプトロード**
+   - main_task_base.rb のメインループに制御が戻る
+   - `ScriptManager#get_requested` が新しいパスを返す
+   - `clear_request` でフラグをクリア
+   - `load` で新スクリプト実行
+   - `GC.start` でメモリ解放
+
+#### ScriptManager Ruby API
+
+```ruby
+sm = ScriptManager.new
+
+# C側から要求されたスクリプトパスを取得（要求がなければnil）
+script_path = sm.get_requested
+
+# 要求フラグをクリア
+sm.clear_request
+
+# stop_requested フラグをチェック（スクリプト実行中に使用）
+if sm.stop_requested?
+  # 停止処理
+end
+```
+
+#### ファイルシステムの注意点
+
+**スクリプトロードは必ずRuby側で実行すること。**
+
+- C側の `fopen()` は ESP-IDF VFS を使用（PicoRuby VFS とは別物）
+- Ruby側の `File.open()` / `load` は PicoRuby VFS を使用
+- SDカード上のスクリプトは Ruby VFS でアクセスする必要がある
+
+```ruby
+# OK: Ruby VFS 経由でロード
+if File.exist?(script_path)
+  load script_path
+end
+
+# NG: C側で fopen(script_path, "r") - ESP-IDF VFS を使うため失敗する
+```
+
+#### 解決済みの問題（2026-03-15）
+
+**問題**: スクリプト切り替えが動作しなかった
+
+**根本原因**:
+`c_script_manager_clear_request()` が `g_stop_requested` フラグをクリアしていなかった。
+
+**動作フロー（修正前）**:
+1. UI からスクリプト変更リクエスト → `g_stop_requested = true`, `g_script_change_requested = true`
+2. `bpm_loop` が `stop_requested?` で `true` を検出 → ループから `break`
+3. スクリプト終了、main_task_base.rb のメインループに制御が戻る
+4. `sm.clear_request` を呼ぶ → **`g_stop_requested` がそのまま `true`**
+5. 新しいスクリプトをロード
+6. 新しいスクリプトが `bpm_loop` を開始
+7. **即座に `stop_requested?` が `true` を返す → すぐにループから抜ける**
+8. スクリプトがすぐに終了してしまう
+
+**修正内容（picoruby-esp32.c:430）**:
+```c
+static void
+c_script_manager_clear_request(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+  (void)vm; (void)v; (void)argc;
+  ESP_LOGI(TAG, "clear_request called - clearing all stop flags");
+  g_script_change_requested = false;
+  g_stop_requested = false;  // IMPORTANT: Clear stop flag too!
+  g_requested_script[0] = '\0';
+  SET_NIL_RETURN();
+}
+```
+
+**結果**: `clear_request` が両方のフラグをクリアするようになり、スクリプト切り替えが正常に動作するようになった。
+
+### シリアルコンソールでのスクリプト実行
+
+M5Stack以外のボード（Freenove等）では、USB-MIDIを使用するためシリアルコンソールが利用できる。
+このため、シリアルコンソールからスクリプトを実行できる機能を追加した。
+
+#### C側実装（picoruby-esp32.c）
+
+**バッファ管理**:
+```c
+static char s_console_buffer[256];
+static int s_console_buffer_pos = 0;
+```
+
+**`c_script_manager_check_console()` 関数**:
+- `getchar()` で非ブロッキングでシリアル入力をチェック
+- エコーバック機能（入力した文字を即座に表示）
+- バックスペース処理（0x08/0x7F）：`printf("\b \b")` で画面上の文字を削除
+- `load /sd/app.rb` 形式のコマンドを検出
+- `picoruby_esp32_request_script_change()` を呼び出し
+- 未知のコマンドにはヘルプを表示
+- プロンプト `> ` を自動表示
+
+**ScriptManagerに追加されたメソッド**:
+```ruby
+sm = ScriptManager.new
+console_script = sm.check_console  # => "/sd/app.rb" or nil
+```
+
+#### Ruby側実装（main_task_base.rb）
+
+```ruby
+# ヘルパー関数
+def load_script(script_path)
+  puts "Loading script: #{script_path}"
+  begin
+    if File.exist?(script_path)
+      load script_path
+      puts "Script finished: #{script_path}"
+    else
+      puts "Script not found: #{script_path}"
+    end
+  rescue => e
+    puts "Script error: #{e.message}"
+  end
+  GC.start
+end
+
+# メインループ
+print "> "  # 初期プロンプト表示
+sm = ScriptManager.new
+loop do
+  # シリアルコンソール入力をチェック
+  console_script = sm.check_console
+  if console_script
+    puts "Loading: #{console_script}"
+    sm.clear_request
+    load_script(console_script)
+  end
+
+  # UI からのリクエストをチェック
+  script_path = sm.get_requested
+  if script_path
+    puts "UI request: #{script_path}"
+    sm.clear_request
+    load_script(script_path)
+    print "> "
+  end
+
+  sleep_ms 100
+end
+```
+
+#### 使用例
+
+```bash
+source ~/esp-idf/export.sh
+idf.py build flash monitor
+```
+
+**シリアルコンソール**:
+```
+Initialization complete.
+Available commands:
+  load /sd/app.rb  - Load and run a script from SD card
+  (or select script from M5Stack UI)
+> load /sd/app1.rb
+Loading: /sd/app1.rb
+Loading script: /sd/app1.rb
+[音が鳴る]
+Script finished: /sd/app1.rb
+> load /sd/app2.rb
+Loading: /sd/app2.rb
+Loading script: /sd/app2.rb
+[別の音が鳴る]
+Script finished: /sd/app2.rb
+> help
+Unknown command: help
+Available commands:
+  load /sd/app.rb  - Load and run a script
+>
+```
+
+**機能**:
+- エコーバック：入力した文字がリアルタイムで表示
+- バックスペース：文字削除が可能
+- プロンプト表示：コマンド実行後に自動的に `> ` を表示
+- エラーハンドリング：未知のコマンド入力時にヘルプ表示
+- バッファオーバーフロー検出：コマンドが長すぎる場合の処理
