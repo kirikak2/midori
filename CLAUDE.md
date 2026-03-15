@@ -325,3 +325,87 @@ Available commands:
 - プロンプト表示：コマンド実行後に自動的に `> ` を表示
 - エラーハンドリング：未知のコマンド入力時にヘルプ表示
 - バッファオーバーフロー検出：コマンドが長すぎる場合の処理
+
+### スクリプトロードとESP32リスタート
+
+#### 問題の背景
+
+mruby/cはグローバルなシンボルテーブルとクラスレジストリを持っている。同一VMプロセス内で`load`を複数回呼び出すと：
+
+1. 前のスクリプトの状態が残りメモリ破損が発生
+2. Cache error / MMU entry fault などの致命的エラー
+3. Sandboxを使っても同様の問題（irep参照の問題）
+
+#### 解決策: NVSを使ったリスタート方式
+
+スクリプトロード時にESP32をリスタートし、常にクリーンな状態から実行する。
+
+**フロー**:
+1. `load /sd/app.rb` コマンドを入力
+2. スクリプトパスをNVS（不揮発性ストレージ）に保存
+3. ESP32をリスタート
+4. 起動時にNVSからスクリプトパスを取得
+5. スクリプトを実行
+6. 実行後、NVSからスクリプトパスを削除
+
+**ScriptManagerメソッド**:
+```ruby
+sm = ScriptManager.new
+
+# Autorun管理
+sm.set_autorun("/sd/app.rb")  # NVSにパスを保存
+path = sm.get_autorun          # NVSからパスを取得（nilも可）
+sm.clear_autorun               # NVSからパスを削除
+
+# ユーティリティ
+sm.free_heap                   # 残りヒープサイズ（バイト）
+sm.esp_restart                 # ESP32をリスタート（戻らない）
+```
+
+**コンソールコマンド**:
+```
+> load /sd/app.rb
+Scheduling: /sd/app.rb
+Restarting ESP32...
+（リスタート後、スクリプトが自動実行される）
+
+> heap
+Free heap: 2048000 bytes
+
+> restart
+Restarting ESP32...
+```
+
+#### main_task_base.rbの実装
+
+```ruby
+# 起動時にautorunスクリプトをチェック
+sm = ScriptManager.new
+autorun_script = sm.get_autorun
+if autorun_script
+  sm.clear_autorun  # クラッシュ時のループ防止
+  run_autorun_script(autorun_script)
+end
+
+# loadコマンド処理
+def request_load_script(script_path)
+  sm = ScriptManager.new
+  sm.set_autorun(script_path)
+  sm.esp_restart
+  # 戻らない
+end
+```
+
+#### ヒープサイズ設定
+
+ESP32-S3 + PSRAM環境では、ヒープサイズを**2MB**に設定:
+```c
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(CONFIG_SPIRAM)
+#define HEAP_SIZE (1024 * 1024 * 2)
+```
+
+#### メリット
+
+1. **常にクリーンな状態**: 毎回リスタートするためメモリ破損なし
+2. **信頼性**: Cache error や MMU fault が発生しない
+3. **シンプル**: 複雑なメモリ管理が不要
