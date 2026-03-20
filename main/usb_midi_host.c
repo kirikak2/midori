@@ -9,6 +9,7 @@
 #include "usb/usb_host.h"
 #include "platform.h"
 #include "picoruby-esp32.h"
+#include "picoruby_supervisor.h"
 
 /* PicoRuby USB-MIDI integration */
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include/usb_midi.h"
@@ -726,21 +727,8 @@ static void class_driver_task(void *arg)
     vTaskSuspend(NULL);
 }
 
-// PicoRuby task - runs Ruby VM with script selection loop
-static void picoruby_task(void *arg)
-{
-    ESP_LOGI(TAG, "Starting PicoRuby task...");
-
-    // Run main_task.rb which:
-    // 1. Mounts SD card and flash
-    // 2. Notifies C side about available scripts
-    // 3. Enters script selection loop (polls for UI requests, loads scripts via PicoRuby VFS)
-    picoruby_esp32();
-
-    // main_task.rb has an infinite loop, so this should not be reached
-    ESP_LOGW(TAG, "PicoRuby task unexpectedly ended");
-    vTaskDelete(NULL);
-}
+// PicoRuby is now managed by the supervisor task
+// See picoruby_supervisor.c for implementation
 
 void app_main(void)
 {
@@ -760,16 +748,10 @@ void app_main(void)
     task_created = xTaskCreatePinnedToCore(class_driver_task, "class", 4096, signaling_sem, 1, NULL, 0);
     assert(task_created == pdTRUE);
 
-    // Start PicoRuby shell on Core 1 (separate from USB Host on Core 0)
-    // Note: PicoRuby shell uses serial console, works on Freenove but not on M5Stack CoreS3 SE
-    // when USB Host is active (shared USB-C port)
-    // Stack 16KB for complex scripts, priority 3 (higher than USB host at 2)
-    task_created = xTaskCreatePinnedToCore(picoruby_task, "picoruby", 16384, NULL, 3, NULL, 1);
-    if (task_created != pdTRUE) {
-        ESP_LOGW(TAG, "Failed to create PicoRuby task");
-    } else {
-        ESP_LOGI(TAG, "PicoRuby task started on Core 1");
-    }
+    // Start PicoRuby supervisor on Core 1 (separate from USB Host on Core 0)
+    // The supervisor manages PicoRuby task lifecycle for dynamic script switching
+    ESP_LOGI(TAG, "Starting PicoRuby supervisor...");
+    supervisor_init();
 
     xSemaphoreTake(signaling_sem, portMAX_DELAY);
 

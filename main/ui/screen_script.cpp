@@ -284,8 +284,9 @@ void ScreenScripts::refreshFromSD()
 
     // Check if PicoRuby has notified us about available scripts
     if (!picoruby_esp32_script_list_ready()) {
-        ESP_LOGW(TAG, "Script list not ready yet. PicoRuby is still initializing SD card.");
-        ESP_LOGW(TAG, "Wait a few seconds and try Refresh again.");
+        ESP_LOGW(TAG, "Script list not ready yet. Requesting SD card re-initialization.");
+        // Request Ruby to re-initialize SD card
+        picoruby_esp32_request_sd_refresh();
         return;
     }
 

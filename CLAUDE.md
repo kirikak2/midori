@@ -445,3 +445,229 @@ MIDIデバイスの電源ON/USB接続のタイミングに依存する問題。
 - ESP-IDF内部APIを使用したUSBポートリセットの実装
 - MIDI INデータ未受信時の自動再接続機構
 - デバイス固有のワークアラウンド（要調査）
+
+## PicoRuby Supervisor Task Architecture（2026-03-20実装中）
+
+### 概要
+
+ESP32リスタートなしでRubyスクリプトを動的に切り替えるための、FreeRTOSベースのSupervisorタスクアーキテクチャ。
+
+**目的**:
+- NVS + ESP32リスタート方式を置き換え
+- `mrbc_cleanup()` によるVM完全リセットでメモリクリーン化
+- UIモードとスクリプトモード間の高速切り替え
+
+### アーキテクチャ
+
+#### タスク構成
+
+```
+Supervisor Task (Core 1) ─┬─ PicoRuby Task (動的生成/削除)
+                           │   └─ main_task.rb
+                           │       ├─ UI Mode
+                           │       └─ Script Mode
+                           │
+USB Host Task (Core 0) ────┘
+```
+
+**Supervisor Task**:
+- FreeRTOSキューでスクリプトリクエストを受信
+- PicoRuby Taskを動的に生成/削除
+- `mrbc_cleanup()` でVM状態を完全リセット
+- `prebuilt_gems[].required` フラグをリセット
+
+**PicoRuby Task**:
+- 毎回新しいタスクとして生成される
+- main_task.rbを実行（UIモードまたはスクリプトモード）
+- 完了後、Supervisorに通知して終了
+
+#### 実行フロー
+
+```
+[起動]
+  ↓
+Supervisor起動 → PicoRuby Task生成（UIモード）
+  ↓
+main_task.rb: UI Mode
+  - FLASH/SD初期化
+  - スクリプトリスト表示
+  - ユーザー入力待ち
+  ↓
+[スクリプト選択: load /sd/app.rb]
+  ↓
+sm.request_script("/sd/app.rb") → Supervisorにリクエスト
+  ↓
+PicoRuby Task終了
+  ↓
+Supervisor: mrbc_cleanup() 実行
+  - メモリアロケータクリア
+  - VM状態クリア
+  - シンボルテーブルクリア
+  - prebuilt_gems[].required リセット
+  ↓
+PicoRuby Task再生成（スクリプトモード）
+  ↓
+main_task.rb: Script Mode
+  - 最小限の初期化（require machine/watchdog/shell）
+  - STDIN/STDOUT初期化
+  - スクリプト実行
+  ↓
+スクリプト終了 → Supervisorに通知
+  ↓
+Supervisor: mrbc_cleanup() 実行
+  ↓
+PicoRuby Task再生成（UIモード） → ループ
+```
+
+### 主要ファイル
+
+#### C側
+
+**picoruby_supervisor.h** (新規):
+- Supervisor API定義
+- `supervisor_init()`: Supervisor初期化
+- `supervisor_request_script()`: C側からのスクリプトリクエスト
+
+**picoruby_supervisor.c** (新規):
+- Supervisorタスク実装
+- PicoRubyタスクのライフサイクル管理
+- `cleanup_vm()`: `mrbc_cleanup()` + gem flagsリセット
+- ScriptManagerクラス登録（Ruby側API）
+
+**picoruby-esp32.c** (変更):
+- グローバル変数を非static化（Supervisor共有用）
+- `extern const uint8_t main_task[]` 宣言に変更
+
+**usb_midi_host.c** (変更):
+- `picoruby_task` 生成を `supervisor_init()` に置き換え
+
+#### Ruby側
+
+**main_task_base.rb** (大幅変更):
+
+```ruby
+sm = ScriptManager.new
+script_to_run = sm.get_autorun_script
+
+if script_to_run
+  # ========== Script Mode ==========
+  require 'machine'
+  require "watchdog"
+  Watchdog.disable
+  require "shell"
+  
+  STDIN = IO.new
+  STDOUT = IO.new
+  
+  # SDカード状態チェック（再初期化は条件付き）
+  $sd_available = VFS.volume_index("/sd") ? true : false
+  if !$sd_available
+    $sd_available = try_init_sd_card
+  end
+  
+  run_script(script_to_run)
+else
+  # ========== UI Mode ==========
+  # 完全な初期化（FLASH、SD、スクリプトリスト）
+  # UIループ（コンソール入力、UIタッチ処理）
+end
+```
+
+**ScriptManager Ruby API**:
+```ruby
+sm = ScriptManager.new
+
+# Supervisorから渡されたスクリプトパスを取得
+script = sm.get_autorun_script  # => "/sd/app.rb" or nil
+
+# Supervisorにスクリプト実行をリクエスト
+sm.request_script("/sd/app.rb")
+
+# MIDI cleanup（Supervisor経由でC側実行）
+sm.cleanup_midi
+```
+
+### 現在の状態と既知の問題
+
+#### 動作状況
+
+| 動作 | 状態 |
+|------|------|
+| 初回起動（UIモード） | ✅ 正常動作 |
+| 1回目スクリプト実行 | ✅ 正常動作 |
+| UIモードへ復帰 | ✅ 正常動作 |
+| 2回目スクリプト実行 | ❌ **Illegal bytecode** エラー |
+| constant警告 | ⚠️ 表示される |
+
+#### 既知の問題（2026-03-20）
+
+**問題1: 2回目のスクリプト実行でIllegal bytecodeエラー**
+
+**症状**:
+```
+Running: /sd/app.rb
+Exception(vm_id=19): Illegal bytecode (Exception)
+```
+
+**発生タイミング**:
+- 1回目のスクリプト実行: 正常動作
+- UIモード復帰: 正常動作
+- 2回目のスクリプト実行: Illegal bytecode
+
+**原因仮説**:
+1. SDカードの再初期化が既にマウント済みのVFSに対して実行され、状態が破損
+2. `VFS.volume_index("/sd")` が `mrbc_cleanup()` 後に不正確な値を返す
+3. `try_init_sd_card()` 内の `Shell.setup_sdcard()` を2回呼ぶとVFS破損
+
+**現在の対策**:
+- スクリプトモードでは `VFS.volume_index("/sd")` でチェック
+- `nil` の場合のみ `try_init_sd_card()` で再初期化
+- しかし2回目で失敗する
+
+**検討中の解決策**:
+1. スクリプトモードでSDカード再初期化を完全にスキップ
+2. C側VFS状態をRuby側で正しく参照する仕組み
+3. `Shell.setup_sdcard()` の冪等性を確保
+
+**問題2: constant警告**
+
+**症状**:
+```
+warning: already initialized constant.
+warning: already initialized constant.
+```
+
+**原因**:
+- `mrbc_cleanup()` が定数テーブル（`handle_const`）をクリアしない
+- 次の `mrbc_init()` で `mrbc_init_global()` が呼ばれるが、既存の定数が残っている
+
+**影響**:
+- 機能的には問題ない（警告のみ）
+- ログが煩雑になる
+
+### 次のステップ
+
+1. **Illegal bytecodeの解決**（最優先）
+   - SDカード再初期化のスキップ方法を検討
+   - C側VFSマウント状態をRuby側で正確に取得
+
+2. **constant警告の解決**
+   - `mrbc_cleanup()` で定数テーブルをクリアする方法を検討
+   - または `mrbc_init_global()` が既存定数を許容するように修正
+
+3. **安定性の検証**
+   - 複数回のスクリプト切り替えテスト
+   - メモリリーク確認
+   - エラーハンドリングの強化
+
+### メリット（期待）
+
+1. **高速切り替え**: ESP32リスタート不要（数秒 → 数十ミリ秒）
+2. **クリーンな状態**: `mrbc_cleanup()` で完全リセット
+3. **柔軟性**: UIモードとスクリプトモード間の自由な切り替え
+
+### 技術的課題
+
+1. **VFS状態の管理**: Ruby側とC側の状態同期
+2. **定数テーブルのクリア**: `mrbc_cleanup()` の限界
+3. **メモリ管理**: 動的タスク生成/削除の安全性
