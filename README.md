@@ -38,6 +38,7 @@ Run the switch script for your target board:
 
 ```bash
 ./switch_board m5stack    # M5Stack CoreS3
+./switch_board m5stack_with_usbserial # M5Stack CoreS3 using USB-Serial mode
 ./switch_board freenove   # Freenove ESP32-S3
 ```
 
