@@ -256,3 +256,79 @@ ESP32-S3 + PSRAM 環境では 2MB のヒープを使用：
 1. **高速切り替え**: ESP32 リスタート不要（数秒 → 数十ミリ秒）
 2. **クリーンな状態**: `mrbc_cleanup()` で完全リセット
 3. **柔軟性**: UI モードとスクリプトモード間の自由な切り替え
+
+## トラブルシューティング
+
+### スクリプト例外クラッシュ問題（修正済み）
+
+**問題**: スクリプトが例外（`NoMethodError`、`NameError`等）を発生させると、ESP32が`Guru Meditation Error: LoadProhibited`パニックでクラッシュする。
+
+**現象**:
+```
+Exception(vm_id=19): in `load_file': undefined local variable or method 'hoge' for Object (NoMethodError)
+Guru Meditation Error: Core  1 panic'ed (LoadProhibited). Exception was unhandled.
+EXCVADDR: 0x00000004
+Backtrace: 0x42028640:0x3fcb9a50 (mrbc_traverse_class_tree)
+```
+
+**根本原因**:
+
+`picoruby-sandbox` の `c_sandbox_error()` 関数における参照カウント管理の不備。
+
+1. サンドボックス内でスクリプト実行中に例外が発生
+2. サンドボックスVMのタスクが終了し、`mrbc_run()` → `mrbc_vm_end()` が呼ばれる
+3. `mrbc_vm_end()` で例外メッセージを出力後、`mrbc_decref(&vm->exception)` が呼ばれ例外オブジェクトが解放される
+4. `require.rb` で `sandbox.error` が呼ばれる
+5. `c_sandbox_error()` が**既に解放済み**の `sandbox_vm->exception` を `mrbc_incref` なしで返す
+6. `raise err` で無効な例外オブジェクトを再raise
+7. rescue での型チェック時に `mrbc_obj_is_kind_of()` → `mrbc_traverse_class_tree()` が呼ばれる
+8. `cls->super` ポインタが無効なメモリを指しているため NULL アクセスでパニック
+
+**修正内容**:
+
+`picoruby-sandbox/src/mrubyc/sandbox.c` の `c_sandbox_error()` で、例外オブジェクトを返す前に `mrbc_incref()` を呼び、参照カウントをインクリメント：
+
+```c
+static void
+c_sandbox_error(mrbc_vm *vm, mrbc_value *v, int argc)
+{
+  SS();
+  mrbc_vm *sandbox_vm = (mrbc_vm *)&ss->tcb->vm;
+  if (sandbox_vm->exception.tt == MRBC_TT_NIL) {
+    SET_NIL_RETURN();
+  } else {
+    mrbc_value err = sandbox_vm->exception;
+    mrbc_incref(&err);  // ← 追加
+    SET_RETURN(err);
+  }
+}
+```
+
+この修正により、`mrbc_vm_end()` で `mrbc_decref()` が呼ばれても参照カウントが 1 残り、例外オブジェクトが解放されなくなる。同じファイル内の `c_sandbox_result()` と同じパターン。
+
+**追加改善**:
+
+スクリプトエラーを M5Stack UI の Logs パネルに表示する `ScriptManager#add_log()` メソッドを追加：
+
+```ruby
+# main_task_base.rb
+rescue => e
+  error_msg = "Error: #{e.message}"
+  puts error_msg
+  sm.add_log(error_msg)  # UIに表示
+end
+```
+
+C 側実装（`picoruby_supervisor.c`）：
+```c
+static void c_sm_add_log(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+  // M5Stack: ui_add_log() でUI Logsパネルに出力
+  // その他: ESP_LOGI() でシリアルコンソールに出力
+}
+```
+
+**関連コミット**:
+- `8e398426` Fix reference count bug in Sandbox#error (picoruby submodule)
+- `d7ab3d6` Add ScriptManager#add_log for UI error reporting
+- `73c6c44` Update picoruby submodule
