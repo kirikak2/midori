@@ -596,40 +596,66 @@ sm.cleanup_midi
 | 初回起動（UIモード） | ✅ 正常動作 |
 | 1回目スクリプト実行 | ✅ 正常動作 |
 | UIモードへ復帰 | ✅ 正常動作 |
-| 2回目スクリプト実行 | ❌ **Illegal bytecode** エラー |
+| 2回目スクリプト実行 | ✅ 正常動作 |
 | constant警告 | ⚠️ 表示される |
 
-#### 既知の問題（2026-03-20）
+#### 解決済みの問題（2026-03-22）
 
-**問題1: 2回目のスクリプト実行でIllegal bytecodeエラー**
+**問題: 2回目のスクリプト実行でIllegal bytecodeエラー**
 
 **症状**:
 ```
 Running: /sd/app.rb
+[c_sandbox_new] Created tcb=$3c18b5d8
+RITE header check failed (memcmp=-81)
+Expected: 0x52 0x49 0x54 0x45 (RITE)
+Actual:   0x01 0x00 0x00 0x00
 Exception(vm_id=19): Illegal bytecode (Exception)
 ```
 
-**発生タイミング**:
-- 1回目のスクリプト実行: 正常動作
-- UIモード復帰: 正常動作
-- 2回目のスクリプト実行: Illegal bytecode
+**根本原因**:
+`c_sandbox_new`（sandbox.c）内の`static uint8_t *suspend_vm_code`が問題だった。
 
-**原因仮説**:
-1. SDカードの再初期化が既にマウント済みのVFSに対して実行され、状態が破損
-2. `VFS.volume_index("/sd")` が `mrbc_cleanup()` 後に不正確な値を返す
-3. `try_init_sd_card()` 内の `Shell.setup_sdcard()` を2回呼ぶとVFS破損
+1. 1回目のSandbox作成時に`suspend_vm_code`（"Task.current.suspend"のコンパイル結果）を生成してstatic変数に保存
+2. `mrbc_cleanup()`でメモリアロケータがクリアされ、`suspend_vm_code`が指すメモリが無効化
+3. 2回目のSandbox作成時、`suspend_vm_code != NULL`なので再利用を試みる
+4. `mrbc_create_task(suspend_vm_code, ...)`で**無効なメモリ**をロードしようとする
+5. `load_header`で無効なデータ（`0x01 0x00 0x00 0x00`）を読んでエラー
 
-**現在の対策**:
-- スクリプトモードでは `VFS.volume_index("/sd")` でチェック
-- `nil` の場合のみ `try_init_sd_card()` で再初期化
-- しかし2回目で失敗する
+**修正内容**:
 
-**検討中の解決策**:
-1. スクリプトモードでSDカード再初期化を完全にスキップ
-2. C側VFS状態をRuby側で正しく参照する仕組み
-3. `Shell.setup_sdcard()` の冪等性を確保
+1. **sandbox.c**: `suspend_vm_code`を関数内staticからfile scope static変数`g_suspend_vm_code`に移動
 
-**問題2: constant警告**
+```c
+// Global suspend_vm_code that needs to be reset on mrbc_cleanup()
+static uint8_t *g_suspend_vm_code = NULL;
+```
+
+2. **sandbox.c**: `mrbc_sandbox_cleanup()`関数を追加
+
+```c
+void mrbc_sandbox_cleanup(void)
+{
+  g_suspend_vm_code = NULL;
+}
+```
+
+3. **picoruby_supervisor.c**: `cleanup_vm()`で`mrbc_sandbox_cleanup()`を呼び出し
+
+```c
+static void cleanup_vm(void)
+{
+    mrbc_cleanup();
+    // ... require flags reset ...
+    mrbc_sandbox_cleanup();  // Reset g_suspend_vm_code
+}
+```
+
+**結果**: 2回目のSandbox作成時も`g_suspend_vm_code == NULL`なので新規作成され、正常動作するようになった。
+
+#### 既知の問題（2026-03-20）
+
+**問題: constant警告**
 
 **症状**:
 ```
@@ -647,15 +673,11 @@ warning: already initialized constant.
 
 ### 次のステップ
 
-1. **Illegal bytecodeの解決**（最優先）
-   - SDカード再初期化のスキップ方法を検討
-   - C側VFSマウント状態をRuby側で正確に取得
-
-2. **constant警告の解決**
+1. **constant警告の解決**
    - `mrbc_cleanup()` で定数テーブルをクリアする方法を検討
    - または `mrbc_init_global()` が既存定数を許容するように修正
 
-3. **安定性の検証**
+2. **安定性の検証**
    - 複数回のスクリプト切り替えテスト
    - メモリリーク確認
    - エラーハンドリングの強化
