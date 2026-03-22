@@ -8,11 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 if [ -z "$1" ]; then
-    echo "Usage: $0 [freenove|m5stack]"
+    echo "Usage: $0 [freenove|m5stack|m5stack_with_usbserial]"
     echo ""
     echo "Boards:"
-    echo "  freenove - Freenove ESP32-S3 (Octal PSRAM, SD card disabled)"
-    echo "  m5stack  - M5Stack CoreS3 SE (Quad PSRAM, SD card via SPI)"
+    echo "  freenove              - Freenove ESP32-S3 (Octal PSRAM, SD card disabled)"
+    echo "  m5stack               - M5Stack CoreS3 SE (Quad PSRAM, USB-MIDI host)"
+    echo "  m5stack_with_usbserial - M5Stack CoreS3 SE (Quad PSRAM, USB serial debug)"
     exit 1
 fi
 
@@ -24,12 +25,16 @@ case "$BOARD" in
         DEFAULTS_FILE="sdkconfig.defaults.freenove"
         ;;
     m5stack)
-        echo "Switching to M5Stack CoreS3 SE..."
+        echo "Switching to M5Stack CoreS3 SE (USB-MIDI host)..."
         DEFAULTS_FILE="sdkconfig.defaults.m5stack"
+        ;;
+    m5stack_with_usbserial)
+        echo "Switching to M5Stack CoreS3 SE (USB serial debug)..."
+        DEFAULTS_FILE="sdkconfig.defaults.m5stack_with_usbserial"
         ;;
     *)
         echo "Error: Unknown board '$BOARD'"
-        echo "Valid options: freenove, m5stack"
+        echo "Valid options: freenove, m5stack, m5stack_with_usbserial"
         exit 1
         ;;
 esac

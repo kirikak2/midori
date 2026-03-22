@@ -19,7 +19,7 @@ static sdmmc_card_t *s_card = NULL;
 static bool s_mounted = false;
 
 // Get board-specific pin configuration
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3)
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3) || defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL)
     #define SD_CLK_PIN  CONFIG_USB_MIDI_SDCARD_M5_CLK
     #define SD_MOSI_PIN CONFIG_USB_MIDI_SDCARD_M5_MOSI
     #define SD_MISO_PIN CONFIG_USB_MIDI_SDCARD_M5_MISO

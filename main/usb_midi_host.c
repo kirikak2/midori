@@ -6,16 +6,26 @@
 #include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "esp_err.h"
-#include "usb/usb_host.h"
+#include "sdkconfig.h"
 #include "platform.h"
 #include "picoruby-esp32.h"
 #include "picoruby_supervisor.h"
 
+#ifndef CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
+/* USB-MIDI Host mode - include USB host library */
+#include "usb/usb_host.h"
+
 /* PicoRuby USB-MIDI integration */
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include/usb_midi.h"
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/include/midi.h"
+#endif /* !CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL */
 
 static const char *TAG = "USB_HOST_SAMPLE";
+
+#ifndef CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
+/* ============================================================================
+ * USB-MIDI Host Mode Implementation
+ * ============================================================================ */
 
 #define CLIENT_NUM_EVENT_MSG        5
 
@@ -727,8 +737,36 @@ static void class_driver_task(void *arg)
     vTaskSuspend(NULL);
 }
 
+#endif /* !CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL */
+
 // PicoRuby is now managed by the supervisor task
 // See picoruby_supervisor.c for implementation
+
+#ifdef CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
+/* ============================================================================
+ * USB Serial Debug Mode Implementation (No USB-MIDI)
+ * ============================================================================ */
+
+void app_main(void)
+{
+    // Initialize platform (LCD on M5Stack)
+    ESP_ERROR_CHECK(platform_init());
+
+    ESP_LOGI(TAG, "USB Serial Debug Mode - USB-MIDI disabled");
+    ESP_LOGI(TAG, "Starting PicoRuby supervisor...");
+
+    // Start PicoRuby supervisor on Core 1
+    // The supervisor manages PicoRuby task lifecycle for dynamic script switching
+    supervisor_init();
+
+    // Simple main loop - just update platform (touch events, UI, etc.)
+    while (1) {
+        platform_update();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+#else /* USB-MIDI Host Mode */
 
 void app_main(void)
 {
@@ -781,3 +819,5 @@ void app_main(void)
     ESP_ERROR_CHECK(usb_host_uninstall());
     vSemaphoreDelete(signaling_sem);
 }
+
+#endif /* !CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL */

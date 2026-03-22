@@ -14,7 +14,7 @@ set(INCLUDE_DIRS
 # Platform-specific sources
 if(CONFIG_USB_MIDI_BOARD_FREENOVE)
     list(APPEND SRCS "platform/platform_freenove.c")
-elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3)
+elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL)
     list(APPEND SRCS
         "platform/platform_m5stack.cpp"
         "lcd_console/lcd_console.cpp"
@@ -33,9 +33,18 @@ endif()
 # We cannot use ESP-IDF's fatfs because it conflicts with PicoRuby's FatFs library
 # Instead, PicoRuby notifies C side about available scripts via API
 
+# USB Host is only required for USB-MIDI mode (not USB serial debug mode)
+if(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL)
+    # USB serial debug mode - no USB host library needed
+    set(PRIV_REQUIRES_LIST driver)
+else()
+    # USB-MIDI host mode - requires USB host library
+    set(PRIV_REQUIRES_LIST usb driver)
+endif()
+
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS ${INCLUDE_DIRS}
     REQUIRES picoruby-esp32
-    PRIV_REQUIRES usb driver
+    PRIV_REQUIRES ${PRIV_REQUIRES_LIST}
 )

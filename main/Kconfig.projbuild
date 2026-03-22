@@ -16,11 +16,19 @@ menu "USB MIDI Host Configuration"
             bool "M5Stack CoreS3 SE"
             help
                 M5Stack CoreS3 SE board with shared USB-C.
+                USB is used for USB-MIDI host.
                 Logs output to LCD display.
+
+        config USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
+            bool "M5Stack CoreS3 SE (USB Serial Debug)"
+            help
+                M5Stack CoreS3 SE board with USB serial for debugging.
+                USB is used for serial console (no USB-MIDI).
+                Logs output to both LCD and serial console.
     endchoice
 
     menu "M5Stack Display Settings"
-        depends on USB_MIDI_BOARD_M5STACK_CORES3
+        depends on USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
 
         config USB_MIDI_LCD_FONT_SIZE
             int "LCD Font Size (pixels)"
@@ -47,7 +55,7 @@ menu "USB MIDI Host Configuration"
                 Enable SD card support for loading app.rb script.
 
         menu "M5Stack CoreS3 SD Card Pins"
-            depends on USB_MIDI_BOARD_M5STACK_CORES3 && USB_MIDI_SDCARD_ENABLED
+            depends on (USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL) && USB_MIDI_SDCARD_ENABLED
 
             config USB_MIDI_SDCARD_M5_CLK
                 int "SD CLK GPIO"
