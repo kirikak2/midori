@@ -204,12 +204,7 @@ void ScreenScripts::onNavCenter()
     if (m_selectedIndex >= 0 && m_selectedIndex < m_scriptCount) {
         const char* filename = m_scripts[m_selectedIndex];
 
-        // Don't run if already running
-        if (strcmp(filename, m_currentScript) == 0) {
-            ESP_LOGI(TAG, "Script %s is already running", filename);
-            return;
-        }
-
+        // Allow re-running the same script (will cleanup VM and restart)
         ESP_LOGI(TAG, "Requesting to run script: %s", filename);
 
         // Build full path
