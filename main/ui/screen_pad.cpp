@@ -227,7 +227,14 @@ void ScreenPads::handlePadPress(int padIndex, bool pressed)
     // Redraw the pad
     drawPad(padIndex);
 
-    // Call callback if registered
+    // Push event to queue for Ruby to consume
+    ui_event_t event;
+    event.type = pressed ? UI_EVENT_PAD_PRESS : UI_EVENT_PAD_RELEASE;
+    event.data.pad.index = padIndex;
+    event.data.pad.state = ui_pad_get_state(padIndex);
+    ui_event_push(&event);
+
+    // Call callback if registered (legacy support)
     if (stateChanged) {
         pad_event_cb_t callback = UIManager::getInstance().getPadEventCallback();
         if (callback) {
