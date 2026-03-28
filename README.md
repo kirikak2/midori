@@ -37,9 +37,9 @@
 Run the switch script for your target board:
 
 ```bash
-./switch_board m5stack    # M5Stack CoreS3
-./switch_board m5stack_with_usbserial # M5Stack CoreS3 using USB-Serial mode
-./switch_board freenove   # Freenove ESP32-S3
+./switch_board.sh m5stack    # M5Stack CoreS3
+./switch_board.sh m5stack_with_usbserial # M5Stack CoreS3 using USB-Serial mode (for develop)
+./switch_board.sh freenove   # Freenove ESP32-S3 (for develop)
 ```
 
 ### Instructions
@@ -51,8 +51,11 @@ source ~/esp-idf/export.sh
 # Build (fullclean recommended to avoid stale cache)
 idf.py fullclean build
 
-# Flash to board and start serial monitor
-idf.py flash monitor
+# Flash to board
+idf.py flash
+
+# If you use develop board, you can start serial monitor.
+idf.py monitor
 ```
 
 > **Development note**: Stale build artifacts can cause inconsistencies. Use `idf.py fullclean build` to be safe.

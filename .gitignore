@@ -1,3 +1,5 @@
 .vscode/
 *.code-workspace
 build/
+sdkconfig
+sdkconfig.defaults
