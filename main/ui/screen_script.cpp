@@ -158,8 +158,9 @@ int ScreenScripts::hitTestItem(int y)
     return -1;
 }
 
-void ScreenScripts::onTouch(int x, int y, bool pressed)
+void ScreenScripts::onTouch(int touchId, int x, int y, bool pressed)
 {
+    (void)touchId;  // Single touch for script selection
     // Check if refresh button was touched
     int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
     int buttonX = (UI_SCREEN_WIDTH - 100) / 2;

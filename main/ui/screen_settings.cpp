@@ -162,8 +162,9 @@ void ScreenSettings::handleBacklightTouch(int x)
     }
 }
 
-void ScreenSettings::onTouch(int x, int y, bool pressed)
+void ScreenSettings::onTouch(int touchId, int x, int y, bool pressed)
 {
+    (void)touchId;  // Single touch for slider
     if (pressed && hitTestBacklight(x, y)) {
         handleBacklightTouch(x);
     }

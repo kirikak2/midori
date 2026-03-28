@@ -203,8 +203,12 @@ void ScreenMidiInfo::drawBleMidiCard()
     M5.Lcd.fillCircle(x + 92, y + 41, 4, UI_COLOR_GRAY);
 }
 
-void ScreenMidiInfo::onTouch(int x, int y, bool pressed)
+void ScreenMidiInfo::onTouch(int touchId, int x, int y, bool pressed)
 {
+    (void)touchId;
+    (void)x;
+    (void)y;
+    (void)pressed;
     // No touch handling for now
     // Future: tap on card to see more details
 }

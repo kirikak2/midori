@@ -23,14 +23,18 @@ static constexpr int PAD_SPACING_Y = 5;
 ScreenPads::ScreenPads()
     : m_isActive(false)
     , m_needsRedraw(false)
-    , m_pressedPad(-1)
 {
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+        m_touchToPad[i] = -1;
+    }
 }
 
 void ScreenPads::enter()
 {
     m_isActive = true;
-    m_pressedPad = -1;
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+        m_touchToPad[i] = -1;
+    }
     ui_clear_content_area();
     draw();
 }
@@ -39,10 +43,12 @@ void ScreenPads::leave()
 {
     m_isActive = false;
 
-    // Release any pressed pad
-    if (m_pressedPad >= 0) {
-        handlePadPress(m_pressedPad, false);
-        m_pressedPad = -1;
+    // Release all pressed pads
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+        if (m_touchToPad[i] >= 0) {
+            handlePadPress(m_touchToPad[i], false);
+            m_touchToPad[i] = -1;
+        }
     }
 }
 
@@ -166,24 +172,54 @@ int ScreenPads::hitTestPad(int x, int y)
     return -1;
 }
 
-void ScreenPads::onTouch(int x, int y, bool pressed)
+void ScreenPads::onTouch(int touchId, int x, int y, bool pressed)
 {
+    if (touchId < 0 || touchId >= MAX_TOUCH_POINTS) return;
+
     int padIndex = hitTestPad(x, y);
 
     if (pressed) {
-        if (padIndex >= 0 && padIndex != m_pressedPad) {
-            // Release previous pad if any
-            if (m_pressedPad >= 0) {
-                handlePadPress(m_pressedPad, false);
+        if (padIndex >= 0) {
+            // Check if this touch is already pressing a different pad
+            if (m_touchToPad[touchId] >= 0 && m_touchToPad[touchId] != padIndex) {
+                // Release the old pad first
+                handlePadPress(m_touchToPad[touchId], false);
             }
-            m_pressedPad = padIndex;
-            handlePadPress(padIndex, true);
+
+            // Only press if not already pressed by another touch
+            bool alreadyPressed = false;
+            for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+                if (i != touchId && m_touchToPad[i] == padIndex) {
+                    alreadyPressed = true;
+                    break;
+                }
+            }
+
+            if (!alreadyPressed && m_touchToPad[touchId] != padIndex) {
+                m_touchToPad[touchId] = padIndex;
+                handlePadPress(padIndex, true);
+            } else {
+                m_touchToPad[touchId] = padIndex;
+            }
         }
     } else {
         // Release
-        if (m_pressedPad >= 0) {
-            handlePadPress(m_pressedPad, false);
-            m_pressedPad = -1;
+        int releasedPad = m_touchToPad[touchId];
+        m_touchToPad[touchId] = -1;
+
+        if (releasedPad >= 0) {
+            // Only release if no other touch is pressing the same pad
+            bool stillPressed = false;
+            for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+                if (m_touchToPad[i] == releasedPad) {
+                    stillPressed = true;
+                    break;
+                }
+            }
+
+            if (!stillPressed) {
+                handlePadPress(releasedPad, false);
+            }
         }
     }
 }

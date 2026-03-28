@@ -109,8 +109,10 @@ int ScreenLog::getDisplayLine(int displayIndex)
     return bufferIndex;
 }
 
-void ScreenLog::onTouch(int x, int y, bool pressed)
+void ScreenLog::onTouch(int touchId, int x, int y, bool pressed)
 {
+    (void)touchId;  // Single touch for scrolling
+    (void)x;
     if (!pressed) return;
 
     // Touch in upper half = scroll up (older)

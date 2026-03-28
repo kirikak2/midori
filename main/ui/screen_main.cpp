@@ -332,8 +332,9 @@ int ScreenMain::hitTestButton(int x, int y)
     return -1;
 }
 
-void ScreenMain::onTouch(int x, int y, bool pressed)
+void ScreenMain::onTouch(int touchId, int x, int y, bool pressed)
 {
+    (void)touchId;  // Only handle first touch for buttons
     if (pressed) {
         int buttonId = hitTestButton(x, y);
         if (buttonId >= 0) {

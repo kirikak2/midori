@@ -14,7 +14,7 @@ public:
     void leave() override;
     void update() override;
     void draw() override;
-    void onTouch(int x, int y, bool pressed) override;
+    void onTouch(int touchId, int x, int y, bool pressed) override;
     const char* getTitle() override;
 
 private:

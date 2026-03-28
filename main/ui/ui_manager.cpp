@@ -29,12 +29,14 @@ UIManager::UIManager()
     , m_beat(0)
     , m_beatProgress(0)
     , m_padEventCallback(nullptr)
-    , m_wasTouched(false)
-    , m_lastTouchX(0)
-    , m_lastTouchY(0)
 {
     for (int i = 0; i < UI_SCREEN_COUNT; i++) {
         m_screens[i] = nullptr;
+    }
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+        m_touchStates[i].isPressed = false;
+        m_touchStates[i].x = 0;
+        m_touchStates[i].y = 0;
     }
 }
 
@@ -108,53 +110,76 @@ void UIManager::update()
 
 void UIManager::handleTouch()
 {
-    auto touch = M5.Touch.getDetail();
-    bool isTouched = touch.isPressed();
+    // Get number of active touch points
+    uint8_t touchCount = M5.Touch.getCount();
 
-    if (isTouched && !m_wasTouched) {
-        // Touch start
+    // Track which touch points are currently active (by touch ID)
+    bool currentlyPressed[MAX_TOUCH_POINTS] = {false};
+
+    // Process each active touch point
+    for (uint8_t i = 0; i < touchCount && i < MAX_TOUCH_POINTS; i++) {
+        auto touch = M5.Touch.getDetail(i);
+        if (!touch.isPressed()) continue;
+
+        // Use the actual touch ID from the hardware
+        uint8_t touchId = touch.id;
+        if (touchId >= MAX_TOUCH_POINTS) continue;
+
+        currentlyPressed[touchId] = true;
         int x = touch.x;
         int y = touch.y;
 
-        // Check which area was touched
-        if (y < UI_STATUS_BAR_HEIGHT) {
-            // Status bar - ignore
-        } else if (y >= UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT) {
-            // Navigation bar
-            if (x < UI_NAV_ZONE_LEFT_END) {
-                // Left zone - previous screen
-                prevScreen();
-            } else if (x >= UI_NAV_ZONE_RIGHT_START) {
-                // Right zone - next screen
-                nextScreen();
+        if (!m_touchStates[touchId].isPressed) {
+            // New touch start
+            m_touchStates[touchId].isPressed = true;
+            m_touchStates[touchId].x = x;
+            m_touchStates[touchId].y = y;
+
+            // Check which area was touched
+            if (y < UI_STATUS_BAR_HEIGHT) {
+                // Status bar - ignore
+            } else if (y >= UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT) {
+                // Navigation bar - only handle on first touch point (touchId 0)
+                if (touchId == 0) {
+                    if (x < UI_NAV_ZONE_LEFT_END) {
+                        prevScreen();
+                    } else if (x >= UI_NAV_ZONE_RIGHT_START) {
+                        nextScreen();
+                    } else {
+                        if (m_screens[m_currentIndex]) {
+                            m_screens[m_currentIndex]->onNavCenter();
+                        }
+                    }
+                }
             } else {
-                // Center zone - screen-specific action
+                // Content area - pass to current screen with touch ID
                 if (m_screens[m_currentIndex]) {
-                    m_screens[m_currentIndex]->onNavCenter();
+                    m_screens[m_currentIndex]->onTouch(touchId, x, y, true);
                 }
             }
         } else {
-            // Content area - pass to current screen
-            if (m_screens[m_currentIndex]) {
-                m_screens[m_currentIndex]->onTouch(x, y, true);
-            }
-        }
-
-        m_lastTouchX = x;
-        m_lastTouchY = y;
-    } else if (!isTouched && m_wasTouched) {
-        // Touch release
-        int y = m_lastTouchY;
-
-        // Only send release to content area touches
-        if (y >= UI_STATUS_BAR_HEIGHT && y < UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT) {
-            if (m_screens[m_currentIndex]) {
-                m_screens[m_currentIndex]->onTouch(m_lastTouchX, m_lastTouchY, false);
-            }
+            // Touch point moved - update position
+            m_touchStates[touchId].x = x;
+            m_touchStates[touchId].y = y;
         }
     }
 
-    m_wasTouched = isTouched;
+    // Check for released touch points
+    for (int touchId = 0; touchId < MAX_TOUCH_POINTS; touchId++) {
+        if (m_touchStates[touchId].isPressed && !currentlyPressed[touchId]) {
+            // Touch released
+            int y = m_touchStates[touchId].y;
+
+            // Only send release to content area touches
+            if (y >= UI_STATUS_BAR_HEIGHT && y < UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT) {
+                if (m_screens[m_currentIndex]) {
+                    m_screens[m_currentIndex]->onTouch(touchId, m_touchStates[touchId].x, m_touchStates[touchId].y, false);
+                }
+            }
+
+            m_touchStates[touchId].isPressed = false;
+        }
+    }
 }
 
 void UIManager::drawStatusBar()

@@ -6,6 +6,9 @@
 
 #ifdef __cplusplus
 
+// Maximum number of simultaneous touch points
+static constexpr int MAX_TOUCH_POINTS = 5;
+
 // Abstract base class for all screens
 class Screen {
 public:
@@ -24,9 +27,10 @@ public:
     virtual void draw() = 0;
 
     // Called when touch event occurs in content area
+    // touchId: unique identifier for this touch point (0-4)
     // x, y are relative to screen (0,0 is top-left)
     // pressed: true for touch start, false for release
-    virtual void onTouch(int x, int y, bool pressed) = 0;
+    virtual void onTouch(int touchId, int x, int y, bool pressed) = 0;
 
     // Called for center nav button press (screen-specific action)
     virtual void onNavCenter() {}
@@ -111,10 +115,13 @@ private:
     // Pad callback
     pad_event_cb_t m_padEventCallback;
 
-    // Touch state
-    bool m_wasTouched;
-    int m_lastTouchX;
-    int m_lastTouchY;
+    // Multi-touch state tracking
+    struct TouchState {
+        bool isPressed;
+        int x;
+        int y;
+    };
+    TouchState m_touchStates[MAX_TOUCH_POINTS];
 };
 
 extern "C" {

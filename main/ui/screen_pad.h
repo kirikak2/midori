@@ -14,13 +14,16 @@ public:
     void leave() override;
     void update() override;
     void draw() override;
-    void onTouch(int x, int y, bool pressed) override;
+    void onTouch(int touchId, int x, int y, bool pressed) override;
     const char* getTitle() override;
 
 private:
     bool m_isActive;
     bool m_needsRedraw;
-    int m_pressedPad;  // Currently pressed pad (-1 = none)
+
+    // Multi-touch support: track which pad each touch point is pressing
+    // m_touchToPad[touchId] = padIndex (-1 = no pad)
+    int m_touchToPad[MAX_TOUCH_POINTS];
 
     void drawPad(int index);
     void drawAllPads();
