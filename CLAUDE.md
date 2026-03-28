@@ -75,6 +75,55 @@ typedef struct {
 - Note On CIN: 0x09
 - Note Off CIN: 0x08
 
+## ノートスケジューラ（マルチタッチ対応）
+
+### 概要
+
+マルチタッチパッドで複数の音を同時に発音するためのノートスケジューラ機能。`trigger`メソッドは即座にnote_onを送信し、指定時間後にnote_offを自動送信する。
+
+### 問題と解決
+
+**従来の問題**:
+```ruby
+# このコードはブロッキングするため、マルチタッチ時に音ズレが発生
+UI.pad(0) do
+  device.note_on(36, 127)
+  MIDI.sleep_ms(100)  # ← ここで100ms待機、他のパッドは待たされる
+  device.note_off(36)
+end
+```
+
+**解決策**:
+```ruby
+# triggerは即座にreturnし、note_offはC側タイマーが自動送信
+UI.pad(0) do
+  device.trigger(36, 127, duration: 100)  # ← 即座にreturn
+end
+```
+
+### Ruby API
+
+```ruby
+# MIDI::Device#trigger
+# @param note [Integer] ノート番号 (0-127)
+# @param velocity [Integer] ベロシティ (0-127, default: 127)
+# @param duration [Integer] ノートオフまでのms (default: 100)
+# @param channel [Integer] MIDIチャンネル (0-15, default: 0)
+device.trigger(60, 100, duration: 200, channel: 0)
+```
+
+### C側実装
+
+**主要ファイル**:
+- `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/ports/esp32/midi.c` - スケジューラ実装
+- `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/include/midi.h` - API定義
+
+**内部動作**:
+1. `MIDI_Note_trigger()` が呼ばれると即座にnote_on送信
+2. スケジューラに (channel, note, off_time) を登録
+3. 1msタイマーが定期的にチェック
+4. off_timeを過ぎたノートはnote_offを送信
+
 ## PicoRuby関連
 
 ### 重要：main_task.rbは自動生成ファイル

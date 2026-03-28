@@ -219,13 +219,43 @@ Rubyスクリプトから自由に機能を割り当てられる6つのカスタ
 詳細は「UI API（PicoRuby側）」セクションを参照。
 
 ```ruby
-# 基本的な使用例
+# 基本的な使用例（triggerメソッド推奨）
+# triggerは即座にreturnし、note_offはバックグラウンドで自動送信
+UI.pad(1, label: "Kick", color: :red, type: :trigger) do
+  device.trigger(36, 127, duration: 100)
+end
+
+# 従来の方法（ブロッキング - マルチタッチ時に音ズレが発生）
 UI.pad(1, label: "Kick", color: :red, type: :trigger) do
   device.note_on(36, 127)
   MIDI.sleep_ms(100)
   device.note_off(36)
 end
 ```
+
+#### マルチタッチ対応
+
+複数パッドを同時に押した場合、`trigger`メソッドを使用すると全ての音が同時に発音されます。
+
+```ruby
+# マルチタッチ対応（全て同時発音）
+UI.pad(0, label: "Kick", color: :red, type: :trigger) do
+  device.trigger(36, 127, duration: 100)
+end
+
+UI.pad(1, label: "Snare", color: :blue, type: :trigger) do
+  device.trigger(38, 127, duration: 100)
+end
+
+UI.pad(2, label: "HiHat", color: :yellow, type: :trigger) do
+  device.trigger(42, 100, duration: 50)
+end
+```
+
+| メソッド | 動作 | マルチタッチ |
+|----------|------|--------------|
+| `trigger(note, vel, duration:)` | 即座にreturn、note_offは自動 | 同時発音 |
+| `note_on` + `sleep_ms` + `note_off` | ブロッキング | 音ズレ発生 |
 
 #### カラーパレット
 
