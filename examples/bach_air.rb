@@ -46,32 +46,6 @@ device.program_change(42, channel: 2) # Viola
 device.program_change(44, channel: 3) # Continuo 1 (Acoustic Bass)
 device.program_change(44, channel: 4) # Continuo 2 (Acoustic Bass)
 
-@violin1 = true
-@violin2 = true
-@viola = true
-@continuo1 = true
-@continuo2 = true
-
-UI.pad(1, label: "Violin I", color: :red, type: :toggle) do |on|
-  @violin1 = on
-end
-
-UI.pad(2, label: "Violin II", color: :yellow, type: :toggle) do |on|
-  @violin2 = on
-end
-
-UI.pad(3, label: "Viola", color: :cyan, type: :toggle) do |on|
-  @viola = on
-end
-
-UI.pad(4, label: "Continuo 1", color: :blue, type: :toggle) do |on|
-  @continuo1 = on
-end
-
-UI.pad(5, label: "Continuo 2", color: :orange, type: :toggle) do |on|
-  @continuo2 = on
-end
-
 # Create MML sequences
 UI.log("Creating MML sequences...")
 violin1_seq = MIDI::MML::Sequence.new(violin1_mml, channel: 0)
@@ -80,20 +54,38 @@ viola_seq = MIDI::MML::Sequence.new(viola_mml, channel: 2)
 continuo1_seq = MIDI::MML::Sequence.new(continuo1_mml, channel: 3)
 continuo2_seq = MIDI::MML::Sequence.new(continuo2_mml, channel: 4)
 
-# Create MML players
-UI.log("Creating MML players...")
-violin1_player = MIDI::MML::Player.new(device, violin1_seq, loop: true)
-violin2_player = MIDI::MML::Player.new(device, violin2_seq, loop: true)
-viola_player = MIDI::MML::Player.new(device, viola_seq, loop: true)
-continuo1_player = MIDI::MML::Player.new(device, continuo1_seq, loop: true)
-continuo2_player = MIDI::MML::Player.new(device, continuo2_seq, loop: true)
+# Create combined player for synchronized playback
+UI.log("Creating combined player...")
+player = MIDI::MML::CombinedPlayer.new(device, loop: true)
+player.add_sequence(violin1_seq, enabled: true)   # Index 0
+player.add_sequence(violin2_seq, enabled: true)   # Index 1
+player.add_sequence(viola_seq, enabled: true)     # Index 2
+player.add_sequence(continuo1_seq, enabled: true) # Index 3
+player.add_sequence(continuo2_seq, enabled: true) # Index 4
+
+# UI pads to toggle parts
+UI.pad(1, label: "Violin I", color: :red, type: :toggle) do |on|
+  player.set_sequence_enabled(0, on)
+end
+
+UI.pad(2, label: "Violin II", color: :yellow, type: :toggle) do |on|
+  player.set_sequence_enabled(1, on)
+end
+
+UI.pad(3, label: "Viola", color: :cyan, type: :toggle) do |on|
+  player.set_sequence_enabled(2, on)
+end
+
+UI.pad(4, label: "Continuo 1", color: :blue, type: :toggle) do |on|
+  player.set_sequence_enabled(3, on)
+end
+
+UI.pad(5, label: "Continuo 2", color: :orange, type: :toggle) do |on|
+  player.set_sequence_enabled(4, on)
+end
 
 # Main playback loop
 on_loop = Proc.new { UI.process }
 MIDI.bpm_loop(25, output: device, subdivisions: 24, on_loop: on_loop) do |clock|
-  violin1_player.tick(clock) if @violin1
-  violin2_player.tick(clock) if @violin2
-  viola_player.tick(clock) if @viola
-  continuo1_player.tick(clock) if @continuo1
-  continuo2_player.tick(clock) if @continuo2
+  player.tick(clock)
 end
