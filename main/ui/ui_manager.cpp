@@ -8,6 +8,10 @@
 #include <M5Unified.h>
 #include "esp_log.h"
 
+extern "C" {
+#include "midi.h"
+}
+
 static const char* TAG = "UI_MANAGER";
 
 // UIManager implementation
@@ -23,6 +27,7 @@ UIManager::UIManager()
     , m_needsRedraw(true)
     , m_internalBpm(UI_BPM_DEFAULT)
     , m_externalBpm(0.0f)
+    , m_selectedExternalBpmSource(MIDI_INTERFACE_USB)
     , m_syncMode(false)
     , m_bpmChangeCallback(nullptr)
     , m_bar(0)
@@ -37,6 +42,9 @@ UIManager::UIManager()
         m_touchStates[i].isPressed = false;
         m_touchStates[i].x = 0;
         m_touchStates[i].y = 0;
+    }
+    for (int i = 0; i < 3; i++) {
+        m_externalBpmBySource[i] = 0.0f;
     }
 }
 
@@ -88,6 +96,42 @@ void UIManager::initScreens()
 void UIManager::update()
 {
     if (!m_initialized) return;
+
+    // Update external BPM from C side (every 100ms)
+    static uint32_t lastBpmUpdate = 0;
+    uint32_t now = esp_timer_get_time() / 1000;  // Convert to ms
+    if (now - lastBpmUpdate > 100) {
+        float usbBpm = MIDI_Input_get_external_bpm_usb();
+        float samBpm = MIDI_Input_get_external_bpm_sam();
+
+        // Track if any source just started receiving BPM
+        bool usbStarted = (m_externalBpmBySource[MIDI_INTERFACE_USB] <= 0.0f && usbBpm > 0.0f);
+        bool samStarted = (m_externalBpmBySource[MIDI_INTERFACE_DIN] <= 0.0f && samBpm > 0.0f);
+
+        setExternalBpmSource(MIDI_INTERFACE_USB, usbBpm);
+        setExternalBpmSource(MIDI_INTERFACE_DIN, samBpm);
+        // BLE not implemented yet
+        setExternalBpmSource(MIDI_INTERFACE_BLE, 0.0f);
+
+        // Auto-select source if currently selected source has no BPM
+        float currentSourceBpm = m_externalBpmBySource[m_selectedExternalBpmSource];
+        if (currentSourceBpm <= 0.0f) {
+            // Try to find a source with BPM (prefer DIN > USB > BLE)
+            if (samBpm > 0.0f) {
+                setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
+            } else if (usbBpm > 0.0f) {
+                setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+            }
+        }
+        // Also auto-select when a new source starts receiving (prefer DIN)
+        else if (samStarted) {
+            setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
+        } else if (usbStarted && m_selectedExternalBpmSource != MIDI_INTERFACE_DIN) {
+            setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+        }
+
+        lastBpmUpdate = now;
+    }
 
     // Handle touch input
     handleTouch();
@@ -305,10 +349,61 @@ float UIManager::getExternalBpm() const
     return m_externalBpm;
 }
 
+void UIManager::setExternalBpmSource(midi_interface_t source, float bpm)
+{
+    if (source < 0 || source > 2) return;
+    m_externalBpmBySource[source] = bpm;
+
+    // Update main external BPM if this is the selected source
+    if (source == m_selectedExternalBpmSource) {
+        m_externalBpm = bpm;
+        if (m_syncMode && m_currentIndex == UI_SCREEN_MAIN) {
+            m_needsRedraw = true;
+        }
+    }
+}
+
+float UIManager::getExternalBpmBySource(midi_interface_t source) const
+{
+    if (source < 0 || source > 2) return 0.0f;
+    return m_externalBpmBySource[source];
+}
+
+void UIManager::setExternalBpmSourceSelection(midi_interface_t source)
+{
+    if (source < 0 || source > 2) return;
+    m_selectedExternalBpmSource = source;
+    m_externalBpm = m_externalBpmBySource[source];
+    if (m_syncMode && m_currentIndex == UI_SCREEN_MAIN) {
+        m_needsRedraw = true;
+    }
+}
+
+midi_interface_t UIManager::getExternalBpmSourceSelection() const
+{
+    return m_selectedExternalBpmSource;
+}
+
 void UIManager::setSyncMode(bool enabled)
 {
     if (m_syncMode != enabled) {
         m_syncMode = enabled;
+
+        // When enabling sync mode, auto-select a source with BPM if current source has none
+        if (enabled) {
+            float currentBpm = m_externalBpmBySource[m_selectedExternalBpmSource];
+            if (currentBpm <= 0.0f) {
+                // Try to find a source with BPM
+                if (m_externalBpmBySource[MIDI_INTERFACE_DIN] > 0.0f) {
+                    setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
+                } else if (m_externalBpmBySource[MIDI_INTERFACE_USB] > 0.0f) {
+                    setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+                } else if (m_externalBpmBySource[MIDI_INTERFACE_BLE] > 0.0f) {
+                    setExternalBpmSourceSelection(MIDI_INTERFACE_BLE);
+                }
+            }
+        }
+
         if (m_currentIndex == UI_SCREEN_MAIN) {
             m_needsRedraw = true;
         }
@@ -398,6 +493,26 @@ void ui_set_external_bpm(float bpm)
 float ui_get_external_bpm(void)
 {
     return UIManager::getInstance().getExternalBpm();
+}
+
+void ui_set_external_bpm_source(midi_interface_t source, float bpm)
+{
+    UIManager::getInstance().setExternalBpmSource(source, bpm);
+}
+
+float ui_get_external_bpm_by_source(midi_interface_t source)
+{
+    return UIManager::getInstance().getExternalBpmBySource(source);
+}
+
+void ui_set_external_bpm_source_selection(midi_interface_t source)
+{
+    UIManager::getInstance().setExternalBpmSourceSelection(source);
+}
+
+midi_interface_t ui_get_external_bpm_source_selection(void)
+{
+    return UIManager::getInstance().getExternalBpmSourceSelection();
 }
 
 void ui_set_sync_mode(bool enabled)

@@ -65,6 +65,10 @@ public:
     float getBpm() const;
     void setExternalBpm(float bpm);
     float getExternalBpm() const;
+    void setExternalBpmSource(midi_interface_t source, float bpm);  // Source-specific BPM update
+    float getExternalBpmBySource(midi_interface_t source) const;    // Get BPM by source
+    void setExternalBpmSourceSelection(midi_interface_t source);    // Select which source to display
+    midi_interface_t getExternalBpmSourceSelection() const;         // Get currently selected source
     void setSyncMode(bool enabled);
     bool getSyncMode() const;
     void setBpmChangeCallback(bpm_change_cb_t cb);
@@ -104,6 +108,8 @@ private:
     // BPM state
     float m_internalBpm;
     float m_externalBpm;
+    float m_externalBpmBySource[3];  // USB, DIN, BLE
+    midi_interface_t m_selectedExternalBpmSource;
     bool m_syncMode;
     bpm_change_cb_t m_bpmChangeCallback;
 
@@ -136,6 +142,10 @@ void ui_set_bpm(float bpm);
 float ui_get_bpm(void);
 void ui_set_external_bpm(float bpm);
 float ui_get_external_bpm(void);
+void ui_set_external_bpm_source(midi_interface_t source, float bpm);
+float ui_get_external_bpm_by_source(midi_interface_t source);
+void ui_set_external_bpm_source_selection(midi_interface_t source);
+midi_interface_t ui_get_external_bpm_source_selection(void);
 void ui_set_sync_mode(bool enabled);
 bool ui_get_sync_mode(void);
 void ui_set_bpm_change_callback(bpm_change_cb_t cb);

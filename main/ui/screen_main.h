@@ -27,6 +27,9 @@ private:
         BTN_PLUS_1,
         BTN_PLUS_10,
         BTN_SYNC,
+        BTN_SOURCE_USB,
+        BTN_SOURCE_DIN,
+        BTN_SOURCE_BLE,
         BTN_COUNT
     };
 

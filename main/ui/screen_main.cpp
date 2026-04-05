@@ -21,6 +21,9 @@ static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 10;
 static constexpr int BPM_BUTTON_W = 45;
 static constexpr int BPM_BUTTON_H = 30;
 static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 65;
+static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 48;
+static constexpr int SOURCE_BTN_W = 40;
+static constexpr int SOURCE_BTN_H = 20;
 static constexpr int SYNC_Y = UI_CONTENT_Y + 85;
 static constexpr int BAR_BEAT_Y = UI_CONTENT_Y + 120;
 static constexpr int PROGRESS_Y = UI_CONTENT_Y + 145;
@@ -87,6 +90,29 @@ void ScreenMain::initButtons()
     m_buttons[BTN_SYNC].h = 25;
     m_buttons[BTN_SYNC].label = "Sync";
     m_buttons[BTN_SYNC].pressed = false;
+
+    // Source selection buttons
+    int sourceX = 50;
+    m_buttons[BTN_SOURCE_USB].x = sourceX;
+    m_buttons[BTN_SOURCE_USB].y = SOURCE_BTN_Y;
+    m_buttons[BTN_SOURCE_USB].w = SOURCE_BTN_W;
+    m_buttons[BTN_SOURCE_USB].h = SOURCE_BTN_H;
+    m_buttons[BTN_SOURCE_USB].label = "USB";
+    m_buttons[BTN_SOURCE_USB].pressed = false;
+
+    m_buttons[BTN_SOURCE_DIN].x = sourceX + SOURCE_BTN_W + 5;
+    m_buttons[BTN_SOURCE_DIN].y = SOURCE_BTN_Y;
+    m_buttons[BTN_SOURCE_DIN].w = SOURCE_BTN_W;
+    m_buttons[BTN_SOURCE_DIN].h = SOURCE_BTN_H;
+    m_buttons[BTN_SOURCE_DIN].label = "DIN";
+    m_buttons[BTN_SOURCE_DIN].pressed = false;
+
+    m_buttons[BTN_SOURCE_BLE].x = sourceX + (SOURCE_BTN_W + 5) * 2;
+    m_buttons[BTN_SOURCE_BLE].y = SOURCE_BTN_Y;
+    m_buttons[BTN_SOURCE_BLE].w = SOURCE_BTN_W;
+    m_buttons[BTN_SOURCE_BLE].h = SOURCE_BTN_H;
+    m_buttons[BTN_SOURCE_BLE].label = "BLE";
+    m_buttons[BTN_SOURCE_BLE].pressed = false;
 }
 
 void ScreenMain::enter()
@@ -191,21 +217,46 @@ void ScreenMain::drawExternalBpm()
 {
     UIManager& ui = UIManager::getInstance();
     float externalBpm = ui.getExternalBpm();
+    midi_interface_t selectedSource = ui.getExternalBpmSourceSelection();
+
+    // Draw source selection buttons
+    const char* sourceLabels[] = {"USB", "DIN", "BLE"};
+    for (int i = 0; i < 3; i++) {
+        Button& btn = m_buttons[BTN_SOURCE_USB + i];
+        bool isSelected = (selectedSource == (midi_interface_t)i);
+        float sourceBpm = ui.getExternalBpmBySource((midi_interface_t)i);
+
+        uint16_t bgColor = isSelected ? UI_COLOR_BLUE : UI_COLOR_DARKGRAY;
+        uint16_t textColor = (sourceBpm > 0) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
+
+        if (!isSelected && sourceBpm <= 0) {
+            bgColor = UI_COLOR_BLACK;
+        }
+
+        M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 2, bgColor);
+        M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 2, UI_COLOR_WHITE);
+
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.setTextColor(textColor, bgColor);
+        int textW = strlen(sourceLabels[i]) * 6;
+        M5.Lcd.setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
+        M5.Lcd.print(sourceLabels[i]);
+    }
 
     // Clear external BPM area
-    M5.Lcd.fillRect(60, EXTERNAL_BPM_Y, 200, 16, UI_COLOR_BLACK);
+    M5.Lcd.fillRect(200, EXTERNAL_BPM_Y, 120, 16, UI_COLOR_BLACK);
 
     M5.Lcd.setTextSize(1);
     M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
 
     char extStr[32];
     if (externalBpm > 0) {
-        snprintf(extStr, sizeof(extStr), "External: %.1f BPM", externalBpm);
+        snprintf(extStr, sizeof(extStr), "Ext: %.1f BPM", externalBpm);
     } else {
-        snprintf(extStr, sizeof(extStr), "External: ---.-- BPM");
+        snprintf(extStr, sizeof(extStr), "Ext: --- BPM");
     }
 
-    M5.Lcd.setCursor(90, EXTERNAL_BPM_Y);
+    M5.Lcd.setCursor(200, EXTERNAL_BPM_Y);
     M5.Lcd.print(extStr);
 
     m_lastDrawnExternalBpm = externalBpm;
@@ -380,6 +431,24 @@ void ScreenMain::handleButtonPress(int buttonId)
                 drawSyncButton();
                 drawButtons();  // Update button enabled states
             }
+            break;
+
+        case BTN_SOURCE_USB:
+            ui.setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+            drawExternalBpm();
+            drawSyncButton();
+            break;
+
+        case BTN_SOURCE_DIN:
+            ui.setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
+            drawExternalBpm();
+            drawSyncButton();
+            break;
+
+        case BTN_SOURCE_BLE:
+            ui.setExternalBpmSourceSelection(MIDI_INTERFACE_BLE);
+            drawExternalBpm();
+            drawSyncButton();
             break;
     }
 }
