@@ -74,6 +74,7 @@ ScreenMain::ScreenMain()
     , m_lastDrawnBeat(0)
     , m_lastDrawnProgress(0)
     , m_lastDrawnSyncMode(false)
+    , m_lastDrawnExternalBpmSource(0xFF)  // Invalid value to force initial draw
 {
     memset(m_tapTimes, 0, sizeof(m_tapTimes));
     initButtons();
@@ -192,16 +193,21 @@ void ScreenMain::update()
         draw();
         m_needsRedraw = false;
     } else {
-        if (needsBpmUpdate) {
-            drawBpmDisplay();
-            drawExternalBpm();
-            drawSyncButton();
-        }
-        if (needsBarBeatUpdate) {
-            drawBarBeat();
-        }
-        if (needsProgressUpdate) {
-            drawBeatProgress();
+        // Batch partial updates in a single transaction to prevent flickering
+        if (needsBpmUpdate || needsBarBeatUpdate || needsProgressUpdate) {
+            M5.Lcd.startWrite();
+            if (needsBpmUpdate) {
+                drawBpmDisplay();
+                drawExternalBpm();
+                drawSyncButton();
+            }
+            if (needsBarBeatUpdate) {
+                drawBarBeat();
+            }
+            if (needsProgressUpdate) {
+                drawBeatProgress();
+            }
+            M5.Lcd.endWrite();
         }
     }
 }
@@ -248,28 +254,34 @@ void ScreenMain::drawExternalBpm()
     float externalBpm = ui.getExternalBpm();
     midi_interface_t selectedSource = ui.getExternalBpmSourceSelection();
 
-    // Draw source selection buttons
-    const char* sourceLabels[] = {"USB", "DIN", "BLE"};
-    for (int i = 0; i < 3; i++) {
-        Button& btn = m_buttons[BTN_SOURCE_USB + i];
-        bool isSelected = (selectedSource == (midi_interface_t)i);
-        float sourceBpm = ui.getExternalBpmBySource((midi_interface_t)i);
+    // Only redraw source buttons if selection changed
+    bool sourceChanged = (selectedSource != m_lastDrawnExternalBpmSource);
 
-        uint16_t bgColor = isSelected ? UI_COLOR_BLUE : UI_COLOR_DARKGRAY;
-        uint16_t textColor = (sourceBpm > 0) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
+    if (sourceChanged) {
+        // Draw source selection buttons
+        const char* sourceLabels[] = {"USB", "DIN", "BLE"};
+        for (int i = 0; i < 3; i++) {
+            Button& btn = m_buttons[BTN_SOURCE_USB + i];
+            bool isSelected = (selectedSource == (midi_interface_t)i);
+            float sourceBpm = ui.getExternalBpmBySource((midi_interface_t)i);
 
-        if (!isSelected && sourceBpm <= 0) {
-            bgColor = UI_COLOR_BLACK;
+            uint16_t bgColor = isSelected ? UI_COLOR_BLUE : UI_COLOR_DARKGRAY;
+            uint16_t textColor = (sourceBpm > 0) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
+
+            if (!isSelected && sourceBpm <= 0) {
+                bgColor = UI_COLOR_BLACK;
+            }
+
+            M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 2, bgColor);
+            M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 2, UI_COLOR_WHITE);
+
+            M5.Lcd.setTextSize(1);
+            M5.Lcd.setTextColor(textColor, bgColor);
+            int textW = strlen(sourceLabels[i]) * 6;
+            M5.Lcd.setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
+            M5.Lcd.print(sourceLabels[i]);
         }
-
-        M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 2, bgColor);
-        M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 2, UI_COLOR_WHITE);
-
-        M5.Lcd.setTextSize(1);
-        M5.Lcd.setTextColor(textColor, bgColor);
-        int textW = strlen(sourceLabels[i]) * 6;
-        M5.Lcd.setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
-        M5.Lcd.print(sourceLabels[i]);
+        m_lastDrawnExternalBpmSource = selectedSource;
     }
 
     // Draw external BPM (background color overwrites old content)

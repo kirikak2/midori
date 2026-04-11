@@ -56,6 +56,7 @@ private:
     uint8_t m_lastDrawnBeat;
     uint8_t m_lastDrawnProgress;
     bool m_lastDrawnSyncMode;
+    uint8_t m_lastDrawnExternalBpmSource;  // Track which source was last selected
 
     void initButtons();
     void drawBpmDisplay();
