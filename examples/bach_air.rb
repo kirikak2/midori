@@ -4,13 +4,17 @@
 # ============================================================
 
 require "midi"
-require "sam2695"
 require "ui"
 
 UI.log("Loading Bach Suite No.3 - Air...")
 
-# Initialize MIDI device
-sam = SAM2695.new(17, 18)
+# Use pre-initialized SAM2695 device from MIDIDevices module
+sam = MIDIDevices.sam2695
+unless sam
+  puts "SAM2695 not available on this board"
+  exit
+end
+
 device = MIDI::Device.new(sam)
 
 # ===== MML Sequences =====

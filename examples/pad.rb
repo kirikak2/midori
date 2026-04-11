@@ -1,8 +1,14 @@
 require 'midi'
 require 'ui'
-require 'sam2695'
 
-sam = SAM2695.new(17, 18)
+# Use pre-initialized SAM2695 device from MIDIDevices module
+# This works on any board without needing to specify pin numbers
+sam = MIDIDevices.sam2695
+unless sam
+  puts "SAM2695 not available on this board"
+  exit
+end
+
 device = MIDI::Device.new(sam)
 
 device.program_change(1, channel: 9)

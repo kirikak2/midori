@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "screen_pad.h"
 #include <M5Unified.h>
 #include <cstring>
@@ -14,11 +15,24 @@ ScreenPads& getScreenPads()
     return s_screenPads;
 }
 
-// Layout constants
+// Layout constants - dynamically calculated for different screen sizes
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+// Tab5: larger spacing for bigger screen
+static constexpr int PAD_SPACING_X = 20;
+static constexpr int PAD_SPACING_Y = 20;
+// Center the grid horizontally
+static constexpr int GRID_WIDTH = UI_PAD_COLS * UI_PAD_WIDTH + (UI_PAD_COLS - 1) * PAD_SPACING_X;
+static constexpr int PAD_START_X = (UI_SCREEN_WIDTH - GRID_WIDTH) / 2;
+// Center the grid vertically in content area
+static constexpr int GRID_HEIGHT = UI_PAD_ROWS * UI_PAD_HEIGHT + (UI_PAD_ROWS - 1) * PAD_SPACING_Y;
+static constexpr int PAD_START_Y = UI_CONTENT_Y + (UI_CONTENT_HEIGHT - GRID_HEIGHT) / 2;
+#else
+// CoreS3: original layout
 static constexpr int PAD_START_X = 10;
 static constexpr int PAD_START_Y = UI_CONTENT_Y + 8;
 static constexpr int PAD_SPACING_X = 5;
 static constexpr int PAD_SPACING_Y = 5;
+#endif
 
 ScreenPads::ScreenPads()
     : m_isActive(false)

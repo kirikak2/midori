@@ -1,4 +1,5 @@
 #include "lcd_console.h"
+#include "ui_common.h"
 #include "sdkconfig.h"
 
 #include <M5Unified.h>
@@ -10,17 +11,21 @@
 #include "esp_vfs.h"
 #include "esp_log.h"
 
-// Screen dimensions for M5Stack CoreS3 SE (2.0" IPS)
-static constexpr int SCREEN_WIDTH = 320;
-static constexpr int SCREEN_HEIGHT = 240;
+// Screen dimensions from ui_common.h (board-specific)
+static constexpr int SCREEN_WIDTH = UI_SCREEN_WIDTH;
+static constexpr int SCREEN_HEIGHT = UI_SCREEN_HEIGHT;
 
-// Layout constants
-static constexpr int STATUS_BAR_HEIGHT = 20;
+// Layout constants from ui_common.h
+static constexpr int STATUS_BAR_HEIGHT = UI_STATUS_BAR_HEIGHT;
 static constexpr int LOG_AREA_Y = STATUS_BAR_HEIGHT;
 static constexpr int LOG_AREA_HEIGHT = SCREEN_HEIGHT - STATUS_BAR_HEIGHT;
 
-// Maximum line length to fit on screen
-static constexpr int MAX_LINE_CHARS = 52;
+// Maximum line length to fit on screen (adjusted for screen width and font size)
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+static constexpr int MAX_LINE_CHARS = 160;  // Tab5: wider screen
+#else
+static constexpr int MAX_LINE_CHARS = 52;   // CoreS3: 320px width
+#endif
 
 // Buffer for formatting
 static char s_format_buffer[256];
