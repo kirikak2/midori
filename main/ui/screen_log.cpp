@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdio>
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 static const char* TAG = "SCREEN_LOG";
 
@@ -30,13 +31,43 @@ static constexpr int LOG_LEFT_MARGIN = 4;
 #endif
 
 ScreenLog::ScreenLog()
-    : m_logHead(0)
+    : m_logBuffer(nullptr)
+    , m_logHead(0)
     , m_logCount(0)
     , m_scrollOffset(0)
     , m_needsRedraw(false)
     , m_isActive(false)
 {
-    memset(m_logBuffer, 0, sizeof(m_logBuffer));
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+    // Allocate log buffer from PSRAM on Tab5 (11KB buffer)
+    m_logBuffer = (char (*)[MAX_LINE_LENGTH])heap_caps_malloc(
+        MAX_LOG_LINES * MAX_LINE_LENGTH,
+        MALLOC_CAP_SPIRAM
+    );
+    if (!m_logBuffer) {
+        ESP_LOGE(TAG, "Failed to allocate log buffer from PSRAM, trying internal RAM");
+        m_logBuffer = (char (*)[MAX_LINE_LENGTH])malloc(MAX_LOG_LINES * MAX_LINE_LENGTH);
+    }
+#else
+    // Use regular malloc for CoreS3 (smaller buffer)
+    m_logBuffer = (char (*)[MAX_LINE_LENGTH])malloc(MAX_LOG_LINES * MAX_LINE_LENGTH);
+#endif
+
+    if (m_logBuffer) {
+        memset(m_logBuffer, 0, MAX_LOG_LINES * MAX_LINE_LENGTH);
+        ESP_LOGI(TAG, "Log buffer allocated: %d lines x %d chars = %d bytes",
+                 MAX_LOG_LINES, MAX_LINE_LENGTH, MAX_LOG_LINES * MAX_LINE_LENGTH);
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate log buffer!");
+    }
+}
+
+ScreenLog::~ScreenLog()
+{
+    if (m_logBuffer) {
+        free(m_logBuffer);
+        m_logBuffer = nullptr;
+    }
 }
 
 void ScreenLog::enter()
@@ -76,6 +107,8 @@ void ScreenLog::draw()
 
 void ScreenLog::drawLogLines()
 {
+    if (!m_logBuffer) return;
+
     portENTER_CRITICAL(&s_log_mutex);
 
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
@@ -171,7 +204,7 @@ const char* ScreenLog::getNavCenterLabel()
 
 void ScreenLog::addLog(const char* text)
 {
-    if (!text || !text[0]) return;
+    if (!text || !text[0] || !m_logBuffer) return;
 
     portENTER_CRITICAL(&s_log_mutex);
 
@@ -235,11 +268,13 @@ void ScreenLog::addLog(const char* text)
 
 void ScreenLog::clearLogs()
 {
+    if (!m_logBuffer) return;
+
     portENTER_CRITICAL(&s_log_mutex);
     m_logHead = 0;
     m_logCount = 0;
     m_scrollOffset = 0;
-    memset(m_logBuffer, 0, sizeof(m_logBuffer));
+    memset(m_logBuffer, 0, MAX_LOG_LINES * MAX_LINE_LENGTH);
     portEXIT_CRITICAL(&s_log_mutex);
 
     if (m_isActive) {

@@ -9,7 +9,7 @@
 class ScreenLog : public Screen {
 public:
     ScreenLog();
-    ~ScreenLog() override = default;
+    ~ScreenLog() override;  // Need destructor to free PSRAM buffer
 
     void enter() override;
     void leave() override;
@@ -29,8 +29,8 @@ public:
 private:
     // Board-specific display settings
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
-    static constexpr int MAX_LOG_LINES = 50;     // Reduced from 100 to save memory
-    static constexpr int MAX_LINE_LENGTH = 70;   // Reduced to avoid memory issues (3.5KB buffer)
+    static constexpr int MAX_LOG_LINES = 100;    // Increased back to 100 with PSRAM
+    static constexpr int MAX_LINE_LENGTH = 110;  // Increased back to 110 with PSRAM
     static constexpr int VISIBLE_LINES = 25;     // Lines visible in content area (620px / 24px)
 #else
     static constexpr int MAX_LOG_LINES = 100;
@@ -38,7 +38,7 @@ private:
     static constexpr int VISIBLE_LINES = 11;     // Lines visible in content area (180px / 16px)
 #endif
 
-    char m_logBuffer[MAX_LOG_LINES][MAX_LINE_LENGTH];
+    char (*m_logBuffer)[MAX_LINE_LENGTH];  // Pointer to buffer (allocated from PSRAM on Tab5)
     int m_logHead;      // Next write position
     int m_logCount;     // Total lines in buffer
     int m_scrollOffset; // Scroll position (0 = bottom/newest)
