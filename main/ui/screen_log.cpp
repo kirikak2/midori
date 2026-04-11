@@ -83,18 +83,18 @@ void ScreenLog::drawLogLines()
 
     int y = UI_CONTENT_Y + 5;
 
-    // Draw visible lines (background color overwrites old content)
     for (int i = 0; i < VISIBLE_LINES; i++) {
+        // Clear the entire line first to remove any leftover characters from previous longer messages
+        M5.Lcd.fillRect(LOG_LEFT_MARGIN, y, UI_SCREEN_WIDTH - LOG_LEFT_MARGIN, LOG_LINE_HEIGHT, UI_COLOR_BLACK);
+
         M5.Lcd.setCursor(LOG_LEFT_MARGIN, y);
 
         if (i < m_logCount) {
             int lineIndex = getDisplayLine(i);
             if (lineIndex >= 0) {
-                // Draw log line directly (background color will overwrite old content)
                 M5.Lcd.print(m_logBuffer[lineIndex]);
             }
         }
-        // No need to explicitly clear empty lines - they'll be black already
 
         y += LOG_LINE_HEIGHT;
     }
