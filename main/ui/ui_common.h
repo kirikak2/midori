@@ -4,12 +4,39 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Screen dimensions (M5Stack CoreS3 SE: 320x240)
+// Screen dimensions - board specific
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+// M5Stack Tab5: 5-inch 1280x720 display
+#define UI_SCREEN_WIDTH         1280
+#define UI_SCREEN_HEIGHT        720
+
+// Layout constants for Tab5 (larger screen)
+#define UI_STATUS_BAR_HEIGHT     40
+#define UI_NAV_BAR_HEIGHT        60
+#define UI_CONTENT_HEIGHT       (UI_SCREEN_HEIGHT - UI_STATUS_BAR_HEIGHT - UI_NAV_BAR_HEIGHT)  // 620px
+#define UI_CONTENT_Y            UI_STATUS_BAR_HEIGHT
+
+// Navigation bar touch zones (3 equal sections)
+#define UI_NAV_ZONE_WIDTH       (UI_SCREEN_WIDTH / 3)
+#define UI_NAV_ZONE_LEFT_END    426
+#define UI_NAV_ZONE_RIGHT_START 854
+
+// Pad configuration for Tab5 (4x3 grid = 12 pads)
+#define UI_PAD_COUNT       12
+#define UI_PAD_COLS        4
+#define UI_PAD_ROWS        3
+#define UI_PAD_WIDTH      280
+#define UI_PAD_HEIGHT     180
+#define UI_PAD_MARGIN      20
+
+#else
+// M5Stack CoreS3 SE: 320x240 display (default)
 #define UI_SCREEN_WIDTH         320
 #define UI_SCREEN_HEIGHT        240
 
@@ -24,6 +51,15 @@ extern "C" {
 #define UI_NAV_ZONE_LEFT_END    106
 #define UI_NAV_ZONE_RIGHT_START 214
 
+// Pad configuration (3x2 grid = 6 pads)
+#define UI_PAD_COUNT       6
+#define UI_PAD_COLS        3
+#define UI_PAD_ROWS        2
+#define UI_PAD_WIDTH      95
+#define UI_PAD_HEIGHT     75
+#define UI_PAD_MARGIN      8
+#endif
+
 // Screen count
 #define UI_SCREEN_COUNT         6
 
@@ -36,14 +72,6 @@ typedef enum {
     UI_SCREEN_SCRIPTS,
     UI_SCREEN_SETTINGS,
 } ui_screen_index_t;
-
-// Pad configuration
-#define UI_PAD_COUNT       6
-#define UI_PAD_COLS        3
-#define UI_PAD_ROWS        2
-#define UI_PAD_WIDTH      95
-#define UI_PAD_HEIGHT     75
-#define UI_PAD_MARGIN      8
 
 // BPM configuration
 #define UI_BPM_MIN         20.0f

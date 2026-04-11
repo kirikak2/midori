@@ -25,10 +25,18 @@ menu "USB MIDI Host Configuration"
                 M5Stack CoreS3 SE board with USB serial for debugging.
                 USB is used for serial console (no USB-MIDI).
                 Logs output to both LCD and serial console.
+
+        config USB_MIDI_BOARD_M5STACK_TAB5
+            bool "M5Stack Tab5 (ESP32-P4)"
+            help
+                M5Stack Tab5 with ESP32-P4 (RISC-V), 5-inch 1280x720 display.
+                USB-A port for USB-MIDI host.
+                USB-C port for serial console and USB device mode.
+                Larger screen supports 4x3 pad grid (12 pads).
     endchoice
 
     menu "M5Stack Display Settings"
-        depends on USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
+        depends on USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL || USB_MIDI_BOARD_M5STACK_TAB5
 
         config USB_MIDI_LCD_FONT_SIZE
             int "LCD Font Size (pixels)"
@@ -86,6 +94,31 @@ menu "USB MIDI Host Configuration"
             config USB_MIDI_SDCARD_FREENOVE_CS
                 int "SD CS GPIO"
                 default 10
+        endmenu
+
+        menu "M5Stack Tab5 SD Card Pins"
+            depends on USB_MIDI_BOARD_M5STACK_TAB5 && USB_MIDI_SDCARD_ENABLED
+
+            config USB_MIDI_SDCARD_TAB5_CLK
+                int "SD CLK GPIO"
+                default 43
+                help
+                    Tab5 SD card clock pin (SPI mode)
+            config USB_MIDI_SDCARD_TAB5_MOSI
+                int "SD MOSI GPIO"
+                default 44
+                help
+                    Tab5 SD card MOSI pin (SPI mode)
+            config USB_MIDI_SDCARD_TAB5_MISO
+                int "SD MISO GPIO"
+                default 39
+                help
+                    Tab5 SD card MISO pin (SPI mode)
+            config USB_MIDI_SDCARD_TAB5_CS
+                int "SD CS GPIO"
+                default 42
+                help
+                    Tab5 SD card chip select pin (SPI mode)
         endmenu
 
         config USB_MIDI_SDCARD_MOUNT_POINT

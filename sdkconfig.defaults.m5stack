@@ -28,3 +28,9 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
 # USB-OTG settings - increase transfer size for large Configuration descriptors
 CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=4096
+
+# Brownout detection level
+# Level 6 (2.87V) instead of default 7 (3.08V) to prevent false triggers
+# during USB device operation which can cause temporary voltage drops
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_6=y
+CONFIG_ESP_BROWNOUT_DET_LVL=6

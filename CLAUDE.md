@@ -508,3 +508,118 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 **主要ファイル**:
 - `components/picoruby-esp32/picoruby_supervisor.c` - Supervisor実装
 - `components/picoruby-esp32/mrblib/main_task_base.rb` - メインRubyコード
+
+## ボード別MIDIデバイス設定（2026-04-11）
+
+### 概要
+
+ボードごとに利用可能なMIDIデバイスとピンアサインが異なるため、本体のmain_task.rbで
+ボード設定に基づいてデバイスを初期化し、SDカード内のスクリプトから利用できるようにした。
+
+詳細は [docs/MIDI_DEVICES.md](docs/MIDI_DEVICES.md) を参照。
+
+### ボード別利用可能デバイス
+
+| ボード | SAM2695 | USB-MIDI Host | USB-MIDI Device |
+|-------|---------|---------------|-----------------|
+| m5stack | ○ (17,18) | ○ | - |
+| m5stack_with_usbserial | ○ (17,18) | - | - |
+| freenove | ○ (17,18) | ○ | - |
+| m5stack_tab5 | ○ (6,7) | ○ | ○ (未実装) |
+
+### アーキテクチャ
+
+**設定ファイル**:
+- `components/picoruby-esp32/mrblib/board_config.rb.in` - ボード設定テンプレート
+- `components/picoruby-esp32/mrblib/board_config.rb` - CMakeで自動生成（DO NOT EDIT）
+- `components/picoruby-esp32/CMakeLists.txt` - ボード別設定の定義
+
+**初期化コード** (main_task_base.rb):
+```ruby
+module MIDIDevices
+  @sam2695 = nil
+  @usb_midi_host = nil
+
+  def self.sam2695
+    @sam2695
+  end
+
+  def self.usb_midi_host
+    @usb_midi_host
+  end
+
+  def self.init_sam2695
+    if BoardConfig::HAS_SAM2695
+      require 'sam2695'
+      @sam2695 = SAM2695.new(BoardConfig::SAM2695_TX_PIN, BoardConfig::SAM2695_RX_PIN)
+    end
+  end
+
+  def self.init_usb_midi_host
+    if BoardConfig::HAS_USB_MIDI_HOST
+      require 'usb_midi'
+      @usb_midi_host = USB_MIDI.instance
+    end
+  end
+end
+```
+
+**初期化タイミング**:
+- UI Mode: 起動時、SDカード初期化の後
+- Script Mode: スクリプト実行前
+
+### SDカード内スクリプトでの使用方法
+
+**推奨**: MIDIDevicesモジュールを使用（ボード間の移植性が高い）
+
+```ruby
+require 'midi'
+require 'ui'
+
+# ボード設定に基づいて初期化済みのデバイスを取得
+sam = MIDIDevices.sam2695
+usb = MIDIDevices.usb_midi_host
+
+if sam
+  device = MIDI::Device.new(sam)
+  # ... SAM2695を使用
+end
+
+if usb
+  usb_device = MIDI::Device.new(usb)
+  # ... USB-MIDIを使用
+end
+```
+
+**従来の方法**（互換性のため残存、非推奨）:
+```ruby
+require 'sam2695'
+sam = SAM2695.new(17, 18)  # ピン番号をハードコード（ボード依存）
+device = MIDI::Device.new(sam)
+```
+
+### ボード設定の追加・変更
+
+新しいボードを追加する場合、または既存ボードの設定を変更する場合：
+
+1. `components/picoruby-esp32/CMakeLists.txt` を編集
+2. 該当するボード設定セクション（`if(CONFIG_USB_MIDI_BOARD_*)`）で以下を設定：
+   - `SAM2695_TX_PIN` / `SAM2695_RX_PIN`
+   - `HAS_SAM2695` (true/false)
+   - `HAS_USB_MIDI_HOST` (true/false)
+   - `HAS_USB_MIDI_DEVICE` (true/false)
+3. リビルド: `idf.py build`
+
+**例**: M5Stack Tab5の設定
+```cmake
+if(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+  set(BOARD_NAME "M5Stack Tab5")
+  # ... SD card settings ...
+  # MIDI devices
+  set(SAM2695_TX_PIN 6)
+  set(SAM2695_RX_PIN 7)
+  set(HAS_SAM2695 true)
+  set(HAS_USB_MIDI_HOST true)
+  set(HAS_USB_MIDI_DEVICE true)  # Future implementation
+endif()
+```

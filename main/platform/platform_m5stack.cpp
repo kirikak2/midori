@@ -33,6 +33,13 @@ extern "C" esp_err_t platform_init(void)
 
     M5.begin(cfg);
 
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+    // Tab5: Rotate screen 270 degrees for landscape mode
+    // Rotation 3 = 270 degrees clockwise (landscape with USB ports on left)
+    M5.Lcd.setRotation(3);
+    ESP_LOGI(TAG, "Tab5: Screen rotated to landscape mode");
+#endif
+
     // Enable USB OTG mode for USB Host functionality
     // This sets the USB_OTG_EN pin via AW9523B IO expander
     M5.Power.setUsbOutput(true);
