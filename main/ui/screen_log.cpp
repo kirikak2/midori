@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "screen_log.h"
 #include <M5Unified.h>
 #include <cstring>
@@ -16,6 +17,17 @@ ScreenLog& getScreenLog()
 
 // Mutex for thread safety
 static portMUX_TYPE s_log_mutex = portMUX_INITIALIZER_UNLOCKED;
+
+// Board-specific text size and line settings
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+static constexpr int LOG_TEXT_SIZE = 2;
+static constexpr int LOG_LINE_HEIGHT = 24;
+static constexpr int LOG_LEFT_MARGIN = 10;
+#else
+static constexpr int LOG_TEXT_SIZE = 1;
+static constexpr int LOG_LINE_HEIGHT = 16;
+static constexpr int LOG_LEFT_MARGIN = 4;
+#endif
 
 ScreenLog::ScreenLog()
     : m_logHead(0)
@@ -57,7 +69,8 @@ void ScreenLog::update()
 
 void ScreenLog::draw()
 {
-    ui_clear_content_area();
+    // Don't clear entire content area - just overwrite with new log lines
+    // enter() already clears the area when switching screens
     drawLogLines();
 }
 
@@ -66,18 +79,24 @@ void ScreenLog::drawLogLines()
     portENTER_CRITICAL(&s_log_mutex);
 
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextSize(LOG_TEXT_SIZE);
 
-    int y = UI_CONTENT_Y + 2;
-    int lineHeight = 16;
+    int y = UI_CONTENT_Y + 5;
 
-    for (int i = 0; i < VISIBLE_LINES && i < m_logCount; i++) {
-        int lineIndex = getDisplayLine(i);
-        if (lineIndex >= 0) {
-            M5.Lcd.setCursor(4, y);
-            M5.Lcd.print(m_logBuffer[lineIndex]);
+    // Draw visible lines (background color overwrites old content)
+    for (int i = 0; i < VISIBLE_LINES; i++) {
+        M5.Lcd.setCursor(LOG_LEFT_MARGIN, y);
+
+        if (i < m_logCount) {
+            int lineIndex = getDisplayLine(i);
+            if (lineIndex >= 0) {
+                // Draw log line directly (background color will overwrite old content)
+                M5.Lcd.print(m_logBuffer[lineIndex]);
+            }
         }
-        y += lineHeight;
+        // No need to explicitly clear empty lines - they'll be black already
+
+        y += LOG_LINE_HEIGHT;
     }
 
     portEXIT_CRITICAL(&s_log_mutex);

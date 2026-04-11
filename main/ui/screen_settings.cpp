@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "screen_settings.h"
 #include <M5Unified.h>
 #include <cstring>
@@ -14,15 +15,30 @@ ScreenSettings& getScreenSettings()
     return s_screenSettings;
 }
 
-// Layout constants
+// Layout constants - Board-specific
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+static constexpr int SECTION_TEXT_SIZE = 2;
+static constexpr int SECTION_START_Y = UI_CONTENT_Y + 20;
+static constexpr int SECTION_MARGIN = 20;
+static constexpr int BLE_SECTION_HEIGHT = 200;
+static constexpr int BACKLIGHT_Y = SECTION_START_Y + BLE_SECTION_HEIGHT + 30;
+static constexpr int BACKLIGHT_LABEL_X = SECTION_MARGIN + 20;
+static constexpr int BACKLIGHT_SLIDER_X = 250;
+static constexpr int BACKLIGHT_SLIDER_W = 500;
+static constexpr int BACKLIGHT_SLIDER_H = 40;
+static constexpr int VERSION_Y = BACKLIGHT_Y + 80;
+#else
+static constexpr int SECTION_TEXT_SIZE = 1;
 static constexpr int SECTION_START_Y = UI_CONTENT_Y + 5;
 static constexpr int SECTION_MARGIN = 8;
 static constexpr int BLE_SECTION_HEIGHT = 100;
 static constexpr int BACKLIGHT_Y = SECTION_START_Y + BLE_SECTION_HEIGHT + 10;
+static constexpr int BACKLIGHT_LABEL_X = SECTION_MARGIN;
 static constexpr int BACKLIGHT_SLIDER_X = 100;
 static constexpr int BACKLIGHT_SLIDER_W = 180;
 static constexpr int BACKLIGHT_SLIDER_H = 20;
 static constexpr int VERSION_Y = BACKLIGHT_Y + 35;
+#endif
 
 // Firmware version
 static const char* FIRMWARE_VERSION = "v1.0.0";
@@ -74,25 +90,26 @@ void ScreenSettings::drawBleMidiSection()
     M5.Lcd.drawRoundRect(x, y, w, h, 4, UI_COLOR_GRAY);
 
     // Draw section title
-    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextSize(SECTION_TEXT_SIZE);
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(x + 6, y + 6);
+    M5.Lcd.setCursor(x + 6 * SECTION_TEXT_SIZE, y + 6 * SECTION_TEXT_SIZE);
     M5.Lcd.print("BLE-MIDI");
 
     // Draw status
     M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(x + 12, y + 24);
+    M5.Lcd.setCursor(x + 12 * SECTION_TEXT_SIZE, y + 24 * SECTION_TEXT_SIZE);
     M5.Lcd.print("Status: Not implemented");
 
     // Draw placeholder device list area
-    int listY = y + 40;
-    int listH = h - 50;
-    M5.Lcd.fillRect(x + 6, listY, w - 12, listH, UI_COLOR_DARKGRAY);
-    M5.Lcd.drawRect(x + 6, listY, w - 12, listH, UI_COLOR_GRAY);
+    int listY = y + 40 * SECTION_TEXT_SIZE;
+    int listH = h - 50 * SECTION_TEXT_SIZE;
+    M5.Lcd.fillRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_DARKGRAY);
+    M5.Lcd.drawRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_GRAY);
 
     // Placeholder message
     M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
-    M5.Lcd.setCursor(x + 40, listY + listH / 2 - 4);
+    int msgWidth = strlen("(BLE scanning not available)") * 6 * SECTION_TEXT_SIZE;
+    M5.Lcd.setCursor(x + (w - msgWidth) / 2, listY + listH / 2 - 4 * SECTION_TEXT_SIZE);
     M5.Lcd.print("(BLE scanning not available)");
 }
 
@@ -101,9 +118,10 @@ void ScreenSettings::drawBacklightSlider()
     int y = BACKLIGHT_Y;
 
     // Draw label
-    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextSize(SECTION_TEXT_SIZE);
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(SECTION_MARGIN, y + 6);
+    int labelY = y + (BACKLIGHT_SLIDER_H - 8 * SECTION_TEXT_SIZE) / 2;
+    M5.Lcd.setCursor(BACKLIGHT_LABEL_X, labelY);
     M5.Lcd.print("Backlight:");
 
     // Draw slider background
@@ -120,15 +138,15 @@ void ScreenSettings::drawBacklightSlider()
     char pctStr[8];
     snprintf(pctStr, sizeof(pctStr), "%d%%", m_backlight);
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W + 8, y + 6);
+    M5.Lcd.setCursor(BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W + 8 * SECTION_TEXT_SIZE, labelY);
     M5.Lcd.print(pctStr);
 }
 
 void ScreenSettings::drawVersionInfo()
 {
-    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextSize(SECTION_TEXT_SIZE);
     M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(SECTION_MARGIN, VERSION_Y);
+    M5.Lcd.setCursor(BACKLIGHT_LABEL_X, VERSION_Y);
     M5.Lcd.print("Version: ");
     M5.Lcd.print(FIRMWARE_VERSION);
 }
@@ -157,8 +175,10 @@ void ScreenSettings::handleBacklightTouch(int x)
         int brightness = (m_backlight * 255) / 100;
         M5.Lcd.setBrightness(brightness);
 
-        // Redraw slider
+        // Redraw slider (requires manual transaction for partial redraw)
+        M5.Lcd.startWrite();
         drawBacklightSlider();
+        M5.Lcd.endWrite();
     }
 }
 
@@ -195,7 +215,10 @@ void ScreenSettings::setBacklight(uint8_t level)
     M5.Lcd.setBrightness(brightness);
 
     if (m_isActive) {
+        // Partial redraw needs its own transaction
+        M5.Lcd.startWrite();
         drawBacklightSlider();
+        M5.Lcd.endWrite();
     }
 }
 

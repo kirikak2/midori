@@ -17,7 +17,8 @@ ScreenPads& getScreenPads()
 
 // Layout constants - dynamically calculated for different screen sizes
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
-// Tab5: larger spacing for bigger screen
+// Tab5: larger spacing and text for bigger screen
+static constexpr int PAD_TEXT_SIZE = 3;
 static constexpr int PAD_SPACING_X = 20;
 static constexpr int PAD_SPACING_Y = 20;
 // Center the grid horizontally
@@ -28,6 +29,7 @@ static constexpr int GRID_HEIGHT = UI_PAD_ROWS * UI_PAD_HEIGHT + (UI_PAD_ROWS - 
 static constexpr int PAD_START_Y = UI_CONTENT_Y + (UI_CONTENT_HEIGHT - GRID_HEIGHT) / 2;
 #else
 // CoreS3: original layout
+static constexpr int PAD_TEXT_SIZE = 1;
 static constexpr int PAD_START_X = 10;
 static constexpr int PAD_START_Y = UI_CONTENT_Y + 8;
 static constexpr int PAD_SPACING_X = 5;
@@ -133,7 +135,7 @@ void ScreenPads::drawPad(int index)
     M5.Lcd.drawRoundRect(x, y, w, h, 6, borderColor);
 
     // Draw label
-    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextSize(PAD_TEXT_SIZE);
     M5.Lcd.setTextColor(textColor, bgColor);
 
     const char* label = pad->assigned ? pad->label : "";
@@ -143,12 +145,14 @@ void ScreenPads::drawPad(int index)
         snprintf(numStr, sizeof(numStr), "Pad %d", index + 1);
         label = numStr;
 
-        int textW = strlen(label) * 6;
-        M5.Lcd.setCursor(x + (w - textW) / 2, y + (h - 8) / 2);
+        int textW = strlen(label) * 6 * PAD_TEXT_SIZE;
+        int textH = 8 * PAD_TEXT_SIZE;
+        M5.Lcd.setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
         M5.Lcd.print(label);
     } else {
-        int textW = strlen(label) * 6;
-        M5.Lcd.setCursor(x + (w - textW) / 2, y + (h - 8) / 2);
+        int textW = strlen(label) * 6 * PAD_TEXT_SIZE;
+        int textH = 8 * PAD_TEXT_SIZE;
+        M5.Lcd.setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
         M5.Lcd.print(label);
 
         // Show type indicator in corner for assigned pads
@@ -160,7 +164,7 @@ void ScreenPads::drawPad(int index)
         }
         if (typeStr) {
             M5.Lcd.setTextColor(UI_COLOR_GRAY, bgColor);
-            M5.Lcd.setCursor(x + 4, y + 4);
+            M5.Lcd.setCursor(x + 4 * PAD_TEXT_SIZE, y + 4 * PAD_TEXT_SIZE);
             M5.Lcd.print(typeStr);
         }
     }

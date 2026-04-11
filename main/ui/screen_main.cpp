@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "screen_main.h"
 #include <M5Unified.h>
 #include <cstring>
@@ -15,20 +16,52 @@ ScreenMain& getScreenMain()
     return s_screenMain;
 }
 
-// Layout constants
+// Layout constants - Board-specific
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+// Tab5: Larger fonts and spacious layout for 1280x720
+static constexpr int BPM_TEXT_SIZE = 6;
+static constexpr int BPM_LABEL_TEXT_SIZE = 2;
+static constexpr int BAR_BEAT_TEXT_SIZE = 4;
+static constexpr int EXTERNAL_BPM_TEXT_SIZE = 2;
+static constexpr int BPM_Y = UI_CONTENT_Y + 60;
+static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 30;
+static constexpr int BPM_BUTTON_W = 80;
+static constexpr int BPM_BUTTON_H = 50;
+static constexpr int BPM_BUTTON_SPACING = 90;
+static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 180;
+static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 140;
+static constexpr int SOURCE_BTN_W = 80;
+static constexpr int SOURCE_BTN_H = 40;
+static constexpr int SYNC_Y = UI_CONTENT_Y + 240;
+static constexpr int SYNC_BTN_W = 200;
+static constexpr int SYNC_BTN_H = 50;
+static constexpr int BAR_BEAT_Y = UI_CONTENT_Y + 340;
+static constexpr int PROGRESS_Y = UI_CONTENT_Y + 420;
+static constexpr int PROGRESS_W = 800;
+static constexpr int PROGRESS_H = 30;
+#else
+// CoreS3: Original compact layout for 320x240
+static constexpr int BPM_TEXT_SIZE = 3;
+static constexpr int BPM_LABEL_TEXT_SIZE = 1;
+static constexpr int BAR_BEAT_TEXT_SIZE = 2;
+static constexpr int EXTERNAL_BPM_TEXT_SIZE = 1;
 static constexpr int BPM_Y = UI_CONTENT_Y + 20;
 static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 10;
 static constexpr int BPM_BUTTON_W = 45;
 static constexpr int BPM_BUTTON_H = 30;
+static constexpr int BPM_BUTTON_SPACING = 50;
 static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 65;
 static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 48;
 static constexpr int SOURCE_BTN_W = 40;
 static constexpr int SOURCE_BTN_H = 20;
 static constexpr int SYNC_Y = UI_CONTENT_Y + 85;
+static constexpr int SYNC_BTN_W = 100;
+static constexpr int SYNC_BTN_H = 30;
 static constexpr int BAR_BEAT_Y = UI_CONTENT_Y + 120;
 static constexpr int PROGRESS_Y = UI_CONTENT_Y + 145;
 static constexpr int PROGRESS_W = 260;
 static constexpr int PROGRESS_H = 16;
+#endif
 
 ScreenMain::ScreenMain()
     : m_isActive(false)
@@ -49,10 +82,9 @@ ScreenMain::ScreenMain()
 void ScreenMain::initButtons()
 {
     int centerX = UI_SCREEN_WIDTH / 2;
-    int spacing = 50;
 
     // [-10] button
-    m_buttons[BTN_MINUS_10].x = centerX - 2 * spacing - BPM_BUTTON_W / 2;
+    m_buttons[BTN_MINUS_10].x = centerX - 2 * BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
     m_buttons[BTN_MINUS_10].y = BPM_BUTTON_Y;
     m_buttons[BTN_MINUS_10].w = BPM_BUTTON_W;
     m_buttons[BTN_MINUS_10].h = BPM_BUTTON_H;
@@ -60,7 +92,7 @@ void ScreenMain::initButtons()
     m_buttons[BTN_MINUS_10].pressed = false;
 
     // [-1] button
-    m_buttons[BTN_MINUS_1].x = centerX - spacing - BPM_BUTTON_W / 2;
+    m_buttons[BTN_MINUS_1].x = centerX - BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
     m_buttons[BTN_MINUS_1].y = BPM_BUTTON_Y;
     m_buttons[BTN_MINUS_1].w = BPM_BUTTON_W;
     m_buttons[BTN_MINUS_1].h = BPM_BUTTON_H;
@@ -68,7 +100,7 @@ void ScreenMain::initButtons()
     m_buttons[BTN_MINUS_1].pressed = false;
 
     // [+1] button
-    m_buttons[BTN_PLUS_1].x = centerX + spacing - BPM_BUTTON_W / 2;
+    m_buttons[BTN_PLUS_1].x = centerX + BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
     m_buttons[BTN_PLUS_1].y = BPM_BUTTON_Y;
     m_buttons[BTN_PLUS_1].w = BPM_BUTTON_W;
     m_buttons[BTN_PLUS_1].h = BPM_BUTTON_H;
@@ -76,7 +108,7 @@ void ScreenMain::initButtons()
     m_buttons[BTN_PLUS_1].pressed = false;
 
     // [+10] button
-    m_buttons[BTN_PLUS_10].x = centerX + 2 * spacing - BPM_BUTTON_W / 2;
+    m_buttons[BTN_PLUS_10].x = centerX + 2 * BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
     m_buttons[BTN_PLUS_10].y = BPM_BUTTON_Y;
     m_buttons[BTN_PLUS_10].w = BPM_BUTTON_W;
     m_buttons[BTN_PLUS_10].h = BPM_BUTTON_H;
@@ -84,30 +116,30 @@ void ScreenMain::initButtons()
     m_buttons[BTN_PLUS_10].pressed = false;
 
     // [Sync] button
-    m_buttons[BTN_SYNC].x = UI_SCREEN_WIDTH / 2 - 30;
+    m_buttons[BTN_SYNC].x = UI_SCREEN_WIDTH / 2 - SYNC_BTN_W / 2;
     m_buttons[BTN_SYNC].y = SYNC_Y;
-    m_buttons[BTN_SYNC].w = 60;
-    m_buttons[BTN_SYNC].h = 25;
+    m_buttons[BTN_SYNC].w = SYNC_BTN_W;
+    m_buttons[BTN_SYNC].h = SYNC_BTN_H;
     m_buttons[BTN_SYNC].label = "Sync";
     m_buttons[BTN_SYNC].pressed = false;
 
-    // Source selection buttons
-    int sourceX = 50;
-    m_buttons[BTN_SOURCE_USB].x = sourceX;
+    // Source selection buttons (centered horizontally)
+    int sourceStartX = (UI_SCREEN_WIDTH - (3 * SOURCE_BTN_W + 2 * 10)) / 2;
+    m_buttons[BTN_SOURCE_USB].x = sourceStartX;
     m_buttons[BTN_SOURCE_USB].y = SOURCE_BTN_Y;
     m_buttons[BTN_SOURCE_USB].w = SOURCE_BTN_W;
     m_buttons[BTN_SOURCE_USB].h = SOURCE_BTN_H;
     m_buttons[BTN_SOURCE_USB].label = "USB";
     m_buttons[BTN_SOURCE_USB].pressed = false;
 
-    m_buttons[BTN_SOURCE_DIN].x = sourceX + SOURCE_BTN_W + 5;
+    m_buttons[BTN_SOURCE_DIN].x = sourceStartX + SOURCE_BTN_W + 10;
     m_buttons[BTN_SOURCE_DIN].y = SOURCE_BTN_Y;
     m_buttons[BTN_SOURCE_DIN].w = SOURCE_BTN_W;
     m_buttons[BTN_SOURCE_DIN].h = SOURCE_BTN_H;
     m_buttons[BTN_SOURCE_DIN].label = "DIN";
     m_buttons[BTN_SOURCE_DIN].pressed = false;
 
-    m_buttons[BTN_SOURCE_BLE].x = sourceX + (SOURCE_BTN_W + 5) * 2;
+    m_buttons[BTN_SOURCE_BLE].x = sourceStartX + (SOURCE_BTN_W + 10) * 2;
     m_buttons[BTN_SOURCE_BLE].y = SOURCE_BTN_Y;
     m_buttons[BTN_SOURCE_BLE].w = SOURCE_BTN_W;
     m_buttons[BTN_SOURCE_BLE].h = SOURCE_BTN_H;
@@ -190,23 +222,20 @@ void ScreenMain::drawBpmDisplay()
     float bpm = ui.getBpm();
     bool syncMode = ui.getSyncMode();
 
-    // Clear BPM area
-    int bpmDisplayX = UI_SCREEN_WIDTH / 2 - 40;
-    M5.Lcd.fillRect(bpmDisplayX, BPM_Y, 80, 35, UI_COLOR_BLACK);
-
-    // Draw BPM value
-    M5.Lcd.setTextSize(3);
+    // Draw BPM value (background color overwrites old content)
+    int bpmDisplayX = UI_SCREEN_WIDTH / 2 - (BPM_TEXT_SIZE * 3 * 6) / 2;
+    M5.Lcd.setTextSize(BPM_TEXT_SIZE);
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
 
     char bpmStr[16];
     snprintf(bpmStr, sizeof(bpmStr), "%3d", (int)bpm);
 
-    M5.Lcd.setCursor(bpmDisplayX, BPM_Y + 5);
+    M5.Lcd.setCursor(bpmDisplayX, BPM_Y);
     M5.Lcd.print(bpmStr);
 
     // Draw "BPM" label
-    M5.Lcd.setTextSize(1);
-    M5.Lcd.setCursor(bpmDisplayX + 60, BPM_Y + 15);
+    M5.Lcd.setTextSize(BPM_LABEL_TEXT_SIZE);
+    M5.Lcd.setCursor(bpmDisplayX + BPM_TEXT_SIZE * 3 * 6 + 10, BPM_Y + BPM_TEXT_SIZE * 8 / 2 - BPM_LABEL_TEXT_SIZE * 4);
     M5.Lcd.print("BPM");
 
     m_lastDrawnBpm = bpm;
@@ -243,10 +272,8 @@ void ScreenMain::drawExternalBpm()
         M5.Lcd.print(sourceLabels[i]);
     }
 
-    // Clear external BPM area
-    M5.Lcd.fillRect(200, EXTERNAL_BPM_Y, 120, 16, UI_COLOR_BLACK);
-
-    M5.Lcd.setTextSize(1);
+    // Draw external BPM (background color overwrites old content)
+    M5.Lcd.setTextSize(EXTERNAL_BPM_TEXT_SIZE);
     M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
 
     char extStr[32];
@@ -256,7 +283,8 @@ void ScreenMain::drawExternalBpm()
         snprintf(extStr, sizeof(extStr), "Ext: --- BPM");
     }
 
-    M5.Lcd.setCursor(200, EXTERNAL_BPM_Y);
+    int extTextWidth = strlen(extStr) * 6 * EXTERNAL_BPM_TEXT_SIZE;
+    M5.Lcd.setCursor((UI_SCREEN_WIDTH - extTextWidth) / 2, EXTERNAL_BPM_Y);
     M5.Lcd.print(extStr);
 
     m_lastDrawnExternalBpm = externalBpm;
@@ -306,16 +334,15 @@ void ScreenMain::drawBarBeat()
     uint32_t bar = ui.getBar();
     uint8_t beat = ui.getBeat();
 
-    // Clear area
-    M5.Lcd.fillRect(60, BAR_BEAT_Y, 200, 20, UI_COLOR_BLACK);
-
-    M5.Lcd.setTextSize(2);
+    // Draw bar/beat (background color overwrites old content)
+    M5.Lcd.setTextSize(BAR_BEAT_TEXT_SIZE);
     M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
 
     char barBeatStr[32];
     snprintf(barBeatStr, sizeof(barBeatStr), "Bar: %3lu  Beat: %d", (unsigned long)bar, beat);
 
-    M5.Lcd.setCursor(60, BAR_BEAT_Y);
+    int barBeatWidth = strlen(barBeatStr) * 6 * BAR_BEAT_TEXT_SIZE;
+    M5.Lcd.setCursor((UI_SCREEN_WIDTH - barBeatWidth) / 2, BAR_BEAT_Y);
     M5.Lcd.print(barBeatStr);
 
     m_lastDrawnBar = bar;

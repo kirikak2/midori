@@ -72,6 +72,7 @@ void ui_draw_nav_bar(const char* center_label, bool show_arrows)
 void ui_draw_button(int x, int y, int w, int h, const char* label, uint16_t bg_color, uint16_t text_color, bool pressed)
 {
     portENTER_CRITICAL(&s_ui_mutex);
+    M5.Lcd.startWrite();
 
     // Adjust color if pressed
     uint16_t draw_color = pressed ? ui_lighten_color(bg_color) : bg_color;
@@ -93,6 +94,7 @@ void ui_draw_button(int x, int y, int w, int h, const char* label, uint16_t bg_c
     M5.Lcd.setCursor(text_x, text_y);
     M5.Lcd.print(label);
 
+    M5.Lcd.endWrite();
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 

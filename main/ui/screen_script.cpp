@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "screen_script.h"
 #include <M5Unified.h>
 #include <cstring>
@@ -18,11 +19,22 @@ ScreenScripts& getScreenScripts()
     return s_screenScripts;
 }
 
-// Layout constants
+// Layout constants - Board-specific
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+static constexpr int LIST_START_Y = UI_CONTENT_Y + 10;
+static constexpr int LIST_MARGIN = 15;
+static constexpr int ITEM_TEXT_SIZE = 2;
+static constexpr int REFRESH_BUTTON_HEIGHT = 50;
+static constexpr int REFRESH_BUTTON_WIDTH = 180;
+static constexpr int REFRESH_BUTTON_MARGIN = 10;
+#else
 static constexpr int LIST_START_Y = UI_CONTENT_Y + 5;
 static constexpr int LIST_MARGIN = 8;
+static constexpr int ITEM_TEXT_SIZE = 1;
 static constexpr int REFRESH_BUTTON_HEIGHT = 30;
+static constexpr int REFRESH_BUTTON_WIDTH = 100;
 static constexpr int REFRESH_BUTTON_MARGIN = 5;
+#endif
 
 ScreenScripts::ScreenScripts()
     : m_scriptCount(0)
@@ -80,9 +92,10 @@ void ScreenScripts::drawScriptList()
 
     // If no scripts, show message
     if (m_scriptCount == 0) {
-        M5.Lcd.setTextSize(1);
+        M5.Lcd.setTextSize(ITEM_TEXT_SIZE);
         M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-        M5.Lcd.setCursor(60, LIST_START_Y + 60);
+        int textWidth = strlen("No scripts found on SD card") * 6 * ITEM_TEXT_SIZE;
+        M5.Lcd.setCursor((UI_SCREEN_WIDTH - textWidth) / 2, LIST_START_Y + 100);
         M5.Lcd.print("No scripts found on SD card");
     }
 
@@ -93,11 +106,9 @@ void ScreenScripts::drawScriptList()
 void ScreenScripts::drawRefreshButton()
 {
     int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
-    int buttonX = (UI_SCREEN_WIDTH - 100) / 2;  // Center horizontally
-    int buttonW = 100;
-    int buttonH = REFRESH_BUTTON_HEIGHT;
+    int buttonX = (UI_SCREEN_WIDTH - REFRESH_BUTTON_WIDTH) / 2;  // Center horizontally
 
-    ui_draw_button(buttonX, buttonY, buttonW, buttonH, "Refresh",
+    ui_draw_button(buttonX, buttonY, REFRESH_BUTTON_WIDTH, REFRESH_BUTTON_HEIGHT, "Refresh",
                    UI_COLOR_BLUE, UI_COLOR_WHITE, m_refreshButtonPressed);
 }
 
@@ -122,25 +133,29 @@ void ScreenScripts::drawScriptItem(int index, int y)
     // Draw background
     M5.Lcd.fillRect(x, y, w, h, bgColor);
 
-    // Draw running indicator
-    M5.Lcd.setTextSize(1);
+    // Draw running indicator and filename
+    M5.Lcd.setTextSize(ITEM_TEXT_SIZE);
+    int textHeight = 8 * ITEM_TEXT_SIZE;
+    int textY = y + (h - textHeight) / 2;
+
     if (isRunning) {
         M5.Lcd.setTextColor(UI_COLOR_GREEN, bgColor);
-        M5.Lcd.setCursor(x + 4, y + (h - 8) / 2);
+        M5.Lcd.setCursor(x + 4 * ITEM_TEXT_SIZE, textY);
         M5.Lcd.print(">");
     }
 
     // Draw filename
     M5.Lcd.setTextColor(isRunning ? UI_COLOR_GREEN : UI_COLOR_WHITE, bgColor);
-    M5.Lcd.setCursor(x + 16, y + (h - 8) / 2);
+    M5.Lcd.setCursor(x + 16 * ITEM_TEXT_SIZE, textY);
     M5.Lcd.print(filename);
 
     // Draw [Running] badge if running
     if (isRunning) {
-        int badgeX = UI_SCREEN_WIDTH - LIST_MARGIN - 60;
-        M5.Lcd.fillRoundRect(badgeX, y + 2, 55, h - 4, 3, UI_COLOR_GREEN);
+        int badgeWidth = 55 * ITEM_TEXT_SIZE;
+        int badgeX = UI_SCREEN_WIDTH - LIST_MARGIN - badgeWidth;
+        M5.Lcd.fillRoundRect(badgeX, y + 2, badgeWidth, h - 4, 3, UI_COLOR_GREEN);
         M5.Lcd.setTextColor(UI_COLOR_BLACK, UI_COLOR_GREEN);
-        M5.Lcd.setCursor(badgeX + 4, y + (h - 8) / 2);
+        M5.Lcd.setCursor(badgeX + 4 * ITEM_TEXT_SIZE, textY);
         M5.Lcd.print("Running");
     }
 }

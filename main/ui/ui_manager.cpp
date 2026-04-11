@@ -143,11 +143,13 @@ void UIManager::update()
 
     // Redraw if needed
     if (m_needsRedraw) {
+        M5.Lcd.startWrite();
         drawStatusBar();
         if (m_screens[m_currentIndex]) {
             m_screens[m_currentIndex]->draw();
         }
         drawNavBar();
+        M5.Lcd.endWrite();
         m_needsRedraw = false;
     }
 }
