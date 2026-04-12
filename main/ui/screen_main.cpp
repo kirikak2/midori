@@ -75,6 +75,8 @@ ScreenMain::ScreenMain()
     , m_lastDrawnProgress(0)
     , m_lastDrawnSyncMode(false)
     , m_lastDrawnExternalBpmSource(0xFF)  // Invalid value to force initial draw
+    , m_lastSyncButtonState(-1)  // Invalid value to force initial draw
+    , m_lastExternalBpmDrawTime(0)
 {
     memset(m_tapTimes, 0, sizeof(m_tapTimes));
     initButtons();
@@ -152,6 +154,8 @@ void ScreenMain::enter()
 {
     m_isActive = true;
     m_lastDrawnBpm = -1;  // Force full redraw
+    m_lastSyncButtonState = -1;  // Force sync button redraw
+    m_lastDrawnExternalBpmSource = 0xFF;  // Force source buttons redraw
     ui_clear_content_area();
     draw();
 }
@@ -166,10 +170,12 @@ void ScreenMain::update()
     if (!m_isActive) return;
 
     UIManager& ui = UIManager::getInstance();
+    int64_t now = esp_timer_get_time();
 
     // Check for changes that need redraw
     bool needsFullRedraw = m_needsRedraw;
     bool needsBpmUpdate = false;
+    bool needsExternalBpmUpdate = false;
     bool needsBarBeatUpdate = false;
     bool needsProgressUpdate = false;
 
@@ -177,8 +183,20 @@ void ScreenMain::update()
     float externalBpm = ui.getExternalBpm();
     bool syncMode = ui.getSyncMode();
 
-    if (currentBpm != m_lastDrawnBpm || externalBpm != m_lastDrawnExternalBpm || syncMode != m_lastDrawnSyncMode) {
+    // Check what changed - separate immediate vs throttled updates
+    if (currentBpm != m_lastDrawnBpm || syncMode != m_lastDrawnSyncMode) {
+        // User-initiated changes (BPM adjustment, sync toggle) - immediate update
         needsBpmUpdate = true;
+    }
+
+    if (externalBpm != m_lastDrawnExternalBpm) {
+        // External BPM changes from MIDI clock - throttle to reduce flicker
+        // At 120 BPM, MIDI clock sends 48 updates/sec. Throttle to ~10 FPS.
+        const int64_t EXTERNAL_BPM_UPDATE_INTERVAL_US = 100000;  // 100ms = 10 FPS
+        if (now - m_lastExternalBpmDrawTime >= EXTERNAL_BPM_UPDATE_INTERVAL_US) {
+            needsExternalBpmUpdate = true;
+            m_lastExternalBpmDrawTime = now;
+        }
     }
 
     if (ui.getBar() != m_lastDrawnBar || ui.getBeat() != m_lastDrawnBeat) {
@@ -194,12 +212,12 @@ void ScreenMain::update()
         m_needsRedraw = false;
     } else {
         // Batch partial updates in a single transaction to prevent flickering
-        if (needsBpmUpdate || needsBarBeatUpdate || needsProgressUpdate) {
+        if (needsBpmUpdate || needsExternalBpmUpdate || needsBarBeatUpdate || needsProgressUpdate) {
             M5.Lcd.startWrite();
-            if (needsBpmUpdate) {
+            if (needsBpmUpdate || needsExternalBpmUpdate) {
                 drawBpmDisplay();
                 drawExternalBpm();
-                drawSyncButton();
+                drawSyncButton();  // Will skip redraw if visual state unchanged
             }
             if (needsBarBeatUpdate) {
                 drawBarBeat();
@@ -308,17 +326,33 @@ void ScreenMain::drawSyncButton()
     bool syncMode = ui.getSyncMode();
     float externalBpm = ui.getExternalBpm();
 
+    // Determine visual state: 0=disabled, 1=off, 2=on
+    int8_t newState;
+    if (externalBpm <= 0) {
+        newState = 0;  // disabled
+    } else if (syncMode) {
+        newState = 2;  // on
+    } else {
+        newState = 1;  // off
+    }
+
+    // Skip redraw if visual state hasn't changed (prevents flicker from frequent external BPM updates)
+    if (newState == m_lastSyncButtonState) {
+        return;
+    }
+    m_lastSyncButtonState = newState;
+
     Button& btn = m_buttons[BTN_SYNC];
 
     // Determine button color based on state
     uint16_t bgColor;
     uint16_t textColor = UI_COLOR_WHITE;
 
-    if (externalBpm <= 0) {
+    if (newState == 0) {
         // No external clock - gray out
         bgColor = UI_COLOR_DARKGRAY;
         textColor = UI_COLOR_GRAY;
-    } else if (syncMode) {
+    } else if (newState == 2) {
         // Sync mode on
         bgColor = UI_COLOR_GREEN;
     } else {

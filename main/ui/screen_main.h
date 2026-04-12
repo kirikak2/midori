@@ -57,6 +57,8 @@ private:
     uint8_t m_lastDrawnProgress;
     bool m_lastDrawnSyncMode;
     uint8_t m_lastDrawnExternalBpmSource;  // Track which source was last selected
+    int8_t m_lastSyncButtonState;  // 0=disabled, 1=off, 2=on (for avoiding unnecessary redraws)
+    int64_t m_lastExternalBpmDrawTime;  // For throttling external BPM display updates
 
     void initButtons();
     void drawBpmDisplay();
