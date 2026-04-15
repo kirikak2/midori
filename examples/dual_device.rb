@@ -12,28 +12,42 @@ usb = MIDIDevices.usb_midi_host
 sam_available = !sam.nil?
 usb_available = !usb.nil?
 
-puts "Board: #{BoardConfig::BOARD_NAME}"
-puts "SAM2695: #{sam_available ? 'available' : 'not available'}"
-puts "USB-MIDI Host: #{usb_available ? 'available' : 'not available'}"
+UI.log("Board: #{BoardConfig::BOARD_NAME}")
+UI.log("SAM2695: #{sam_available ? 'available' : 'not available'}")
+UI.log("USB-MIDI Host: #{usb_available ? 'available' : 'not available'}")
 
 # Exit if no devices available
 unless sam_available || usb_available
-  puts "No MIDI devices available on this board"
+  UI.log("No MIDI devices available on this board")
   exit
 end
 
 # Initialize SAM2695 device
 if sam_available
   sam_device = MIDI::Device.new(sam)
+  sam_input = MIDI::Input.new(sam_device)
+  sam_input.on(:note_on) do |event|
+    UI.log("SAM2695 Note On: #{event[:note]} Velocity: #{event[:velocity]}")
+  end
+  sam_input.on(:note_off) do |event|
+    UI.log("SAM2695 Note Off: #{event[:note]}")
+  end
   sam_device.program_change(0, channel: 0)  # Acoustic Grand Piano
-  puts "SAM2695 device initialized"
+  UI.log("SAM2695 device initialized")
 end
 
 # Initialize USB-MIDI device
 if usb_available
   usb_device = MIDI::Device.new(usb)
+  usb_input = MIDI::Input.new(usb_device)
+  usb_input.on(:note_on) do |event|
+    UI.log("USB-MIDI Note On: #{event[:note]} Velocity: #{event[:velocity]}")
+  end
+  usb_input.on(:note_off) do |event|
+    UI.log("USB-MIDI Note Off: #{event[:note]}")
+  end
   usb_device.program_change(1, channel: 0)  # Bright Acoustic Piano
-  puts "USB-MIDI device initialized"
+  UI.log("USB-MIDI device initialized")
 end
 
 # Pad 1: Play on SAM2695 (if available)
