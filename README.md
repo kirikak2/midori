@@ -19,12 +19,17 @@
 | Board | Notes |
 |-------|-------|
 | M5Stack CoreS3 | Touch screen UI available |
+| M5Stack Tab5 | Touch screen UI available |
 | Freenove ESP32-S3 | Script operation via serial console |
 
-## Tested MIDI Devices
+## Tested MIDI Devices (USB)
+
+The following devices have been confirmed to work as USB MIDI hosts. MIDI-DIN is universally supported and not listed here.
 
 - Roland J-6
 - Teenage Engineering OP-1 field
+- ROLI Lightpad BLOCKS
+- ROLI LUMI keys
 
 ## Building
 
@@ -37,9 +42,10 @@
 Run the switch script for your target board:
 
 ```bash
-./switch_board.sh m5stack    # M5Stack CoreS3
+./switch_board.sh m5stack              # M5Stack CoreS3
 ./switch_board.sh m5stack_with_usbserial # M5Stack CoreS3 using USB-Serial mode (for develop)
-./switch_board.sh freenove   # Freenove ESP32-S3 (for develop)
+./switch_board.sh m5stack_tab5         # M5Stack Tab5 (ESP32-P4)
+./switch_board.sh freenove             # Freenove ESP32-S3 (for develop)
 ```
 
 ### Instructions
