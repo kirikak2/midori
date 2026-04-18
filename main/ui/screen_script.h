@@ -45,6 +45,7 @@ private:
     bool m_isActive;
     bool m_needsRedraw;
     bool m_refreshButtonPressed;
+    uint32_t m_scriptListVersion;
 
     void drawScriptList();
     void drawScriptItem(int index, int y);

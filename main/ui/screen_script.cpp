@@ -43,6 +43,7 @@ ScreenScripts::ScreenScripts()
     , m_isActive(false)
     , m_needsRedraw(false)
     , m_refreshButtonPressed(false)
+    , m_scriptListVersion(0)
 {
     memset(m_scripts, 0, sizeof(m_scripts));
     m_currentScript[0] = '\0';
@@ -52,11 +53,25 @@ void ScreenScripts::enter()
 {
     m_isActive = true;
 
-    // Don't auto-refresh - let user press Refresh button after SD card is mounted
-    // This avoids race condition with PicoRuby's SD card mounting
+    // Load current script list if Ruby has already populated it
+    uint32_t currentVersion = picoruby_esp32_get_script_list_version();
+    if (currentVersion != m_scriptListVersion && picoruby_esp32_script_list_ready()) {
+        m_scriptListVersion = currentVersion;
+        clearScripts();
+        int count = picoruby_esp32_get_script_count();
+        for (int i = 0; i < count && m_scriptCount < MAX_SCRIPTS; i++) {
+            const char* name = picoruby_esp32_get_script_name(i);
+            if (name != NULL) {
+                addScript(name);
+            }
+        }
+        if (m_scriptCount > 0 && m_selectedIndex < 0) {
+            m_selectedIndex = 0;
+        }
+    }
 
-    ui_clear_content_area();
     draw();
+    m_needsRedraw = false;
 }
 
 void ScreenScripts::leave()
@@ -68,6 +83,25 @@ void ScreenScripts::update()
 {
     if (!m_isActive) return;
 
+    // Reload list if Ruby has updated the script list since we last saw it
+    uint32_t currentVersion = picoruby_esp32_get_script_list_version();
+    if (currentVersion != m_scriptListVersion && picoruby_esp32_script_list_ready()) {
+        m_scriptListVersion = currentVersion;
+        clearScripts();
+        int count = picoruby_esp32_get_script_count();
+        for (int i = 0; i < count && m_scriptCount < MAX_SCRIPTS; i++) {
+            const char* name = picoruby_esp32_get_script_name(i);
+            if (name != NULL) {
+                addScript(name);
+            }
+        }
+        ESP_LOGI(TAG, "Script list updated: %d script(s) (version %lu)", m_scriptCount, (unsigned long)currentVersion);
+        if (m_scriptCount > 0 && m_selectedIndex < 0) {
+            m_selectedIndex = 0;
+        }
+        m_needsRedraw = true;
+    }
+
     if (m_needsRedraw) {
         draw();
         m_needsRedraw = false;
@@ -76,6 +110,7 @@ void ScreenScripts::update()
 
 void ScreenScripts::draw()
 {
+    ui_clear_content_area();
     drawScriptList();
 }
 
@@ -290,35 +325,12 @@ void ScreenScripts::clearScripts()
 void ScreenScripts::refreshFromSD()
 {
 #ifdef CONFIG_USB_MIDI_SDCARD_ENABLED
-    // Clear current list
-    clearScripts();
-
-    // Check if PicoRuby has notified us about available scripts
-    if (!picoruby_esp32_script_list_ready()) {
-        ESP_LOGW(TAG, "Script list not ready yet. Requesting SD card re-initialization.");
-        // Request Ruby to re-initialize SD card
-        picoruby_esp32_request_sd_refresh();
-        return;
-    }
-
-    // Get scripts from PicoRuby's script list
-    int count = picoruby_esp32_get_script_count();
-    for (int i = 0; i < count && m_scriptCount < MAX_SCRIPTS; i++) {
-        const char* name = picoruby_esp32_get_script_name(i);
-        if (name != NULL) {
-            addScript(name);
-        }
-    }
-
-    ESP_LOGI(TAG, "Found %d script(s) from PicoRuby", m_scriptCount);
-
-    // Auto-select first script if none selected
-    if (m_scriptCount > 0 && m_selectedIndex < 0) {
-        m_selectedIndex = 0;
-    }
+    // Request Ruby to re-scan the SD card. update() will detect the new
+    // version when notify_scripts_to_c completes.
+    picoruby_esp32_request_sd_refresh();
+    ESP_LOGI(TAG, "SD card refresh requested (version %lu)", (unsigned long)picoruby_esp32_get_script_list_version());
 #else
     ESP_LOGW(TAG, "SD card support not enabled");
-    // Add a test script for development
     addScript("app.rb");
     m_selectedIndex = 0;
 #endif
