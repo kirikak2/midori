@@ -13,7 +13,7 @@ SDカード内のスクリプトから簡単にアクセスできるようにな
 | m5stack (CoreS3) | ○ (17,18) | ○ | - |
 | m5stack_with_usbserial | ○ (17,18) | - | - |
 | freenove (ESP32-S3) | ○ (17,18) | ○ | - |
-| m5stack_tab5 (P4) | ○ (6,7) | ○ | ○ (未実装) |
+| m5stack_tab5 (P4) | ○ (53,54 / Port A) | ○ | ○ (未実装) |
 
 ## 推奨: MIDIDevicesモジュールを使用する方法
 
@@ -65,8 +65,8 @@ require 'sam2695'
 # M5Stack/Freenoveの場合（ピン17,18）
 sam = SAM2695.new(17, 18)
 
-# M5Stack Tab5の場合（ピン6,7）
-# sam = SAM2695.new(6, 7)
+# M5Stack Tab5の場合（Port Aピン: TX=53, RX=54）
+# sam = SAM2695.new(53, 54)
 
 device = MIDI::Device.new(sam)
 ```

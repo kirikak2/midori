@@ -525,7 +525,7 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 | m5stack | ○ (17,18) | ○ | - |
 | m5stack_with_usbserial | ○ (17,18) | - | - |
 | freenove | ○ (17,18) | ○ | - |
-| m5stack_tab5 | ○ (6,7) | ○ | ○ (未実装) |
+| m5stack_tab5 | ○ (53,54 / Port A) | ○ | ○ (未実装) |
 
 ### アーキテクチャ
 
@@ -615,9 +615,9 @@ device = MIDI::Device.new(sam)
 if(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
   set(BOARD_NAME "M5Stack Tab5")
   # ... SD card settings ...
-  # MIDI devices
-  set(SAM2695_TX_PIN 6)
-  set(SAM2695_RX_PIN 7)
+  # MIDI devices (Port A / UART)
+  set(SAM2695_TX_PIN 53)  # Port A pin2 (SDA)
+  set(SAM2695_RX_PIN 54)  # Port A pin1 (SCL)
   set(HAS_SAM2695 true)
   set(HAS_USB_MIDI_HOST true)
   set(HAS_USB_MIDI_DEVICE true)  # Future implementation
