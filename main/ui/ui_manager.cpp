@@ -64,6 +64,14 @@ esp_err_t UIManager::init()
     // Initialize screens (placeholders for now)
     initScreens();
 
+    // Reset any text-scroll state left over from lcd_console boot screen.
+    // Without this, setTextScroll(true) and setScrollRect from lcd_console_init
+    // remain active globally and cause flicker (the scroll-rect area gets
+    // filled with the scroll-rect's bgcolor whenever a print() crosses an
+    // invisible boundary).
+    M5.Lcd.setTextScroll(false);
+    M5.Lcd.setScrollRect(0, 0, M5.Lcd.width(), M5.Lcd.height());
+
     // Clear screen
     M5.Lcd.fillScreen(UI_COLOR_BLACK);
 
@@ -327,9 +335,11 @@ void UIManager::setBpm(float bpm)
         if (m_bpmChangeCallback) {
             m_bpmChangeCallback(bpm);
         }
-        if (m_currentIndex == UI_SCREEN_MAIN) {
-            m_needsRedraw = true;
-        }
+        // NOTE: do NOT set m_needsRedraw here. The Main screen's update() polls
+        // for BPM changes and updates only the BPM area. Setting m_needsRedraw
+        // would force a full-screen redraw (status bar + content + nav bar) on
+        // every external MIDI clock tick (~48 Hz in sync mode), causing visible
+        // flicker.
     }
 }
 
@@ -341,9 +351,10 @@ float UIManager::getBpm() const
 void UIManager::setExternalBpm(float bpm)
 {
     m_externalBpm = bpm;
-    if (m_syncMode && m_currentIndex == UI_SCREEN_MAIN) {
-        m_needsRedraw = true;
-    }
+    // NOTE: do NOT set m_needsRedraw here. The Main screen's update() polls
+    // ui.getBpm() (which returns externalBpm in sync mode) and ui.getExternalBpm()
+    // and refreshes only the affected widgets. Forcing a full-screen redraw on
+    // every MIDI clock tick (~48 Hz at 120 BPM) caused severe flicker.
 }
 
 float UIManager::getExternalBpm() const
@@ -359,9 +370,8 @@ void UIManager::setExternalBpmSource(midi_interface_t source, float bpm)
     // Update main external BPM if this is the selected source
     if (source == m_selectedExternalBpmSource) {
         m_externalBpm = bpm;
-        if (m_syncMode && m_currentIndex == UI_SCREEN_MAIN) {
-            m_needsRedraw = true;
-        }
+        // NOTE: do NOT set m_needsRedraw. Same reason as setExternalBpm() above
+        // (called ~48 Hz from MIDI clock; full-screen redraw causes flicker).
     }
 }
 

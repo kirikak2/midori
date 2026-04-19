@@ -17,17 +17,20 @@ ScreenMain& getScreenMain()
 }
 
 // Layout constants - Board-specific
+// Top row layout (centered):  [-10][-1]  [ BPM ]  [+1][+10]
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
 // Tab5: Larger fonts and spacious layout for 1280x720
-static constexpr int BPM_TEXT_SIZE = 6;
+static constexpr int BPM_TEXT_SIZE = 5;          // Reduced from 6 to fit between buttons
 static constexpr int BPM_LABEL_TEXT_SIZE = 2;
 static constexpr int BAR_BEAT_TEXT_SIZE = 4;
 static constexpr int EXTERNAL_BPM_TEXT_SIZE = 2;
-static constexpr int BPM_Y = UI_CONTENT_Y + 60;
 static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 30;
 static constexpr int BPM_BUTTON_W = 80;
 static constexpr int BPM_BUTTON_H = 50;
-static constexpr int BPM_BUTTON_SPACING = 90;
+static constexpr int BPM_DISPLAY_GAP = 30;       // Gap between BPM display and adjacent buttons
+static constexpr int BPM_BUTTON_GAP = 10;        // Gap between adjacent buttons
+// BPM display is vertically centered with the buttons
+static constexpr int BPM_Y = BPM_BUTTON_Y + (BPM_BUTTON_H - BPM_TEXT_SIZE * 8) / 2;
 static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 180;
 static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 140;
 static constexpr int SOURCE_BTN_W = 80;
@@ -45,11 +48,12 @@ static constexpr int BPM_TEXT_SIZE = 3;
 static constexpr int BPM_LABEL_TEXT_SIZE = 1;
 static constexpr int BAR_BEAT_TEXT_SIZE = 2;
 static constexpr int EXTERNAL_BPM_TEXT_SIZE = 1;
-static constexpr int BPM_Y = UI_CONTENT_Y + 20;
 static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 10;
 static constexpr int BPM_BUTTON_W = 45;
 static constexpr int BPM_BUTTON_H = 30;
-static constexpr int BPM_BUTTON_SPACING = 50;
+static constexpr int BPM_DISPLAY_GAP = 8;
+static constexpr int BPM_BUTTON_GAP = 4;
+static constexpr int BPM_Y = BPM_BUTTON_Y + (BPM_BUTTON_H - BPM_TEXT_SIZE * 8) / 2;
 static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 65;
 static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 48;
 static constexpr int SOURCE_BTN_W = 40;
@@ -63,9 +67,15 @@ static constexpr int PROGRESS_W = 260;
 static constexpr int PROGRESS_H = 16;
 #endif
 
+// BPM display total width: "999" + gap + "BPM" label
+static constexpr int BPM_NUM_WIDTH = BPM_TEXT_SIZE * 6 * 3;          // 3 digits
+static constexpr int BPM_LABEL_WIDTH = BPM_LABEL_TEXT_SIZE * 6 * 3;  // "BPM" = 3 chars
+static constexpr int BPM_DISPLAY_WIDTH = BPM_NUM_WIDTH + 10 + BPM_LABEL_WIDTH;
+
 ScreenMain::ScreenMain()
     : m_isActive(false)
     , m_needsRedraw(false)
+    , m_topSprite(nullptr)
     , m_tapIndex(0)
     , m_tapCount(0)
     , m_lastDrawnBpm(0)
@@ -82,41 +92,45 @@ ScreenMain::ScreenMain()
     initButtons();
 }
 
+ScreenMain::~ScreenMain()
+{
+    if (m_topSprite) {
+        m_topSprite->deleteSprite();
+        delete m_topSprite;
+        m_topSprite = nullptr;
+    }
+}
+
+// Top area covers UI_CONTENT_Y .. SYNC_Y - 1 (i.e. everything above the Sync button)
+static constexpr int TOP_AREA_Y = UI_CONTENT_Y;
+static constexpr int TOP_AREA_HEIGHT = SYNC_Y - UI_CONTENT_Y;
+
 void ScreenMain::initButtons()
 {
     int centerX = UI_SCREEN_WIDTH / 2;
+    int bpmHalfWidth = BPM_DISPLAY_WIDTH / 2;
 
-    // [-10] button
-    m_buttons[BTN_MINUS_10].x = centerX - 2 * BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
-    m_buttons[BTN_MINUS_10].y = BPM_BUTTON_Y;
-    m_buttons[BTN_MINUS_10].w = BPM_BUTTON_W;
-    m_buttons[BTN_MINUS_10].h = BPM_BUTTON_H;
+    // Layout: [-10][-1]  <BPM display>  [+1][+10]
+    // Inner buttons sit BPM_DISPLAY_GAP away from the BPM display.
+    // [-10] button (leftmost)
+    int minus1RightX = centerX - bpmHalfWidth - BPM_DISPLAY_GAP;
+    m_buttons[BTN_MINUS_1].x = minus1RightX - BPM_BUTTON_W;
+    m_buttons[BTN_MINUS_10].x = m_buttons[BTN_MINUS_1].x - BPM_BUTTON_GAP - BPM_BUTTON_W;
+
+    // [+1] [+10] buttons (right side)
+    m_buttons[BTN_PLUS_1].x = centerX + bpmHalfWidth + BPM_DISPLAY_GAP;
+    m_buttons[BTN_PLUS_10].x = m_buttons[BTN_PLUS_1].x + BPM_BUTTON_W + BPM_BUTTON_GAP;
+
+    for (int i = BTN_MINUS_10; i <= BTN_PLUS_10; i++) {
+        m_buttons[i].y = BPM_BUTTON_Y;
+        m_buttons[i].w = BPM_BUTTON_W;
+        m_buttons[i].h = BPM_BUTTON_H;
+        m_buttons[i].pressed = false;
+    }
     m_buttons[BTN_MINUS_10].label = "-10";
-    m_buttons[BTN_MINUS_10].pressed = false;
-
-    // [-1] button
-    m_buttons[BTN_MINUS_1].x = centerX - BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
-    m_buttons[BTN_MINUS_1].y = BPM_BUTTON_Y;
-    m_buttons[BTN_MINUS_1].w = BPM_BUTTON_W;
-    m_buttons[BTN_MINUS_1].h = BPM_BUTTON_H;
-    m_buttons[BTN_MINUS_1].label = "-1";
-    m_buttons[BTN_MINUS_1].pressed = false;
-
-    // [+1] button
-    m_buttons[BTN_PLUS_1].x = centerX + BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
-    m_buttons[BTN_PLUS_1].y = BPM_BUTTON_Y;
-    m_buttons[BTN_PLUS_1].w = BPM_BUTTON_W;
-    m_buttons[BTN_PLUS_1].h = BPM_BUTTON_H;
-    m_buttons[BTN_PLUS_1].label = "+1";
-    m_buttons[BTN_PLUS_1].pressed = false;
-
-    // [+10] button
-    m_buttons[BTN_PLUS_10].x = centerX + 2 * BPM_BUTTON_SPACING - BPM_BUTTON_W / 2;
-    m_buttons[BTN_PLUS_10].y = BPM_BUTTON_Y;
-    m_buttons[BTN_PLUS_10].w = BPM_BUTTON_W;
-    m_buttons[BTN_PLUS_10].h = BPM_BUTTON_H;
-    m_buttons[BTN_PLUS_10].label = "+10";
-    m_buttons[BTN_PLUS_10].pressed = false;
+    m_buttons[BTN_MINUS_1].label  = "-1";
+    m_buttons[BTN_PLUS_1].label   = "+1";
+    m_buttons[BTN_PLUS_10].label  = "+10";
 
     // [Sync] button
     m_buttons[BTN_SYNC].x = UI_SCREEN_WIDTH / 2 - SYNC_BTN_W / 2;
@@ -156,6 +170,29 @@ void ScreenMain::enter()
     m_lastDrawnBpm = -1;  // Force full redraw
     m_lastSyncButtonState = -1;  // Force sync button redraw
     m_lastDrawnExternalBpmSource = 0xFF;  // Force source buttons redraw
+
+    // Lazy-create the top-area sprite. Prefer internal RAM for speed; fall
+    // back to PSRAM (Tab5 needs ~600KB which exceeds internal RAM).
+    if (!m_topSprite) {
+        m_topSprite = new LGFX_Sprite(&M5.Lcd);
+        m_topSprite->setColorDepth(16);
+        m_topSprite->setPsram(false);
+        void* result = m_topSprite->createSprite(UI_SCREEN_WIDTH, TOP_AREA_HEIGHT);
+        if (!result) {
+            ESP_LOGW(TAG, "Top-area sprite alloc in internal RAM failed (%dx%d), trying PSRAM",
+                     UI_SCREEN_WIDTH, TOP_AREA_HEIGHT);
+            m_topSprite->setPsram(true);
+            result = m_topSprite->createSprite(UI_SCREEN_WIDTH, TOP_AREA_HEIGHT);
+        }
+        if (!result) {
+            ESP_LOGE(TAG, "Failed to create top-area sprite");
+            delete m_topSprite;
+            m_topSprite = nullptr;
+        } else {
+            ESP_LOGI(TAG, "Top-area sprite created: %dx%d", UI_SCREEN_WIDTH, TOP_AREA_HEIGHT);
+        }
+    }
+
     ui_clear_content_area();
     draw();
 }
@@ -183,15 +220,15 @@ void ScreenMain::update()
     float externalBpm = ui.getExternalBpm();
     bool syncMode = ui.getSyncMode();
 
-    // Check what changed - separate immediate vs throttled updates
-    if (currentBpm != m_lastDrawnBpm || syncMode != m_lastDrawnSyncMode) {
-        // User-initiated changes (BPM adjustment, sync toggle) - immediate update
+    // Compare on display-significant precision so we don't redraw when the
+    // rendered text would be identical (matters in Sync mode where the
+    // internal BPM tracks micro-fluctuations of the external clock).
+    if ((int)currentBpm != (int)m_lastDrawnBpm || syncMode != m_lastDrawnSyncMode) {
         needsBpmUpdate = true;
     }
 
-    if (externalBpm != m_lastDrawnExternalBpm) {
-        // External BPM changes from MIDI clock - throttle to reduce flicker
-        // At 120 BPM, MIDI clock sends 48 updates/sec. Throttle to ~10 FPS.
+    if ((int)(externalBpm * 10) != (int)(m_lastDrawnExternalBpm * 10)) {
+        // Throttle external BPM updates to ~10 FPS
         const int64_t EXTERNAL_BPM_UPDATE_INTERVAL_US = 100000;  // 100ms = 10 FPS
         if (now - m_lastExternalBpmDrawTime >= EXTERNAL_BPM_UPDATE_INTERVAL_US) {
             needsExternalBpmUpdate = true;
@@ -211,113 +248,138 @@ void ScreenMain::update()
         draw();
         m_needsRedraw = false;
     } else {
-        // Batch partial updates in a single transaction to prevent flickering
-        if (needsBpmUpdate || needsExternalBpmUpdate || needsBarBeatUpdate || needsProgressUpdate) {
-            M5.Lcd.startWrite();
-            if (needsBpmUpdate || needsExternalBpmUpdate) {
-                drawBpmDisplay();
-                drawExternalBpm();
-                drawSyncButton();  // Will skip redraw if visual state unchanged
-            }
-            if (needsBarBeatUpdate) {
-                drawBarBeat();
-            }
-            if (needsProgressUpdate) {
-                drawBeatProgress();
-            }
-            M5.Lcd.endWrite();
+        // Top area renders to a sprite and pushes atomically, so no outer
+        // startWrite/endWrite is needed (it would only batch sprite pushes
+        // which can confuse the Tab5 DSI framebuffer panel).
+        if (needsBpmUpdate || needsExternalBpmUpdate) {
+            drawTopArea();
+            drawSyncButton();  // visual state may change with BPM/sync changes
+        }
+        if (needsBarBeatUpdate) {
+            drawBarBeat();
+        }
+        if (needsProgressUpdate) {
+            drawBeatProgress();
         }
     }
 }
 
 void ScreenMain::draw()
 {
-    drawButtons();
-    drawBpmDisplay();
-    drawExternalBpm();
+    drawTopArea();
     drawSyncButton();
     drawBarBeat();
     drawBeatProgress();
 }
 
-void ScreenMain::drawBpmDisplay()
+void ScreenMain::drawTopArea()
 {
     UIManager& ui = UIManager::getInstance();
     float bpm = ui.getBpm();
+    float externalBpm = ui.getExternalBpm();
     bool syncMode = ui.getSyncMode();
+    midi_interface_t selectedSource = ui.getExternalBpmSourceSelection();
 
-    // Draw BPM value (background color overwrites old content)
-    int bpmDisplayX = UI_SCREEN_WIDTH / 2 - (BPM_TEXT_SIZE * 3 * 6) / 2;
-    M5.Lcd.setTextSize(BPM_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    // Pick rendering target: sprite (preferred, atomic push) or LCD directly
+    LovyanGFX* canvas = m_topSprite ? (LovyanGFX*)m_topSprite : (LovyanGFX*)&M5.Lcd;
+    int yOffset = m_topSprite ? TOP_AREA_Y : 0;  // Sprite-relative when using sprite
 
+    if (m_topSprite) {
+        m_topSprite->fillSprite(UI_COLOR_BLACK);
+    }
+
+    // Disable any text wrap/scroll that might be active on the canvas, just in case
+    // (LovyanGFX defaults to wrap-horizontal=on, which can cause unexpected redraws
+    // if a print() ever spans past the right edge).
+    canvas->setTextWrap(false, false);
+
+    // ----- BPM adjustment buttons -----
+    for (int i = BTN_MINUS_10; i <= BTN_PLUS_10; i++) {
+        Button& btn = m_buttons[i];
+        uint16_t bgColor = syncMode ? UI_COLOR_DARKGRAY : UI_COLOR_NAVY;
+        uint16_t textColor = syncMode ? UI_COLOR_GRAY : UI_COLOR_WHITE;
+
+        if (btn.pressed && !syncMode) {
+            bgColor = ui_lighten_color(bgColor);
+        }
+
+        int sy = btn.y - yOffset;
+        canvas->fillRoundRect(btn.x, sy, btn.w, btn.h, 4, bgColor);
+        canvas->drawRoundRect(btn.x, sy, btn.w, btn.h, 4, UI_COLOR_WHITE);
+
+        canvas->setTextSize(1);
+        canvas->setTextColor(textColor, bgColor);
+        int textW = strlen(btn.label) * 6;
+        canvas->setCursor(btn.x + (btn.w - textW) / 2, sy + (btn.h - 8) / 2);
+        canvas->print(btn.label);
+    }
+
+    // ----- BPM display (number + "BPM" label, both centered as a group) -----
     char bpmStr[16];
     snprintf(bpmStr, sizeof(bpmStr), "%3d", (int)bpm);
 
-    M5.Lcd.setCursor(bpmDisplayX, BPM_Y);
-    M5.Lcd.print(bpmStr);
+    int bpmStartX = UI_SCREEN_WIDTH / 2 - BPM_DISPLAY_WIDTH / 2;
+    int bpmSY = BPM_Y - yOffset;
 
-    // Draw "BPM" label
-    M5.Lcd.setTextSize(BPM_LABEL_TEXT_SIZE);
-    M5.Lcd.setCursor(bpmDisplayX + BPM_TEXT_SIZE * 3 * 6 + 10, BPM_Y + BPM_TEXT_SIZE * 8 / 2 - BPM_LABEL_TEXT_SIZE * 4);
-    M5.Lcd.print("BPM");
+    canvas->setTextSize(BPM_TEXT_SIZE);
+    canvas->setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    canvas->setCursor(bpmStartX, bpmSY);
+    canvas->print(bpmStr);
 
-    m_lastDrawnBpm = bpm;
-    m_lastDrawnSyncMode = syncMode;
-}
+    canvas->setTextSize(BPM_LABEL_TEXT_SIZE);
+    canvas->setCursor(bpmStartX + BPM_NUM_WIDTH + 10,
+                      bpmSY + BPM_TEXT_SIZE * 8 / 2 - BPM_LABEL_TEXT_SIZE * 4);
+    canvas->print("BPM");
 
-void ScreenMain::drawExternalBpm()
-{
-    UIManager& ui = UIManager::getInstance();
-    float externalBpm = ui.getExternalBpm();
-    midi_interface_t selectedSource = ui.getExternalBpmSourceSelection();
+    // ----- Source selection buttons -----
+    const char* sourceLabels[] = {"USB", "DIN", "BLE"};
+    for (int i = 0; i < 3; i++) {
+        Button& btn = m_buttons[BTN_SOURCE_USB + i];
+        bool isSelected = (selectedSource == (midi_interface_t)i);
+        float sourceBpm = ui.getExternalBpmBySource((midi_interface_t)i);
 
-    // Only redraw source buttons if selection changed
-    bool sourceChanged = (selectedSource != m_lastDrawnExternalBpmSource);
+        uint16_t bgColor = isSelected ? UI_COLOR_BLUE : UI_COLOR_DARKGRAY;
+        uint16_t textColor = (sourceBpm > 0) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
 
-    if (sourceChanged) {
-        // Draw source selection buttons
-        const char* sourceLabels[] = {"USB", "DIN", "BLE"};
-        for (int i = 0; i < 3; i++) {
-            Button& btn = m_buttons[BTN_SOURCE_USB + i];
-            bool isSelected = (selectedSource == (midi_interface_t)i);
-            float sourceBpm = ui.getExternalBpmBySource((midi_interface_t)i);
-
-            uint16_t bgColor = isSelected ? UI_COLOR_BLUE : UI_COLOR_DARKGRAY;
-            uint16_t textColor = (sourceBpm > 0) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
-
-            if (!isSelected && sourceBpm <= 0) {
-                bgColor = UI_COLOR_BLACK;
-            }
-
-            M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 2, bgColor);
-            M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 2, UI_COLOR_WHITE);
-
-            M5.Lcd.setTextSize(1);
-            M5.Lcd.setTextColor(textColor, bgColor);
-            int textW = strlen(sourceLabels[i]) * 6;
-            M5.Lcd.setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
-            M5.Lcd.print(sourceLabels[i]);
+        if (!isSelected && sourceBpm <= 0) {
+            bgColor = UI_COLOR_BLACK;
         }
-        m_lastDrawnExternalBpmSource = selectedSource;
+
+        int sy = btn.y - yOffset;
+        canvas->fillRoundRect(btn.x, sy, btn.w, btn.h, 2, bgColor);
+        canvas->drawRoundRect(btn.x, sy, btn.w, btn.h, 2, UI_COLOR_WHITE);
+
+        canvas->setTextSize(1);
+        canvas->setTextColor(textColor, bgColor);
+        int textW = strlen(sourceLabels[i]) * 6;
+        canvas->setCursor(btn.x + (btn.w - textW) / 2, sy + (btn.h - 8) / 2);
+        canvas->print(sourceLabels[i]);
     }
 
-    // Draw external BPM (background color overwrites old content)
-    M5.Lcd.setTextSize(EXTERNAL_BPM_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-
+    // ----- External BPM text -----
     char extStr[32];
     if (externalBpm > 0) {
         snprintf(extStr, sizeof(extStr), "Ext: %.1f BPM", externalBpm);
     } else {
         snprintf(extStr, sizeof(extStr), "Ext: --- BPM");
     }
-
     int extTextWidth = strlen(extStr) * 6 * EXTERNAL_BPM_TEXT_SIZE;
-    M5.Lcd.setCursor((UI_SCREEN_WIDTH - extTextWidth) / 2, EXTERNAL_BPM_Y);
-    M5.Lcd.print(extStr);
+    int extSY = EXTERNAL_BPM_Y - yOffset;
 
+    canvas->setTextSize(EXTERNAL_BPM_TEXT_SIZE);
+    canvas->setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+    canvas->setCursor((UI_SCREEN_WIDTH - extTextWidth) / 2, extSY);
+    canvas->print(extStr);
+
+    // Push the entire top area atomically
+    if (m_topSprite) {
+        m_topSprite->pushSprite(0, TOP_AREA_Y);
+    }
+
+    m_lastDrawnBpm = bpm;
     m_lastDrawnExternalBpm = externalBpm;
+    m_lastDrawnSyncMode = syncMode;
+    m_lastDrawnExternalBpmSource = selectedSource;
 }
 
 void ScreenMain::drawSyncButton()
@@ -417,33 +479,6 @@ void ScreenMain::drawBeatProgress()
     m_lastDrawnProgress = progress;
 }
 
-void ScreenMain::drawButtons()
-{
-    UIManager& ui = UIManager::getInstance();
-    bool syncMode = ui.getSyncMode();
-
-    // Draw BPM adjustment buttons (disabled when in sync mode)
-    for (int i = BTN_MINUS_10; i <= BTN_PLUS_10; i++) {
-        Button& btn = m_buttons[i];
-        uint16_t bgColor = syncMode ? UI_COLOR_DARKGRAY : UI_COLOR_NAVY;
-        uint16_t textColor = syncMode ? UI_COLOR_GRAY : UI_COLOR_WHITE;
-
-        if (btn.pressed && !syncMode) {
-            bgColor = ui_lighten_color(bgColor);
-        }
-
-        M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, bgColor);
-        M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 4, UI_COLOR_WHITE);
-
-        M5.Lcd.setTextSize(1);
-        M5.Lcd.setTextColor(textColor, bgColor);
-
-        int textW = strlen(btn.label) * 6;
-        M5.Lcd.setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
-        M5.Lcd.print(btn.label);
-    }
-}
-
 int ScreenMain::hitTestButton(int x, int y)
 {
     for (int i = 0; i < BTN_COUNT; i++) {
@@ -502,25 +537,25 @@ void ScreenMain::handleButtonPress(int buttonId)
             if (ui.getExternalBpm() > 0) {
                 ui.setSyncMode(!syncMode);
                 drawSyncButton();
-                drawButtons();  // Update button enabled states
+                drawTopArea();  // Refresh BPM-adjust button enabled state
             }
             break;
 
         case BTN_SOURCE_USB:
             ui.setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
-            drawExternalBpm();
+            drawTopArea();
             drawSyncButton();
             break;
 
         case BTN_SOURCE_DIN:
             ui.setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
-            drawExternalBpm();
+            drawTopArea();
             drawSyncButton();
             break;
 
         case BTN_SOURCE_BLE:
             ui.setExternalBpmSourceSelection(MIDI_INTERFACE_BLE);
-            drawExternalBpm();
+            drawTopArea();
             drawSyncButton();
             break;
     }

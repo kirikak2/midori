@@ -5,10 +5,12 @@
 
 #ifdef __cplusplus
 
+#include <M5Unified.h>
+
 class ScreenMain : public Screen {
 public:
     ScreenMain();
-    ~ScreenMain() override = default;
+    ~ScreenMain() override;
 
     void enter() override;
     void leave() override;
@@ -44,6 +46,11 @@ private:
     bool m_isActive;
     bool m_needsRedraw;
 
+    // Sprite covering the area above the Sync button (BPM adjust buttons,
+    // BPM display, source-select buttons, external BPM text). Drawn off-screen
+    // and pushed in a single pushSprite to avoid tearing on the Tab5 DSI panel.
+    LGFX_Sprite* m_topSprite;
+
     // TAP tempo state
     uint32_t m_tapTimes[UI_TAP_TEMPO_SAMPLES];
     int m_tapIndex;
@@ -61,12 +68,10 @@ private:
     int64_t m_lastExternalBpmDrawTime;  // For throttling external BPM display updates
 
     void initButtons();
-    void drawBpmDisplay();
-    void drawExternalBpm();
+    void drawTopArea();        // BPM buttons + BPM display + source buttons + external BPM (sprite-backed)
     void drawSyncButton();
     void drawBarBeat();
     void drawBeatProgress();
-    void drawButtons();
     int hitTestButton(int x, int y);
     void handleButtonPress(int buttonId);
     void processTapTempo();
