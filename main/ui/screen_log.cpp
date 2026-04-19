@@ -24,10 +24,14 @@ static portMUX_TYPE s_log_mutex = portMUX_INITIALIZER_UNLOCKED;
 static constexpr int LOG_TEXT_SIZE = 2;
 static constexpr int LOG_LINE_HEIGHT = 24;
 static constexpr int LOG_LEFT_MARGIN = 10;
+// Batch sprite size: 5 lines * 24px * 1280px * 2 bytes = 300KB (in internal RAM)
+static constexpr int LOG_BATCH_LINES = 5;
 #else
 static constexpr int LOG_TEXT_SIZE = 1;
 static constexpr int LOG_LINE_HEIGHT = 16;
 static constexpr int LOG_LEFT_MARGIN = 4;
+// Batch sprite size: 4 lines * 16px * 320px * 2 bytes = 40KB
+static constexpr int LOG_BATCH_LINES = 4;
 #endif
 
 ScreenLog::ScreenLog()
@@ -37,6 +41,7 @@ ScreenLog::ScreenLog()
     , m_scrollOffset(0)
     , m_needsRedraw(false)
     , m_isActive(false)
+    , m_sprite(nullptr)
 {
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
     // Allocate log buffer from PSRAM on Tab5 (11KB buffer)
@@ -68,12 +73,40 @@ ScreenLog::~ScreenLog()
         free(m_logBuffer);
         m_logBuffer = nullptr;
     }
+    if (m_sprite) {
+        m_sprite->deleteSprite();
+        delete m_sprite;
+        m_sprite = nullptr;
+    }
 }
 
 void ScreenLog::enter()
 {
     m_isActive = true;
     m_scrollOffset = 0;  // Reset to bottom (newest)
+
+    // Lazy-create batch sprite in internal RAM for faster rendering
+    // Internal RAM is ~50-100x faster than PSRAM for pixel operations
+    if (!m_sprite) {
+        int batchHeight = LOG_BATCH_LINES * LOG_LINE_HEIGHT;
+        m_sprite = new LGFX_Sprite(&M5.Lcd);
+        m_sprite->setColorDepth(16);
+        m_sprite->setPsram(false);  // Use internal RAM for speed
+        void* result = m_sprite->createSprite(UI_SCREEN_WIDTH, batchHeight);
+        if (!result) {
+            ESP_LOGW(TAG, "Failed to create Log batch sprite in internal RAM, trying PSRAM");
+            m_sprite->setPsram(true);
+            result = m_sprite->createSprite(UI_SCREEN_WIDTH, batchHeight);
+        }
+        if (!result) {
+            ESP_LOGW(TAG, "Failed to create Log sprite");
+            delete m_sprite;
+            m_sprite = nullptr;
+        } else {
+            ESP_LOGI(TAG, "Log batch sprite created: %dx%d", UI_SCREEN_WIDTH, batchHeight);
+        }
+    }
+
     ui_clear_content_area();
     draw();
 }
@@ -109,30 +142,69 @@ void ScreenLog::drawLogLines()
 {
     if (!m_logBuffer) return;
 
+    // Step 1: Take a quick snapshot of log lines inside critical section
+    // (keep critical section as short as possible - no rendering here)
+    // Use static buffer to avoid stack overflow (2750 bytes on Tab5)
+    // Safe because drawLogLines is only called from main task
+    static char snapshot[VISIBLE_LINES][MAX_LINE_LENGTH];
+
     portENTER_CRITICAL(&s_log_mutex);
-
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setTextSize(LOG_TEXT_SIZE);
-
-    int y = UI_CONTENT_Y + 5;
-
     for (int i = 0; i < VISIBLE_LINES; i++) {
-        // Clear the entire line first to remove any leftover characters from previous longer messages
-        M5.Lcd.fillRect(LOG_LEFT_MARGIN, y, UI_SCREEN_WIDTH - LOG_LEFT_MARGIN, LOG_LINE_HEIGHT, UI_COLOR_BLACK);
-
-        M5.Lcd.setCursor(LOG_LEFT_MARGIN, y);
-
         if (i < m_logCount) {
             int lineIndex = getDisplayLine(i);
             if (lineIndex >= 0) {
-                M5.Lcd.print(m_logBuffer[lineIndex]);
+                strncpy(snapshot[i], m_logBuffer[lineIndex], MAX_LINE_LENGTH);
+                snapshot[i][MAX_LINE_LENGTH - 1] = '\0';
+            } else {
+                snapshot[i][0] = '\0';
             }
+        } else {
+            snapshot[i][0] = '\0';
         }
-
-        y += LOG_LINE_HEIGHT;
     }
-
     portEXIT_CRITICAL(&s_log_mutex);
+
+    // Step 2: Render to sprite in batches (outside critical section)
+    if (m_sprite) {
+        // Batch rendering: process LOG_BATCH_LINES lines per sprite push
+        // Sprite is in internal RAM (fast), batch keeps total memory small
+        m_sprite->setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+        m_sprite->setTextSize(LOG_TEXT_SIZE);
+
+        int batchHeight = LOG_BATCH_LINES * LOG_LINE_HEIGHT;
+
+        for (int batch = 0; batch < VISIBLE_LINES; batch += LOG_BATCH_LINES) {
+            int linesInBatch = LOG_BATCH_LINES;
+            if (batch + linesInBatch > VISIBLE_LINES) {
+                linesInBatch = VISIBLE_LINES - batch;
+            }
+
+            // Clear sprite for this batch
+            m_sprite->fillSprite(UI_COLOR_BLACK);
+
+            // Draw lines for this batch
+            for (int i = 0; i < linesInBatch; i++) {
+                m_sprite->setCursor(LOG_LEFT_MARGIN, i * LOG_LINE_HEIGHT);
+                m_sprite->print(snapshot[batch + i]);
+            }
+
+            // Push batch to LCD
+            int lcd_y = UI_CONTENT_Y + 5 + batch * LOG_LINE_HEIGHT;
+            m_sprite->pushSprite(0, lcd_y);
+        }
+    } else {
+        // Fallback: direct LCD rendering
+        M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+        M5.Lcd.setTextSize(LOG_TEXT_SIZE);
+
+        int y = UI_CONTENT_Y + 5;
+        for (int i = 0; i < VISIBLE_LINES; i++) {
+            M5.Lcd.fillRect(LOG_LEFT_MARGIN, y, UI_SCREEN_WIDTH - LOG_LEFT_MARGIN, LOG_LINE_HEIGHT, UI_COLOR_BLACK);
+            M5.Lcd.setCursor(LOG_LEFT_MARGIN, y);
+            M5.Lcd.print(snapshot[i]);
+            y += LOG_LINE_HEIGHT;
+        }
+    }
 }
 
 int ScreenLog::getDisplayLine(int displayIndex)
