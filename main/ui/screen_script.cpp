@@ -24,6 +24,7 @@ ScreenScripts& getScreenScripts()
 static constexpr int LIST_START_Y = UI_CONTENT_Y + 10;
 static constexpr int LIST_MARGIN = 15;
 static constexpr int ITEM_TEXT_SIZE = 2;
+static constexpr int ITEM_HEIGHT = 40;
 static constexpr int REFRESH_BUTTON_HEIGHT = 50;
 static constexpr int REFRESH_BUTTON_WIDTH = 180;
 static constexpr int REFRESH_BUTTON_MARGIN = 10;
@@ -31,10 +32,17 @@ static constexpr int REFRESH_BUTTON_MARGIN = 10;
 static constexpr int LIST_START_Y = UI_CONTENT_Y + 5;
 static constexpr int LIST_MARGIN = 8;
 static constexpr int ITEM_TEXT_SIZE = 1;
+static constexpr int ITEM_HEIGHT = 20;
 static constexpr int REFRESH_BUTTON_HEIGHT = 30;
 static constexpr int REFRESH_BUTTON_WIDTH = 100;
 static constexpr int REFRESH_BUTTON_MARGIN = 5;
 #endif
+
+// Vertical area available for list items (between LIST_START_Y and the refresh button)
+static constexpr int LIST_BOTTOM_PADDING = 4;
+static constexpr int LIST_AREA_HEIGHT =
+    UI_CONTENT_HEIGHT - (LIST_START_Y - UI_CONTENT_Y)
+    - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN - LIST_BOTTOM_PADDING;
 
 ScreenScripts::ScreenScripts()
     : m_scriptCount(0)
@@ -44,9 +52,44 @@ ScreenScripts::ScreenScripts()
     , m_needsRedraw(false)
     , m_refreshButtonPressed(false)
     , m_scriptListVersion(0)
+    , m_pressStartY(0)
+    , m_pressStartScrollOffset(0)
+    , m_pressInList(false)
 {
     memset(m_scripts, 0, sizeof(m_scripts));
     m_currentScript[0] = '\0';
+}
+
+int ScreenScripts::visibleItems() const
+{
+    int n = LIST_AREA_HEIGHT / ITEM_HEIGHT;
+    if (n < 1) n = 1;
+    return n;
+}
+
+int ScreenScripts::maxScrollOffset() const
+{
+    int excess = m_scriptCount - visibleItems();
+    return excess > 0 ? excess : 0;
+}
+
+void ScreenScripts::clampScrollOffset()
+{
+    int maxOff = maxScrollOffset();
+    if (m_scrollOffset < 0) m_scrollOffset = 0;
+    if (m_scrollOffset > maxOff) m_scrollOffset = maxOff;
+}
+
+void ScreenScripts::ensureSelectedVisible()
+{
+    if (m_selectedIndex < 0) return;
+    int visible = visibleItems();
+    if (m_selectedIndex < m_scrollOffset) {
+        m_scrollOffset = m_selectedIndex;
+    } else if (m_selectedIndex >= m_scrollOffset + visible) {
+        m_scrollOffset = m_selectedIndex - visible + 1;
+    }
+    clampScrollOffset();
 }
 
 void ScreenScripts::enter()
@@ -116,10 +159,12 @@ void ScreenScripts::draw()
 
 void ScreenScripts::drawScriptList()
 {
+    clampScrollOffset();
+    int visible = visibleItems();
     int y = LIST_START_Y;
 
     // Draw visible items
-    for (int i = 0; i < VISIBLE_ITEMS && (i + m_scrollOffset) < m_scriptCount; i++) {
+    for (int i = 0; i < visible && (i + m_scrollOffset) < m_scriptCount; i++) {
         int scriptIndex = i + m_scrollOffset;
         drawScriptItem(scriptIndex, y);
         y += ITEM_HEIGHT;
@@ -134,8 +179,35 @@ void ScreenScripts::drawScriptList()
         M5.Lcd.print("No scripts found on SD card");
     }
 
+    // Scroll indicator on the right edge when overflowing
+    if (m_scriptCount > visible) {
+        drawScrollIndicator();
+    }
+
     // Draw refresh button at the bottom
     drawRefreshButton();
+}
+
+void ScreenScripts::drawScrollIndicator()
+{
+    int visible = visibleItems();
+    int trackX = UI_SCREEN_WIDTH - LIST_MARGIN + 2;
+    int trackW = 4;
+    int trackY = LIST_START_Y;
+    int trackH = visible * ITEM_HEIGHT;
+
+    // Track background
+    M5.Lcd.fillRect(trackX, trackY, trackW, trackH, UI_COLOR_DARKGRAY);
+
+    // Thumb proportional to visible/total
+    int thumbH = (trackH * visible) / m_scriptCount;
+    if (thumbH < 8) thumbH = 8;
+    int maxOff = maxScrollOffset();
+    int thumbY = trackY;
+    if (maxOff > 0) {
+        thumbY += ((trackH - thumbH) * m_scrollOffset) / maxOff;
+    }
+    M5.Lcd.fillRect(trackX, thumbY, trackW, thumbH, UI_COLOR_WHITE);
 }
 
 void ScreenScripts::drawRefreshButton()
@@ -200,8 +272,10 @@ int ScreenScripts::hitTestItem(int y)
     if (y < LIST_START_Y) return -1;
 
     int relY = y - LIST_START_Y;
-    int itemIndex = relY / ITEM_HEIGHT + m_scrollOffset;
+    int slot = relY / ITEM_HEIGHT;
+    if (slot >= visibleItems()) return -1;  // tapped below visible rows
 
+    int itemIndex = slot + m_scrollOffset;
     if (itemIndex >= 0 && itemIndex < m_scriptCount) {
         return itemIndex;
     }
@@ -211,10 +285,11 @@ int ScreenScripts::hitTestItem(int y)
 void ScreenScripts::onTouch(int touchId, int x, int y, bool pressed)
 {
     (void)touchId;  // Single touch for script selection
-    // Check if refresh button was touched
+
+    // Refresh button hit test matches drawRefreshButton geometry
     int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
-    int buttonX = (UI_SCREEN_WIDTH - 100) / 2;
-    int buttonW = 100;
+    int buttonX = (UI_SCREEN_WIDTH - REFRESH_BUTTON_WIDTH) / 2;
+    int buttonW = REFRESH_BUTTON_WIDTH;
     int buttonH = REFRESH_BUTTON_HEIGHT;
 
     if (x >= buttonX && x <= buttonX + buttonW &&
@@ -223,7 +298,6 @@ void ScreenScripts::onTouch(int touchId, int x, int y, bool pressed)
             m_refreshButtonPressed = true;
             m_needsRedraw = true;
         } else {
-            // Release - trigger refresh
             if (m_refreshButtonPressed) {
                 ESP_LOGI(TAG, "Refresh button clicked");
                 refreshFromSD();
@@ -234,18 +308,39 @@ void ScreenScripts::onTouch(int touchId, int x, int y, bool pressed)
         return;
     }
 
-    // Reset button state if touch is outside button
+    // Reset button state if touch drifted off the button
     if (!pressed && m_refreshButtonPressed) {
         m_refreshButtonPressed = false;
         m_needsRedraw = true;
     }
 
-    if (!pressed) return;
+    if (pressed) {
+        m_pressStartY = y;
+        m_pressStartScrollOffset = m_scrollOffset;
+        m_pressInList = (hitTestItem(y) >= 0);
+        return;
+    }
 
-    int itemIndex = hitTestItem(y);
-    if (itemIndex >= 0) {
-        m_selectedIndex = itemIndex;
+    // Release: decide between drag (scroll) and tap (select)
+    if (!m_pressInList) return;
+    m_pressInList = false;
+
+    int dy = y - m_pressStartY;
+    int dragThreshold = ITEM_HEIGHT / 2;
+    bool overflowing = m_scriptCount > visibleItems();
+
+    if (overflowing && (dy > dragThreshold || dy < -dragThreshold)) {
+        // Drag down moves content down → scrollOffset decreases
+        int scrollDelta = -dy / ITEM_HEIGHT;
+        m_scrollOffset = m_pressStartScrollOffset + scrollDelta;
+        clampScrollOffset();
         m_needsRedraw = true;
+    } else {
+        int itemIndex = hitTestItem(m_pressStartY);
+        if (itemIndex >= 0) {
+            m_selectedIndex = itemIndex;
+            m_needsRedraw = true;
+        }
     }
 }
 
@@ -299,11 +394,28 @@ void ScreenScripts::setCurrentScript(const char* filename)
 
 void ScreenScripts::addScript(const char* filename)
 {
-    if (m_scriptCount >= MAX_SCRIPTS) return;
+    if (m_scriptCount >= MAX_SCRIPTS || filename == nullptr) return;
 
-    strncpy(m_scripts[m_scriptCount], filename, MAX_FILENAME_LEN - 1);
-    m_scripts[m_scriptCount][MAX_FILENAME_LEN - 1] = '\0';
+    // Find insertion position for case-insensitive alphabetical order
+    int pos = m_scriptCount;
+    for (int i = 0; i < m_scriptCount; i++) {
+        if (strcasecmp(filename, m_scripts[i]) < 0) {
+            pos = i;
+            break;
+        }
+    }
+    // Shift existing entries one slot down
+    for (int i = m_scriptCount; i > pos; i--) {
+        memcpy(m_scripts[i], m_scripts[i - 1], MAX_FILENAME_LEN);
+    }
+    strncpy(m_scripts[pos], filename, MAX_FILENAME_LEN - 1);
+    m_scripts[pos][MAX_FILENAME_LEN - 1] = '\0';
     m_scriptCount++;
+
+    // Preserve selection on the same filename after insertion
+    if (m_selectedIndex >= pos) {
+        m_selectedIndex++;
+    }
 
     if (m_isActive) {
         m_needsRedraw = true;

@@ -34,8 +34,6 @@ public:
 private:
     static constexpr int MAX_SCRIPTS = 20;
     static constexpr int MAX_FILENAME_LEN = 32;
-    static constexpr int VISIBLE_ITEMS = 7;
-    static constexpr int ITEM_HEIGHT = 24;
 
     char m_scripts[MAX_SCRIPTS][MAX_FILENAME_LEN];
     int m_scriptCount;
@@ -47,9 +45,20 @@ private:
     bool m_refreshButtonPressed;
     uint32_t m_scriptListVersion;
 
+    // Touch tracking for drag-to-scroll
+    int m_pressStartY;
+    int m_pressStartScrollOffset;
+    bool m_pressInList;
+
+    int visibleItems() const;
+    int maxScrollOffset() const;
+    void clampScrollOffset();
+    void ensureSelectedVisible();
+
     void drawScriptList();
     void drawScriptItem(int index, int y);
     void drawRefreshButton();
+    void drawScrollIndicator();
     int hitTestItem(int y);
 };
 
