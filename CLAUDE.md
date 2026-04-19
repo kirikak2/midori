@@ -495,6 +495,15 @@ MIDIデバイスの電源ON/USB接続のタイミングに依存する問題。
 - MIDI INデータ未受信時の自動再接続機構
 - デバイス固有のワークアラウンド（要調査）
 
+## メモリ確保ガイドライン (ESP32-P4 + PSRAM)
+
+詳細は [docs/MEMORY_ALLOCATION.md](docs/MEMORY_ALLOCATION.md) を参照。
+
+**重要な落とし穴**: static 変数に 数百 byte 以上の inline buffer を持たせると、
+内部 DRAM の .bss レイアウトが変わり、最悪「LCD が真っ暗・シリアルは正常」という
+症状で起動時に破綻する (2026-04-19 に SysEx 実装で実際に遭遇)。
+溜め込み系バッファは必要時だけ malloc してください。
+
 ## PicoRuby Supervisor Task Architecture
 
 詳細は [docs/PICORUBY_SUPERVISOR.md](docs/PICORUBY_SUPERVISOR.md) を参照。
