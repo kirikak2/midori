@@ -28,6 +28,7 @@ The following devices have been confirmed to work as USB MIDI hosts. MIDI-DIN is
 
 - Roland J-6
 - Teenage Engineering OP-1 field
+- ROLI Seaboard BLOCKS
 - ROLI Lightpad BLOCKS
 - ROLI LUMI keys
 - Novation Launch Control XL mk2
