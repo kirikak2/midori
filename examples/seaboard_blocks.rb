@@ -6,8 +6,8 @@
 # 各指を独立したチャンネル（1〜15）に割り当てる。
 #
 # 対応 MPE メッセージ:
-#   Note On / Note Off      … 打鍵・離鍵（velocity を記録）
-#   Channel Pressure        … Press：打鍵 velocity + pressure を加算して送信
+#   Note On / Note Off      … 打鍵・離鍵
+#   Channel Pressure        … Press（鍵盤を押す縦方向の圧力）
 #   Pitch Bend              … Glide（水平スライド）
 #                             ※ 受信側の PB レンジを ±48 半音に設定して転送
 #   Control Change (CC#74)  … Slide（鍵盤上の縦スライド）
@@ -37,11 +37,6 @@ $din_in = MIDI::Input.new(MIDI::Device.new(sam))
 # 出力チャンネル（0-indexed: 0 = MIDI ch1, 11 = MIDI ch12）
 $out_ch = 0
 
-# 打鍵チャンネルごとのノート状態を記録（Seaboard ch 0〜14）
-# channel_pressure 受信時に velocity + pressure を加算して note_on / channel_pressure 両方に反映する
-# 値: {note: Integer, velocity: Integer} または nil（発音なし）
-$note_states = {}
-
 # ---- ピッチベンドレンジ設定 ------------------------------------------------
 #
 # 問題: Seaboard BLOCKS の MPE ピッチベンドは ±48 半音を前提に送出する。
@@ -70,25 +65,15 @@ UI.log("Output: ch1  PB: +-#{PB_SEMITONES}st")
 # ---- MPE → 単チャンネル変換 ------------------------------------------------
 
 $usb_in.on(:note_on) do |e|
-  $note_states[e[:channel]] = {note: e[:note], velocity: e[:velocity]}
   $din.note_on(e[:note], e[:velocity], channel: $out_ch)
 end
 
 $usb_in.on(:note_off) do |e|
-  $note_states[e[:channel]] = nil
   $din.note_off(e[:note], e[:velocity], channel: $out_ch)
 end
 
-# Channel Pressure（Press）: 打鍵 velocity + pressure を加算して
-# channel_pressure と note_on の両方に反映する。
-# note_on を再送することで、シンセ側の velocity 感度にも押し込みが作用する。
 $usb_in.on(:channel_pressure) do |e|
-  state = $note_states[e[:channel]]
-  base = state ? state[:velocity] : 64
-  combined = base + e[:pressure]
-  combined = 127 if combined > 127
-  combined = 0   if combined < 0
-  $din.channel_pressure(combined, channel: $out_ch)
+  $din.channel_pressure(e[:pressure], channel: $out_ch)
 end
 
 $usb_in.on(:pitch_bend) do |e|
