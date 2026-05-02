@@ -29,7 +29,7 @@ PicoRuby プロジェクトに標準 mrbgem として提出するための方針
 ```
 picoruby-midi-mml ──→ picoruby-midi ──→ picoruby-machine
                             ↑
-                            │ (Transport ABI)
+                            │ (Transport interface)
    ┌────────────────────────┼────────────────────────┬───────────────┬───────────────┐
    │                        │                        │               │               │
 picoruby-usb_midi_host  picoruby-uart_midi           │  picoruby-usb_midi_device  picoruby-ble_midi
@@ -130,8 +130,8 @@ upstream に提出するには構造的なリファクタリングが必要。
   - upstream 提出時に「USB ホスト stack をどこが持つか」の設計判断が必要
 - **README / sig / example 不足**
 - **ESP32 port のみ**（rp2040 等の port 無し）
-- **Transport ABI 適合**: 既に `send_packet` / `bytes_available` / `read_available`
-  / `connected?` を提供しており、picoruby-midi の Transport ABI 導入時に
+- **Transport interface 適合**: 既に `send_packet` / `bytes_available` / `read_available`
+  / `connected?` を提供しており、picoruby-midi の Transport interface 導入時に
   そのまま実装側として接続可能
 
 #### picoruby-sam2695
@@ -401,7 +401,7 @@ MIDI.start!(bpm: -> { UI.bpm }, output: device) { |clock| ... }
 - [ ] examples を `MIDI.start!` で書き換え（後方互換のため `bpm_loop` も deprecation 経由で残す）
 - [ ] `bpm_loop` に deprecation warning を追加
 - [ ] レガシー API 削除（`_pop_event` / `_external_bpm` / `_reset_external_clock` の USB-only 版）
-- [ ] `_get_transport_mask` を transport ABI 経由に置換
+- [ ] `_get_transport_mask` を transport interface 経由に置換
 - [ ] `send_midi_batch` を `trigger_batch` にリネーム
 
 ### Phase 3: VM サポート充実
@@ -436,7 +436,7 @@ MIDI.start!(bpm: -> { UI.bpm }, output: device) { |clock| ... }
   - midori `main/usb_midi_host.c` の USB Host 処理を `ports/esp32/` に移植
   - デバイス列挙 / MIDI Streaming subclass 検出 / Bulk endpoint 管理 / ホットプラグ
   - midori 側は gem の API を呼ぶだけで USB MIDI Host が使える形に
-- [ ] picoruby-midi の Transport ABI を実装する形に修正
+- [ ] picoruby-midi の Transport interface を実装する形に修正
 - [ ] グローバル変数 `$__usb_midi_instance__` 依存の整理（→ `$__usb_midi_host_instance__`）
 - [ ] `mrbgem.rake` の `author` / `summary` / `require_name` を実態に合わせる
   - `require_name = 'usb_midi_host'`
@@ -452,7 +452,7 @@ MIDI.start!(bpm: -> { UI.bpm }, output: device) { |clock| ... }
 - [ ] picoruby-sam2695 の `ports/esp32/sam2695.c` から汎用 UART MIDI 部分を移植
   - UART driver init / send / receive / input task
   - 31250 bps デフォルト、引数で変更可能に
-- [ ] `UART_MIDI` クラスを mrblib に実装（Transport ABI 実装）
+- [ ] `UART_MIDI` クラスを mrblib に実装（Transport interface 実装）
 - [ ] mruby / mrubyc 両 VM の bindings を実装
 - [ ] `README.md` / `sig/uart_midi.rbs` / `example/` を整備
 - [ ] `mrbgem.rake` の `author` を実態に合わせる
@@ -478,7 +478,7 @@ MIDI.start!(bpm: -> { UI.bpm }, output: device) { |clock| ... }
 - [ ] (将来) gem 名: `picoruby-usb_midi_device`
 - [ ] (将来) Ruby クラス名: `USB_MIDI_DEVICE`
 - [ ] (将来) ESP-IDF `esp_tinyusb` component ベースで実装
-- [ ] (将来) Transport ABI を実装し、picoruby-midi からは均質に扱える
+- [ ] (将来) Transport interface を実装し、picoruby-midi からは均質に扱える
 - [ ] (将来) Host gem と同時 require 可能 — 単一 OTG ポート ボードでは排他チェック
 - [ ] (将来) USB Configuration Descriptor の宣言（Class Audio / Subclass MIDI Streaming）
 
@@ -491,13 +491,13 @@ BLE 対応ボード向けに Apple BLE-MIDI 仕様準拠の MIDI トランスポ
 - [ ] (将来) Ruby クラス名: `BLE_MIDI`
 - [ ] (将来) `picoruby-ble` の上に構築
 - [ ] (将来) BLE GATT Service / Characteristic UUID（Apple BLE-MIDI 仕様）の登録
-- [ ] (将来) Transport ABI を実装し、picoruby-midi からは均質に扱える
+- [ ] (将来) Transport interface を実装し、picoruby-midi からは均質に扱える
 - [ ] (将来) BLE-MIDI 固有のタイムスタンプ付きパケット形式の解釈・付与ロジック
 - [ ] (将来) Peripheral / Central 両モード対応（init 引数で切替）
 - [ ] (将来) MTU 制限対応・SysEx 分割送信
 - [ ] (将来) `picoruby-ble` の ESP32 port 整備が前提（NimBLE または Bluedroid）
 
-→ 本標準化では Transport ABI を `send_packet` / `bytes_available` /
+→ 本標準化では Transport interface を `send_packet` / `bytes_available` /
 `read_available` / `connected?` で揃えておくことで、後続の USB Device / BLE-MIDI gem
 追加時に picoruby-midi の修正が不要となるよう設計する。
 
@@ -616,7 +616,7 @@ picoruby-uart_midi/
 ├── src/                    # mruby/mrubyc bindings
 ├── ports/esp32/uart_midi.c # ESP32 UART driver wrapping
 ├── ports/rp2040/...        # 将来追加
-├── mrblib/uart_midi.rb     # UART_MIDI クラス (Transport ABI 実装)
+├── mrblib/uart_midi.rb     # UART_MIDI クラス (Transport interface 実装)
 └── mrbgem.rake
 
 picoruby-sam2695/
@@ -634,7 +634,7 @@ class SAM2695
     @uart = UART_MIDI.new(tx_pin: tx_pin, rx_pin: rx_pin, baud: DEFAULT_BAUD)
   end
 
-  # Transport ABI を委譲
+  # Transport interface を委譲
   def send_packet(*args); @uart.send_packet(*args); end
   def bytes_available;    @uart.bytes_available;   end
   def read_available;     @uart.read_available;    end
@@ -683,7 +683,7 @@ end
 
 **方針: 別 gem として分離。標準化と同時に Host gem をリネーム、Device gem は将来追加。**
 
-USB Host MIDI と USB Device MIDI は MIDI プロトコル層から見ると同じ Transport ABI を
+USB Host MIDI と USB Device MIDI は MIDI プロトコル層から見ると同じ Transport interface を
 実装する均質なトランスポートだが、内部の USB stack（`usb_host` vs TinyUSB）と
 ライフサイクルが大きく異なるため、独立した gem に分ける。
 
@@ -702,7 +702,7 @@ USB Host MIDI と USB Device MIDI は MIDI プロトコル層から見ると同�
 M5Stack Tab5 (ESP32-P4) のように USB OTG Host + Device 同時運用が可能なボードで使う
 予定の gem。本標準化と同時には作成しないが、設計上の余地を以下の形で残す：
 
-- 同じ Transport ABI（`send_packet` / `bytes_available` / `read_available` / `connected?`）
+- 同じ Transport interface（`send_packet` / `bytes_available` / `read_available` / `connected?`）
   を実装するため、picoruby-midi 側の修正は不要
 - TinyUSB（ESP-IDF の `esp_tinyusb` component）ベースで実装予定
 - Ruby クラス名は `USB_MIDI_DEVICE` を予約
@@ -732,7 +732,7 @@ MIDI.start!  # 永続ループ
 
 - 現状はすべて USB-MIDI 1.0（4-byte packet, CIN+MIDI3）
 - 将来的な USB-MIDI 2.0 (Universal MIDI Packet, 32/64-bit) サポートのために、
-  Transport ABI で `send_packet` の方を抽象化済みにしておく
+  Transport interface で `send_packet` の方を抽象化済みにしておく
 - UMP 対応時には別 gem（`picoruby-usb_midi_host_ump` 等）または既存 gem 内の
   オプション機能として追加検討
 
@@ -751,7 +751,7 @@ USB ケーブル不要のワイヤレス MIDI として、近年のキーボー�
 - Ruby クラス名: `BLE_MIDI`
 - 既存の `picoruby-ble`（Bluetooth LE 抽象 gem、ESP32 / RP2040W で利用可能）の
   上に構築
-- Transport ABI（`send_packet` / `bytes_available` / `read_available` / `connected?`）
+- Transport interface（`send_packet` / `bytes_available` / `read_available` / `connected?`）
   を実装し、picoruby-midi からは他の MIDI トランスポートと均質に扱える
 
 #### 実装上の特徴と難所
@@ -797,17 +797,17 @@ input.on(:note_on) { |e| puts "#{e[:note]} #{e[:velocity]}" }
 MIDI.start!
 ```
 
-#### picoruby-midi の Transport ABI への影響
+#### picoruby-midi の Transport interface への影響
 
 BLE-MIDI のタイムスタンプは Transport 内で扱い、picoruby-midi の core API には
 影響を与えない設計とする：
 
 - 受信側: BLE_MIDI が受信時にタイムスタンプを解釈、必要なら遅延補正をかけて
   USB-MIDI 互換の 4-byte 形式（または相当の MIDI イベント）として
-  Transport ABI 経由で picoruby-midi に渡す
+  Transport interface 経由で picoruby-midi に渡す
 - 送信側: picoruby-midi から渡された MIDI イベントを、BLE_MIDI が自前で現在時刻を
   Header/Timestamp として付与して BLE 送信
-- → Transport ABI に新しいメソッドや変更は不要
+- → Transport interface に新しいメソッドや変更は不要
 
 #### 残課題
 
@@ -869,7 +869,7 @@ ports/esp32/usb_midi_host.c ~400 行
 
 ### picoruby-uart_midi（新規作成）
 ```
-mrblib/uart_midi.rb         ~80 行   (Transport ABI 実装、UART_MIDI クラス)
+mrblib/uart_midi.rb         ~80 行   (Transport interface 実装、UART_MIDI クラス)
 src/mrubyc/uart_midi.c      ~190 行  (現 picoruby-sam2695 のものから流用)
 src/mruby/uart_midi.c       ~150 行  (同上)
 ports/esp32/uart_midi.c     ~440 行  (現 ports/esp32/sam2695.c をほぼそのまま移管)
