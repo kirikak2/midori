@@ -16,7 +16,7 @@
 #include "usb/usb_host.h"
 
 /* PicoRuby USB-MIDI integration */
-#include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include/usb_midi.h"
+#include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_host/include/usb_midi_host.h"
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/include/midi.h"
 #endif /* !CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL */
 
@@ -332,7 +332,7 @@ static void action_setup_midi(class_driver_t *driver_obj)
         usb_device_info_t dev_info;
         usb_host_device_info(driver_obj->dev_hdl, &dev_info);
 
-        usb_midi_device_info_t midi_info = {
+        usb_midi_host_device_info_t midi_info = {
             .vendor_id = dev_desc->idVendor,
             .product_id = dev_desc->idProduct,
             .midi_in_ep = driver_obj->midi_in_ep,
@@ -388,7 +388,7 @@ static void action_setup_midi(class_driver_t *driver_obj)
         }
 
         // Notify connection AFTER MIDI IN transfer is ready
-        USB_MIDI_notify_connected(&midi_info);
+        USB_MIDI_HOST_notify_connected(&midi_info);
     }
 
     driver_obj->actions &= ~ACTION_SETUP_MIDI;
@@ -453,7 +453,7 @@ static void midi_in_transfer_callback(usb_transfer_t *transfer)
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
         if (transfer->actual_num_bytes > 0) {
             // Push data to PicoRuby USB-MIDI ring buffer
-            USB_MIDI_push_rx_data(transfer->data_buffer, transfer->actual_num_bytes);
+            USB_MIDI_HOST_push_rx_data(transfer->data_buffer, transfer->actual_num_bytes);
 
             // Parse USB MIDI packet (4 bytes per packet) - minimal logging
             for (int i = 0; i < transfer->actual_num_bytes; i += 4) {
@@ -581,7 +581,7 @@ static void action_close_dev(class_driver_t *driver_obj)
     reset_midi_static_vars();
 
     // Notify PicoRuby USB-MIDI of device disconnection
-    USB_MIDI_notify_disconnected();
+    USB_MIDI_HOST_notify_disconnected();
 
     // Clear action and prepare for new device
     driver_obj->actions &= ~ACTION_CLOSE_DEV;
@@ -596,7 +596,7 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
         /* Device not available - drain and discard any pending packets */
         uint8_t discard[4];
         int discarded = 0;
-        while (USB_MIDI_pop_tx_packet(discard)) {
+        while (USB_MIDI_HOST_pop_tx_packet(discard)) {
             discarded++;
         }
         if (discarded > 0) {
@@ -623,7 +623,7 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
     }
 
     uint8_t packet[4];
-    if (USB_MIDI_pop_tx_packet(packet)) {
+    if (USB_MIDI_HOST_pop_tx_packet(packet)) {
         usb_transfer_t *transfer;
         esp_err_t ret = usb_host_transfer_alloc(4, 0, &transfer);
         if (ret != ESP_OK) {
@@ -656,7 +656,7 @@ static void process_midi_tx_queue(class_driver_t *driver_obj)
                 }
                 /* Drain remaining packets */
                 int discarded = 1;  /* Count current packet */
-                while (USB_MIDI_pop_tx_packet(packet)) {
+                while (USB_MIDI_HOST_pop_tx_packet(packet)) {
                     discarded++;
                 }
                 ESP_LOGI(TAG, "Device disconnected during TX, stopped MIDI, discarded %d packets", discarded);
@@ -674,7 +674,7 @@ static void class_driver_task(void *arg)
     class_driver_t driver_obj = {0};
 
     /* Initialize PicoRuby USB-MIDI subsystem */
-    USB_MIDI_init();
+    USB_MIDI_HOST_init();
 
     usb_host_client_config_t client_config = {
         .is_synchronous = false,

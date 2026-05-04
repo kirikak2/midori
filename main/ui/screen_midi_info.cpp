@@ -1,6 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_midi_info.h"
-#include "usb_midi.h"
+#include "usb_midi_host.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -133,8 +133,8 @@ void ScreenMidiInfo::drawUsbMidiCard()
 {
     int y = CARD_START_Y;
 
-    usb_midi_device_info_t info;
-    bool connected = USB_MIDI_get_device_info(&info);
+    usb_midi_host_device_info_t info;
+    bool connected = USB_MIDI_HOST_get_device_info(&info);
 
     if (connected) {
         // Use product name, or "USB MIDI Device" if empty

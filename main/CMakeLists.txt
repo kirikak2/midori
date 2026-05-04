@@ -8,7 +8,7 @@ set(INCLUDE_DIRS
     "lcd_console"
     "sd_card"
     "ui"
-    "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/include"
+    "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_host/include"
 )
 
 # Platform-specific sources
