@@ -3,7 +3,7 @@
 本ドキュメントは、Midori 内で開発してきた `picoruby-midi` および関連 mrbgem を upstream
 PicoRuby プロジェクトに標準 mrbgem として提出するための方針とタスクをまとめたものです。
 
-最終更新: 2026-05-02
+最終更新: 2026-05-05
 
 ## 対象 gem
 
@@ -38,6 +38,60 @@ picoruby-usb_midi_host  picoruby-uart_midi           │  picoruby-usb_midi_devi
    ▼                  picoruby-sam2695               │        ▼                       ▼
 [ESP-IDF usb_host]   (UART_MIDI に委譲) ─────────────┘    [TinyUSB]            picoruby-ble (BTstack)
 ```
+
+## 進捗状況（2026-05-05 時点）
+
+Phase 1〜5 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP32-P4）。
+残タスクは Phase 6（README / sig / example 整備）と Phase 7（テスト）／Phase 8（upstream 提出）。
+
+### Phase 1: 内部リファクタリング ✅
+
+- `src/midi_parser.c` / `src/midi_scheduler.c` / `src/midi_clock_gen.c` に OS-free コアを抽出
+  （`aae01c40` / `1e63c2bf` / `dc86f8f0`）
+- `midi_transport_t` 抽象を導入し、`MIDI_Note_trigger` 等を transport 経由に置換
+  （`1defcbbf`）
+- Input task を Transport interface 経由で動かす形に変更（`42e28e84`）
+- `picoruby_esp32_*` への直接依存を削除し、cooperative-stop / cleanup hook 化（`0f3745da`）
+- 既知問題: SysEx 入力時の mrbc heap 破壊クラッシュ。**Phase 1 以前から再現する pre-existing
+  バグ**であり、本標準化と独立した別 issue として扱う。
+
+### Phase 2: API 整理 ✅（一部は方針変更）
+
+- `MIDI.start!` を新設（`d3313412`）。Midori 側 `main_task_base.rb` は `start!`/`bpm_loop`
+  を薄くラップして UI とスクリプト停止 hook を注入する形に。
+- `_get_transport_mask` を `transport.transport_id` 経由に置換（`c6ec44fb`）
+- `send_midi_batch` を `trigger_batch` にリネーム（`87434ce8`）
+- **方針変更**: `MIDI.on_tick` ではなくユーザの希望により `MIDI.on_bpm_change` フックを採用
+  （`d73994f8`）。BPM 変更通知は明示的にテンポ追従が必要な箇所（UI バッジ等）にだけ届く。
+- レガシー API（`_pop_event` / `_external_bpm` 等の USB-only 版）はまだ残置。
+  upstream 提出前に整理予定。
+
+### Phase 3: mruby バインディング ✅
+
+- `src/mruby/midi.c` を mrubyc 版とフィーチャ等価にした（`96d60da8`）。
+
+### Phase 4: スコープ整理 ✅
+
+- MML 関連を `picoruby-midi-mml` に分離（`4b709ef5`）。
+- アプリ層参照（`UI.bpm` / `ScriptManager`）を picoruby-midi から完全除去（`d73994f8`）。
+- Midori の bridge 役は `main_task_base.rb` に集約。
+
+### Phase 5: 関連 gem の標準化 ✅
+
+- **5a-1** picoruby-usb_midi → picoruby-usb_midi_host にリネーム（`4e844e96`）
+- **5a-2** USB Host stack を gem に取り込み（`71bc801b`）。midori `main/usb_midi_host.c` は
+  `USB_MIDI_HOST_start_driver()` を呼ぶだけの ~70 行に縮小。
+- **5b** picoruby-uart_midi を新規作成（`d7eeee7b`）。31250 baud デフォルト + 任意 baud 指定可。
+- **5c** picoruby-sam2695 を pure-Ruby thin wrapper に縮小（`698c82e0`）。`include/` `src/`
+  `ports/` を削除（~1085 行 → 64 行）。`SAM2695.new` は内部で `UART_MIDI.new` を構築する。
+
+### 残タスク
+
+- Phase 6: 各 gem に `README.md` / `sig/*.rbs` / `example/` を整備、`mrbgem.rake` の
+  author/summary を最終化。
+- Phase 7: ホストビルドのパーサ単体テスト、mruby/mrubyc 両ビルド確認、RTOS 無し環境（RP2040 等）
+  での動作確認。
+- Phase 8: upstream 提出（メンテナとのスコープ確認、PR 分割方針）。
 
 ## 背景
 
