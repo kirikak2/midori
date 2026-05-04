@@ -4,6 +4,7 @@
 # ============================================================
 
 require "midi"
+require "midi-mml"
 require "ui"
 
 UI.log("Loading Bach Suite No.3 - Air...")

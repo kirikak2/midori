@@ -210,6 +210,10 @@ int ui_event_available(void);
 // Get current UI BPM value (for Ruby to read)
 float ui_get_bpm(void);
 
+// Set UI BPM value (used by Ruby to seed the on-screen tempo widget
+// with a script-supplied initial value).
+void ui_set_bpm(float bpm);
+
 // Log functions (for Ruby to output to screen log)
 void ui_add_log(const char* text);
 void ui_clear_logs(void);
