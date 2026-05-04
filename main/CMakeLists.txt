@@ -33,14 +33,10 @@ endif()
 # We cannot use ESP-IDF's fatfs because it conflicts with PicoRuby's FatFs library
 # Instead, PicoRuby notifies C side about available scripts via API
 
-# USB Host is only required for USB-MIDI mode (not USB serial debug mode)
-if(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL)
-    # USB serial debug mode - no USB host library needed
-    set(PRIV_REQUIRES_LIST driver)
-else()
-    # USB-MIDI host mode - requires USB host library
-    set(PRIV_REQUIRES_LIST usb driver)
-endif()
+# USB Host bring-up now lives inside picoruby-usb_midi_host (Phase 5a-2),
+# so main only needs the legacy 'driver' component for whatever else it
+# might pull in.
+set(PRIV_REQUIRES_LIST driver)
 
 idf_component_register(
     SRCS ${SRCS}
