@@ -3,7 +3,7 @@
 本ドキュメントは、Midori 内で開発してきた `picoruby-midi` および関連 mrbgem を upstream
 PicoRuby プロジェクトに標準 mrbgem として提出するための方針とタスクをまとめたものです。
 
-最終更新: 2026-05-05
+最終更新: 2026-05-05（Phase 6 完了）
 
 ## 対象 gem
 
@@ -41,8 +41,8 @@ picoruby-usb_midi_host  picoruby-uart_midi           │  picoruby-usb_midi_devi
 
 ## 進捗状況（2026-05-05 時点）
 
-Phase 1〜5 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP32-P4）。
-残タスクは Phase 6（README / sig / example 整備）と Phase 7（テスト）／Phase 8（upstream 提出）。
+Phase 1〜6 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP32-P4）。
+残タスクは Phase 7（テスト）／Phase 8（upstream 提出）。
 
 ### Phase 1: 内部リファクタリング ✅
 
@@ -85,10 +85,16 @@ Phase 1〜5 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP3
 - **5c** picoruby-sam2695 を pure-Ruby thin wrapper に縮小（`698c82e0`）。`include/` `src/`
   `ports/` を削除（~1085 行 → 64 行）。`SAM2695.new` は内部で `UART_MIDI.new` を構築する。
 
+### Phase 6: 規約準拠 ✅
+
+- 5 gem すべてに `README.md` / `sig/*.rbs` / `example/` を整備（`9f8886c5`）。
+  各 gem に最低 1 本の動作する例（`example/*.rb`）を含む。
+- `picoruby-midi` の `mrbgem.rake` の author を `Toshio Maki`、summary を
+  `MIDI protocol layer (parser, scheduler, clock) for PicoRuby` に最終化。
+  他の 4 gem は Phase 5 時点ですでに反映済み。
+
 ### 残タスク
 
-- Phase 6: 各 gem に `README.md` / `sig/*.rbs` / `example/` を整備、`mrbgem.rake` の
-  author/summary を最終化。
 - Phase 7: ホストビルドのパーサ単体テスト、mruby/mrubyc 両ビルド確認、RTOS 無し環境（RP2040 等）
   での動作確認。
 - Phase 8: upstream 提出（メンテナとのスコープ確認、PR 分割方針）。
