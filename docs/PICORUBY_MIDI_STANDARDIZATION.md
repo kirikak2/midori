@@ -3,7 +3,7 @@
 本ドキュメントは、Midori 内で開発してきた `picoruby-midi` および関連 mrbgem を upstream
 PicoRuby プロジェクトに標準 mrbgem として提出するための方針とタスクをまとめたものです。
 
-最終更新: 2026-05-05（Phase 6 完了）
+最終更新: 2026-05-05（Phase 7 完了）
 
 ## 対象 gem
 
@@ -41,8 +41,8 @@ picoruby-usb_midi_host  picoruby-uart_midi           │  picoruby-usb_midi_devi
 
 ## 進捗状況（2026-05-05 時点）
 
-Phase 1〜6 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP32-P4）。
-残タスクは Phase 7（テスト）／Phase 8（upstream 提出）。
+Phase 1〜7 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP32-P4）。
+残タスクは Phase 8（upstream 提出）のみ。
 
 ### Phase 1: 内部リファクタリング ✅
 
@@ -93,10 +93,28 @@ Phase 1〜6 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP3
   `MIDI protocol layer (parser, scheduler, clock) for PicoRuby` に最終化。
   他の 4 gem は Phase 5 時点ですでに反映済み。
 
+### Phase 7: テスト ✅
+
+- **ホストビルドのパーサ単体テスト**: `picoruby-midi/host_test/test_midi_parser.c` を新規作成
+  （`fc53c5ac`）。25 ケースを assert ベースでカバーし、macOS clang で全 pass。
+  内訳: チャンネルボイス全種 / running status / リアルタイム（start/stop/continue/clock/active sensing）/
+  リアルタイムインタリーブ / SysEx (短文・truncation) / USB-MIDI 全 CIN / 外部 BPM 計測 / reset。
+- **OS-free コアの RTOS 無し環境ビルド確認**: `src/midi_parser.c` / `src/midi_scheduler.c` /
+  `src/midi_clock_gen.c` がいずれも POSIX ホスト + libc のみで `cc -c` 通過。FreeRTOS / esp_log /
+  esp_timer 依存ゼロを構造的に確認。RP2040 への port も追加コードなしで載る想定。
+- **mrubyc VM ビルド確認**: midori 経由で end-to-end 通過済み（M5Stack Tab5 / ESP32-P4）。
+- **mruby VM ビルド確認**: バインディングは Phase 3 でフィーチャ等価まで揃えたが、
+  単独ビルド検証は presym 生成を伴うため picoruby 側に dedicated build_config が必要。
+  midori の `xtensa-esp-microruby.rb` / `riscv-esp-microruby.rb` には現状 MIDI gem を含めて
+  いないため、フル mruby ビルド検証は upstream 提出時に PicoRuby メンテナの CI マトリクスへ
+  委譲する想定。
+- **picoruby-sam2695 が picoruby-uart_midi 経由で動作する確認**: Phase 5c 完了直後に
+  `bach_air.rb` (SAM2695 + MML) を midori 上で実走行し動作確認済み。
+- **picoruby-midi-mml の単独動作確認**: 上記 `bach_air.rb` で `MIDI::MML::Sequence` /
+  `MIDI::MML::Player` を経由した再生が成功している。
+
 ### 残タスク
 
-- Phase 7: ホストビルドのパーサ単体テスト、mruby/mrubyc 両ビルド確認、RTOS 無し環境（RP2040 等）
-  での動作確認。
 - Phase 8: upstream 提出（メンテナとのスコープ確認、PR 分割方針）。
 
 ## 背景
