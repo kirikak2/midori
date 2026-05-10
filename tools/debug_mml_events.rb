@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # Debug script to show what events MML parser generates at specific clocks
 
-require_relative '../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/mrblib/midi_mml'
+require_relative '../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi-mml/mrblib/midi_mml'
 
 # MML from bach_air.rb
 violin1_mml = "r2 o5 f+1&8 b16 g16 f+32 e32 d16 c+16 d16 c+4 o4 b16 a8. o5 a2&16 f+16 c16 o4 b16 o5 e16 d+16 a16 g16 g2&16 e16 o4 b16 a16 o5 d16 c+16 g16 f+16 f+4. g+16 a16 d8 d32 e32 f+8 e16 e16 d16 c+16 o4 b16 b32 o5 c+32 d8. c+16 o4 b16 a2 o5 f+1&8 b16 g16 f+32 e32 d16 c+16 d16 c+4 o4 b16 a8. o5 a2&16 f+16 c16 o4 b16 o5 e16 d+16 a16 g16 g2&16 e16 o4 b16 a16 o5 d16 c+16 g16 f+16 f+4. g+16 a16 d8 d32 e32 f+8 e16 e16 d16 c+16 o4 b16 b32 o5 c+32 d8. c+16 o4 b16 a2 o5 c+4&16 d32 c+32 o4 b32 o5 c+32 o4 a16 o5 a4. c8 o4 b8 o5 b8. a16 g16 f+16 g4&32 f+32 e32 d32 c+16 o4 b16 a+16 b16 o5 c+8. d16 e8. f+16 g4 f+8 e16 d16 c+16 o4 b16 o5 c+16 d32 e32 d16 c+16 o4 b2 o5 d4&16 f+16 e16 d16 b4. a16 g+16 f+32 e32 a16 o4 a8 b8. o5 c+32 d32 c+8. o4 b16 a4 o5 d4. f+16 e16 e4. g16 f+16 f+4. a16 g16 g2 o4 a4&16 o5 c+16 e16 g16 g16 e16 f+4&16 g32 a32 d4&16 f+16 a16 o6 c16 o5 b4. d8 c+16 e16 g4 o4 b8 a8 o5 e16 f+32 g16. f+8 e16 d32 c+32 o4 b8 o5 c+16 d8 c+16 d16 d2 c+4&16 d32 c+32 o4 b32 o5 c+32 o4 a16 o5 a4. c8 o4 b8 o5 b8. a16 g16 f+16 g4&32 f+32 e32 d32 c+16 o4 b16 a+16 b16 o5 c+8. d16 e8. f+16 g4 f+8 e16 d16 c+16 o4 b16 o5 c+16 d32 e32 d16 c+16 o4 b2 o5 d4&16 f+16 e16 d16 b4. a16 g+16 f+32 e32 a16 o4 a8 b8. o5 c+32 d32 c+8. o4 b16 a4 o5 d4. f+16 e16 e4. g16 f+16 f+4. a16 g16 g2 o4 a4&16 o5 c+16 e16 g16 g16 e16 f+4&16 g32 a32 d4&16 f+16 a16 o6 c16 o5 b4. d8 c+16 e16 g4 o4 b8 a8 o5 e16 f+32 g16. f+8 e16 d32 c+32 o4 b8 o5 c+16 d8 c+16 d16 d4.&16.&32"
@@ -56,4 +56,55 @@ puts "Sequence lengths:"
 puts "=" * 60
 seqs.each do |s|
   puts "#{s[:name]}: #{s[:seq].total_length} clocks"
+end
+
+# ============================================================
+# Dump every event up to DUMP_UNTIL_CLOCK in the order the
+# on-device CombinedPlayer would emit them:
+#   1. note_off events at this clock (flushed first)
+#   2. note_on events at this clock (sent as one trigger_batch)
+# Within each group we keep the original sequence-add order
+# (Violin I, II, Viola, Continuo 1, Continuo 2) so a side-by-side
+# diff against a serial-log capture lines up cleanly.
+# Line format: `[c=<clock> sc=<clock>] on|off ch=<n> n=<note> ...`
+# ============================================================
+DUMP_UNTIL_CLOCK = 480
+
+puts
+puts "=" * 60
+puts "Theoretical event timeline (clock 0..#{DUMP_UNTIL_CLOCK})"
+puts "=" * 60
+
+# Collect all events with their sequence index for stable secondary sort
+all_events = []
+seqs.each_with_index do |s, idx|
+  s[:seq].events.each do |e|
+    next if e[:clock] > DUMP_UNTIL_CLOCK
+    all_events << {
+      clock: e[:clock],
+      seq_idx: idx,
+      channel: s[:channel],
+      event: e,
+    }
+  end
+end
+
+# Sort: by clock, then note_off before note_on, then by sequence index
+all_events.sort_by! do |item|
+  type_rank = item[:event][:type] == :note_off ? 0 : 1
+  [item[:clock], type_rank, item[:seq_idx]]
+end
+
+all_events.each do |item|
+  e = item[:event]
+  c = item[:clock]
+  ch = item[:channel]
+  case e[:type]
+  when :note_on
+    # CombinedPlayer multiplies duration_clocks by 100 for duration_ms
+    duration_ms = (e[:duration_clocks] || 24) * 100
+    puts "[c=#{c} sc=#{c}] on  ch=#{ch} n=#{e[:note]} v=#{e[:velocity]} d=#{duration_ms}"
+  when :note_off
+    puts "[c=#{c} sc=#{c}] off ch=#{ch} n=#{e[:note]}"
+  end
 end
