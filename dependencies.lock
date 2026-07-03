@@ -1,15 +1,51 @@
 dependencies:
+  espressif/esp_tinyusb:
+    component_hash: 9a73a76a6bc17907f6e523342ff6b1e440023e8aac2c11f4691212106ec24e66
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    - name: espressif/tinyusb
+      registry_url: https://components.espressif.com
+      require: public
+      version: '>=0.17.0~2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - esp32s31
+    version: 2.2.1
+  espressif/tinyusb:
+    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - esp32s31
+    version: 0.19.0~3
   idf:
     source:
       type: idf
     version: 5.5.1
   m5stack/m5gfx:
-    component_hash: 4c420c89ae7bfe33231dab80b784f4508591279b2a3a935ac849dddb1942d0d5
+    component_hash: 8e19e000cfb2724e55040392cc2a461a2aa4ad217978b7d4b7465bca4149d12f
     dependencies: []
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.2.17
+    version: 0.2.24
   m5stack/m5unified:
     component_hash: 1c75bb80654da6c7fcdd11ef7a1cb9b7d6db2e98f96612a4babf12b5e9bc7196
     dependencies:
@@ -22,7 +58,8 @@ dependencies:
       type: service
     version: 0.2.11
 direct_dependencies:
+- espressif/esp_tinyusb
 - m5stack/m5unified
-manifest_hash: 7e2d6b4eddaccaffa62cca956e485a25fd55dd26c3736cfe374df51cdfa1706b
+manifest_hash: 80d2dbe3f5c9aa0accb07234df6d1ecda5f31c0f638289f2bde3f820f1d43e65
 target: esp32p4
 version: 2.0.0

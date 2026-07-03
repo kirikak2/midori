@@ -3,3 +3,6 @@ dependencies:
   # Always downloaded but only compiled when CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 is set
   m5stack/m5unified:
     version: ">=0.2.0"
+  # TinyUSB device stack for Tab5 (ESP32-P4) CDC + MIDI composite device
+  espressif/esp_tinyusb:
+    version: ">=0.14.0"

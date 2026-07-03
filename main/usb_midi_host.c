@@ -28,6 +28,8 @@
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_host/include/usb_midi_host.h"
 #endif
 
+#include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/include/usb_midi_device.h"
+
 static const char *TAG = "MIDORI";
 
 #ifdef CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
@@ -50,6 +52,14 @@ void app_main(void)
 void app_main(void)
 {
     ESP_ERROR_CHECK(platform_init());
+
+#ifdef CONFIG_USB_MIDI_BOARD_M5STACK_TAB5
+    /* Tab5: start USB-C device (CDC + MIDI) before USB-A host */
+    ESP_LOGI(TAG, "Starting USB-MIDI Device driver (CDC + MIDI)...");
+    if (USB_MIDI_DEVICE_start() != 0) {
+        ESP_LOGE(TAG, "Failed to start USB-MIDI Device driver");
+    }
+#endif
 
     ESP_LOGI(TAG, "Starting USB-MIDI Host driver...");
     if (USB_MIDI_HOST_start_driver() != 0) {

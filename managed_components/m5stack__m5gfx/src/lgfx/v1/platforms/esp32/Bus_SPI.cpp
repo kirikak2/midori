@@ -18,6 +18,11 @@ Contributors:
 #if defined (ESP_PLATFORM)
 #include <sdkconfig.h>
 
+#if defined (CONFIG_IDF_TARGET_ESP32P4)
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wattributes"
+#endif
+
 #include "Bus_SPI.hpp"
 
 #if defined ( CONFIG_IDF_TARGET_ESP32 ) || !defined ( CONFIG_IDF_TARGET )
@@ -56,18 +61,26 @@ Contributors:
    #include <esp32/rom/gpio.h>
 #else
    #include <rom/gpio.h> // dispatched by core
-#endif   
+#endif
 
 #ifndef SPI_PIN_REG
  #define SPI_PIN_REG SPI_MISC_REG
 #endif
 
 #if defined (SOC_GDMA_SUPPORTED)  // for C3/C6/S3
- #include <soc/gdma_channel.h>
+ #if __has_include(<soc/gdma_channel.h>)
+  #include <soc/gdma_channel.h>
+ #elif __has_include(<hal/gdma_channel.h>)
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wattributes"
+  #include <hal/gdma_channel.h>
+  #pragma GCC diagnostic pop
+ #endif
  #if __has_include(<soc/gdma_reg.h>)
   #include <soc/gdma_reg.h>
  #elif __has_include(<soc/axi_dma_reg.h>) // ESP32P4
   #include <soc/axi_dma_reg.h>
+  #include <esp_cache.h>
  #endif
  #if __has_include(<soc/gdma_struct.h>)
   #include <soc/gdma_struct.h>
@@ -81,21 +94,31 @@ Contributors:
   #define DMA_OUTFIFO_EMPTY_CH0      AXI_DMA_OUTFIFO_L3_EMPTY_CH0
   #define SIZE_OF_DMA_OUT_CH (sizeof(axi_dma_out_reg_t))
  #else
-  #if !defined DMA_OUT_LINK_CH0_REG
-   #define DMA_OUT_LINK_CH0_REG       GDMA_OUT_LINK_CH0_REG
-   #define DMA_OUTFIFO_STATUS_CH0_REG GDMA_OUTFIFO_STATUS_CH0_REG
-   #define DMA_OUTLINK_START_CH0      GDMA_OUTLINK_START_CH0
-   #if defined (GDMA_OUTFIFO_EMPTY_L3_CH0)
-    #define DMA_OUTFIFO_EMPTY_CH0      GDMA_OUTFIFO_EMPTY_L3_CH0
-   #else
-    #define DMA_OUTFIFO_EMPTY_CH0      GDMA_OUTFIFO_EMPTY_CH0
+  #if __has_include(<soc/gdma_struct.h>)
+   #if !defined DMA_OUT_LINK_CH0_REG
+    #define DMA_OUT_LINK_CH0_REG       GDMA_OUT_LINK_CH0_REG
+    #define DMA_OUTFIFO_STATUS_CH0_REG GDMA_OUTFIFO_STATUS_CH0_REG
+    #define DMA_OUTLINK_START_CH0      GDMA_OUTLINK_START_CH0
+    #if defined (GDMA_OUTFIFO_EMPTY_L3_CH0)
+     #define DMA_OUTFIFO_EMPTY_CH0      GDMA_OUTFIFO_EMPTY_L3_CH0
+    #else
+     #define DMA_OUTFIFO_EMPTY_CH0      GDMA_OUTFIFO_EMPTY_CH0
+    #endif
    #endif
+   #define SIZE_OF_DMA_OUT_CH (sizeof(GDMA.channel[0]))
   #endif
-  #define SIZE_OF_DMA_OUT_CH (sizeof(GDMA.channel[0]))
  #endif
 #endif
 
+#if !defined(gpio_matrix_out) && defined(rom_gpio_matrix_out)
+ #define gpio_matrix_out rom_gpio_matrix_out
+#endif
+
 #include "common.hpp"
+
+#if defined (CONFIG_IDF_TARGET_ESP32P4)
+ #pragma GCC diagnostic pop
+#endif
 
 #include <algorithm>
 
@@ -174,7 +197,7 @@ namespace lgfx
 #endif
       _inited = spi::init(_cfg.spi_host, _cfg.pin_sclk, _cfg.pin_miso, _cfg.pin_mosi, dma_ch).has_value();
 
-#if defined ( SOC_GDMA_SUPPORTED )
+#if defined ( SOC_GDMA_SUPPORTED ) && defined ( DMA_OUT_LINK_CH0_REG )
     // 割当られたDMAチャネル番号を取得する
 
 #if defined ( SOC_GDMA_TRIG_PERIPH_SPI3 )
@@ -189,6 +212,9 @@ namespace lgfx
     { // DMAチャンネルが特定できたらそれを使用する;
       _spi_dma_out_link_reg  = reg(DMA_OUT_LINK_CH0_REG       + assigned_dma_ch * SIZE_OF_DMA_OUT_CH);
       _spi_dma_outstatus_reg = reg(DMA_OUTFIFO_STATUS_CH0_REG + assigned_dma_ch * SIZE_OF_DMA_OUT_CH);
+      #if defined ( CONFIG_IDF_TARGET_ESP32P4 )
+      _spi_dma_out_link2_reg = reg(AXI_DMA_OUT_LINK2_CH0_REG  + assigned_dma_ch * SIZE_OF_DMA_OUT_CH);
+      #endif
     }
 #elif defined ( CONFIG_IDF_TARGET_ESP32 ) || !defined ( CONFIG_IDF_TARGET )
 
@@ -206,7 +232,11 @@ namespace lgfx
   {
     if (pin >= GPIO_NUM_MAX) return;
     gpio_reset_pin( (gpio_num_t)pin);
+#if defined (ESP_IDF_VERSION_VAL) && (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0))
+    rom_gpio_matrix_out((gpio_num_t)pin, SIG_GPIO_OUT_IDX, 0, 0);
+#else
     gpio_matrix_out((gpio_num_t)pin, SIG_GPIO_OUT_IDX, 0, 0);
+#endif
     // gpio_matrix_in には、ArduinoESP32 v1.0.x系では重大なバグがある。(無関係なピンに対して設定変更が行われることがある)
     // gpio_matrix_in( (gpio_num_t)pin, 0x100, 0   );
   }
@@ -405,7 +435,7 @@ namespace lgfx
 #if defined LGFX_USE_QSPI
     // reg for sending data in 4-bit mode
     auto qspi_user_reg = _spi_user_reg;
-    uint32_t qspi_user = (*qspi_user_reg | SPI_FWRITE_QUAD);
+    uint32_t qspi_user = (_user_reg & ~(SPI_USR_MISO | SPI_DOUTDIN | SPI_SIO)) | SPI_USR_MOSI | SPI_FWRITE_QUAD;
 #endif
 
 #if defined ( CONFIG_IDF_TARGET ) && !defined ( CONFIG_IDF_TARGET_ESP32 )
@@ -520,7 +550,7 @@ namespace lgfx
     {
       // reg for sending data in 4-bit mode
       auto qspi_user_reg = _spi_user_reg;
-      uint32_t qspi_user = (*qspi_user_reg | SPI_FWRITE_QUAD);
+      uint32_t qspi_user = (_user_reg & ~(SPI_USR_MISO | SPI_DOUTDIN | SPI_SIO)) | SPI_USR_MOSI | SPI_FWRITE_QUAD;
       *qspi_user_reg = qspi_user;
     }
 #endif
@@ -634,7 +664,7 @@ namespace lgfx
     {
       // reg for sending data in 4-bit mode
       auto qspi_user_reg = _spi_user_reg;
-      uint32_t qspi_user = (*qspi_user_reg | SPI_FWRITE_QUAD);
+      uint32_t qspi_user = (_user_reg & ~(SPI_USR_MISO | SPI_DOUTDIN | SPI_SIO)) | SPI_USR_MOSI | SPI_FWRITE_QUAD;
       *qspi_user_reg = qspi_user;
     }
 #endif
@@ -672,18 +702,53 @@ namespace lgfx
       if (use_dma)
       {
         auto spi_dma_out_link_reg = _spi_dma_out_link_reg;
+        #if defined ( CONFIG_IDF_TARGET_ESP32P4 )
+        auto spi_dma_out_link2_reg = _spi_dma_out_link2_reg;
+        #endif
         auto cmd = _spi_cmd_reg;
         while (*cmd & SPI_USR) {}
         *spi_dma_out_link_reg = 0;
         _setup_dma_desc_links(data, length);
-#if defined ( SOC_GDMA_SUPPORTED )
+
+        #if defined ( CONFIG_IDF_TARGET_ESP32P4 )
+        esp_cache_msync((void*)data, sizeof(uint8_t) * length, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        esp_cache_msync(_dmadesc, sizeof(lldesc_t) * _dmadesc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        #endif
+#if defined ( SOC_GDMA_SUPPORTED ) && defined ( DMA_OUTLINK_START_CH0 )
         auto dma = reg(SPI_DMA_CONF_REG(_spi_port));
         *dma = 0; /// Clear previous transfer
         uint32_t len = ((length - 1) & ((SPI_MS_DATA_BITLEN)>>3)) + 1;
+        #if defined ( CONFIG_IDF_TARGET_ESP32P4 )
+        *spi_dma_out_link2_reg = ((uint32_t)(_dmadesc));
+        *spi_dma_out_link_reg = DMA_OUTLINK_START_CH0 ;
+        #else
         *spi_dma_out_link_reg = DMA_OUTLINK_START_CH0 | ((int)(&_dmadesc[0]) & 0xFFFFF);
+        #endif
         *dma = SPI_DMA_TX_ENA;
         _clear_dma_reg = dma;
-#else
+        set_write_len(len << 3);
+        *_gpio_reg_dc[dc] = _mask_reg_dc;
+
+        // DMA準備完了待ち;
+ #if defined ( DMA_OUTFIFO_EMPTY_CH0 )
+        while (*_spi_dma_outstatus_reg & DMA_OUTFIFO_EMPTY_CH0 ) {}
+ #endif
+        exec_spi();
+
+        if (length -= len)
+        {
+          while (*cmd & SPI_USR) {}
+          set_write_len(SPI_MS_DATA_BITLEN + 1);
+          goto label_start;
+          do
+          {
+            vTaskDelay(1 / portTICK_PERIOD_MS);
+            while (*cmd & SPI_USR) {}
+label_start:
+            exec_spi();
+          } while (length -= ((SPI_MS_DATA_BITLEN + 1) >> 3));
+        }
+#elif defined ( CONFIG_IDF_TARGET_ESP32 ) || !defined ( CONFIG_IDF_TARGET )
         auto dma_conf_reg = reg(SPI_DMA_CONF_REG(_spi_port));
         auto dma_conf = *dma_conf_reg & ~(SPI_OUT_DATA_BURST_EN | SPI_AHBM_RST | SPI_AHBM_FIFO_RST | SPI_OUT_RST);
         *dma_conf_reg = dma_conf | SPI_AHBM_RST | SPI_AHBM_FIFO_RST | SPI_OUT_RST;
@@ -699,36 +764,18 @@ namespace lgfx
         uint32_t len = length;
         *spi_dma_out_link_reg = SPI_OUTLINK_START | ((int)(&_dmadesc[0]) & 0xFFFFF);
         _clear_dma_reg = spi_dma_out_link_reg;
-#endif
         set_write_len(len << 3);
         *_gpio_reg_dc[dc] = _mask_reg_dc;
 
         // DMA準備完了待ち;
-#if defined ( SOC_GDMA_SUPPORTED )
-        while (*_spi_dma_outstatus_reg & DMA_OUTFIFO_EMPTY_CH0 ) {}
-#elif defined (SPI_DMA_OUTFIFO_EMPTY)
+ #if defined (SPI_DMA_OUTFIFO_EMPTY)
         while (*_spi_dma_outstatus_reg & SPI_DMA_OUTFIFO_EMPTY ) {}
-#else
- #if defined ( LGFX_SPIDMA_WORKAROUND )
+ #else
+  #if defined ( LGFX_SPIDMA_WORKAROUND )
         if (_dma_ch) { spicommon_dmaworkaround_transfer_active(_dma_ch); }
+  #endif
  #endif
-#endif
         exec_spi();
-
-#if defined ( SOC_GDMA_SUPPORTED )
-        if (length -= len)
-        {
-          while (*cmd & SPI_USR) {}
-          set_write_len(SPI_MS_DATA_BITLEN + 1);
-          goto label_start;
-          do
-          {
-            vTaskDelay(1 / portTICK_PERIOD_MS);
-            while (*cmd & SPI_USR) {}
-label_start:
-            exec_spi();
-          } while (length -= ((SPI_MS_DATA_BITLEN + 1) >> 3));
-        }
 #endif
         return;
       }
@@ -868,7 +915,7 @@ label_start:
     {
       // reg for sending data in 4-bit mode
       auto qspi_user_reg = _spi_user_reg;
-      uint32_t qspi_user = (*qspi_user_reg | SPI_FWRITE_QUAD);
+      uint32_t qspi_user = (_user_reg & ~(SPI_USR_MISO | SPI_DOUTDIN | SPI_SIO)) | SPI_USR_MOSI | SPI_FWRITE_QUAD;
       *qspi_user_reg = qspi_user;
     }
 #endif
@@ -888,39 +935,24 @@ label_start:
     dc_control(true);
     *_spi_dma_out_link_reg = 0;
 
-#if defined ( SOC_GDMA_SUPPORTED )
+#if defined ( SOC_GDMA_SUPPORTED ) && defined ( DMA_OUTLINK_START_CH0 )
+    #if defined ( CONFIG_IDF_TARGET_ESP32P4 )
+    *_spi_dma_out_link2_reg = ((uint32_t)(_dmadesc));
+    *_spi_dma_out_link_reg = DMA_OUTLINK_START_CH0;
+    #else
     *_spi_dma_out_link_reg = DMA_OUTLINK_START_CH0 | ((int)(&_dmadesc[0]) & 0xFFFFF);
+    #endif
     auto dma = reg(SPI_DMA_CONF_REG(_spi_port));
     *dma = SPI_DMA_TX_ENA;
     _clear_dma_reg = dma;
     uint32_t len = ((_dma_queue_bytes - 1) & ((SPI_MS_DATA_BITLEN)>>3)) + 1;
-#else
-    auto dma_conf_reg = reg(SPI_DMA_CONF_REG(_spi_port));
-    auto dma_conf = *dma_conf_reg & ~(SPI_OUT_DATA_BURST_EN | SPI_AHBM_RST | SPI_AHBM_FIFO_RST | SPI_OUT_RST);
-    dma_conf |= SPI_OUTDSCR_BURST_EN;
-    *dma_conf_reg = dma_conf | SPI_AHBM_RST | SPI_AHBM_FIFO_RST | SPI_OUT_RST;
-    *dma_conf_reg = dma_conf;
-
-    *_spi_dma_out_link_reg = SPI_OUTLINK_START | ((int)(&_dmadesc[0]) & 0xFFFFF);
-    _clear_dma_reg = _spi_dma_out_link_reg;
-    uint32_t len = _dma_queue_bytes;
-    _dma_queue_bytes = 0;
-#endif
-
     set_write_len(len << 3);
     // DMA準備完了待ち;
-#if defined ( SOC_GDMA_SUPPORTED )
+ #if defined ( DMA_OUTFIFO_EMPTY_CH0 )
     while (*_spi_dma_outstatus_reg & DMA_OUTFIFO_EMPTY_CH0 ) {}
-#elif defined (SPI_DMA_OUTFIFO_EMPTY)
-    while (*_spi_dma_outstatus_reg & SPI_DMA_OUTFIFO_EMPTY ) {}
-#else
- #if defined ( LGFX_SPIDMA_WORKAROUND )
-    if (_dma_ch) { spicommon_dmaworkaround_transfer_active(_dma_ch); }
  #endif
-#endif
     exec_spi();
 
-#if defined ( SOC_GDMA_SUPPORTED )
     uint32_t length = _dma_queue_bytes - len;
     _dma_queue_bytes = 0;
     if (length)
@@ -935,6 +967,27 @@ label_start:
         exec_spi();
       } while (length -= ((SPI_MS_DATA_BITLEN + 1) >> 3));
     }
+#elif defined ( CONFIG_IDF_TARGET_ESP32 ) || !defined ( CONFIG_IDF_TARGET )
+    auto dma_conf_reg = reg(SPI_DMA_CONF_REG(_spi_port));
+    auto dma_conf = *dma_conf_reg & ~(SPI_OUT_DATA_BURST_EN | SPI_AHBM_RST | SPI_AHBM_FIFO_RST | SPI_OUT_RST);
+    dma_conf |= SPI_OUTDSCR_BURST_EN;
+    *dma_conf_reg = dma_conf | SPI_AHBM_RST | SPI_AHBM_FIFO_RST | SPI_OUT_RST;
+    *dma_conf_reg = dma_conf;
+
+    *_spi_dma_out_link_reg = SPI_OUTLINK_START | ((int)(&_dmadesc[0]) & 0xFFFFF);
+    _clear_dma_reg = _spi_dma_out_link_reg;
+    uint32_t len = _dma_queue_bytes;
+    _dma_queue_bytes = 0;
+    set_write_len(len << 3);
+    // DMA準備完了待ち;
+ #if defined (SPI_DMA_OUTFIFO_EMPTY)
+    while (*_spi_dma_outstatus_reg & SPI_DMA_OUTFIFO_EMPTY ) {}
+ #else
+  #if defined ( LGFX_SPIDMA_WORKAROUND )
+    if (_dma_ch) { spicommon_dmaworkaround_transfer_active(_dma_ch); }
+  #endif
+ #endif
+    exec_spi();
 #endif
   }
 
@@ -1173,7 +1226,18 @@ label_start:
       periph_module_reset( PERIPH_SPI3_DMA_MODULE );
     }
 #elif defined( CONFIG_IDF_TARGET_ESP32 ) || !defined( CONFIG_IDF_TARGET )
+ #if defined (PERIPH_SPI_DMA_MODULE)
     periph_module_reset( PERIPH_SPI_DMA_MODULE );
+ #elif defined (PERIPH_HSPI_MODULE) && defined (PERIPH_VSPI_MODULE)
+    if (_cfg.spi_host == SPI2_HOST)
+    {
+      periph_module_reset( PERIPH_HSPI_MODULE );
+    }
+    else
+    {
+      periph_module_reset( PERIPH_VSPI_MODULE );
+    }
+ #endif
 #endif
   }
 

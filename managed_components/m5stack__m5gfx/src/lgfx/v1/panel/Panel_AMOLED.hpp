@@ -37,7 +37,7 @@ namespace lgfx
         struct Panel_AMOLED_Framebuffer : Panel_FrameBufferBase
         {
         public:
-            Panel_AMOLED_Framebuffer(Panel_AMOLED* panel) : _panel(panel) { assert(_panel); }
+            Panel_AMOLED_Framebuffer(Panel_AMOLED* panel);
             virtual ~Panel_AMOLED_Framebuffer(void) { deinitFramebuffer(); }
             bool init(bool use_reset) override;
             bool initFramebuffer(uint_fast16_t w, uint_fast16_t h);
@@ -46,7 +46,9 @@ namespace lgfx
             // TODO: reinit frame buffer when one of those functions is called
             //color_depth_t setColorDepth(color_depth_t depth) override;
             //void setRotation(uint_fast8_t r) override;
-            //void setInvert(bool invert) override;
+            void setInvert(bool invert) override;
+            void setBrightness(uint8_t brightness) override;
+            uint_fast8_t getTouchRaw(touch_point_t* tp, uint_fast8_t count) override;
 
             void display(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h) override;
 

@@ -44,8 +44,19 @@ CONFIG_USB_MIDI_LCD_FONT_SIZE=4
 CONFIG_USB_MIDI_LCD_BACKLIGHT_LEVEL=200
 
 # Tab5 has both USB-C (device/serial) and USB-A (host)
-# USB-C can be used for serial console while USB-A handles MIDI host
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# USB-C is now a TinyUSB composite device (CDC + MIDI).
+# NOTE: CONFIG_ESP_CONSOLE_USB_CDC is NOT available for ESP32-P4 (only S2/S3),
+# so the secondary USB-Serial-JTAG console is disabled instead. The USB-C
+# connector itself is handed to TinyUSB at runtime by swapping the FSLS PHY
+# mux (usb_serial_jtag_ll_phy_select) in picoruby-usb_midi_device; console
+# output is then redirected to USB CDC via tinyusb_console_init().
+# NOTE: Hardware JTAG debugging via USB-C is no longer available, and
+# idf.py flash now requires entering download mode manually (BOOT + RESET).
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# TinyUSB device stack for the USB-C FS OTG port
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_MIDI_COUNT=1
 
 # Enable mbedtls CMAC support for PicoRuby
 CONFIG_MBEDTLS_CMAC_C=y

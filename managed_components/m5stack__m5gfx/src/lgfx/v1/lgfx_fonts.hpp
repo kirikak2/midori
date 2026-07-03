@@ -27,6 +27,7 @@ namespace lgfx
     , ft_bdf
     , ft_vlw
     , ft_u8g2
+    , ft_lvgl
     , ft_ttf
     };
 
@@ -220,6 +221,87 @@ namespace lgfx
 
     DataWrapper* _fontData = nullptr;
     bool _fontLoaded = false;
+  };
+
+//----------------------------------------------------------------------------
+// Compact bitmap font (head/cmap/loca/glyf[/kern])
+
+  struct BFFfont : public RunTimeFont
+  {
+    struct CMapSubtable
+    {
+      uint32_t data_offset;
+      uint32_t range_start;
+      uint16_t range_length;
+      uint16_t glyph_id_offset;
+      uint16_t entries_count;
+      uint8_t format_type;
+    };
+
+    struct GlyphInfo
+    {
+      bool valid = false;
+      uint16_t glyph_id = 0;
+      uint16_t advance_raw = 0;  // uint or FP4 by advanceWidthFormat
+      int16_t bbox_x = 0;
+      int16_t bbox_y = 0;
+      uint16_t bbox_w = 0;
+      uint16_t bbox_h = 0;
+      uint16_t bitmap_w = 0;     // raw bitmap width stored in glyf
+      uint16_t bitmap_h = 0;     // raw bitmap height stored in glyf
+    };
+
+    // Parsed from head table
+    uint16_t font_size = 0;
+    uint16_t typo_ascent = 0;
+    int16_t  typo_descent = 0;
+    uint16_t typo_line_gap = 0;
+    int16_t  ascent = 0;
+    int16_t  descent = 0;
+    int16_t  min_y = 0;
+    int16_t  max_y = 0;
+    uint16_t default_advance_width = 0;
+    uint16_t kerning_scale = 0;
+    uint8_t index_to_loc_format = 0;
+    uint8_t glyph_id_format = 0;
+    uint8_t advance_width_format = 0;
+    uint8_t bits_per_pixel = 1;
+    uint8_t bbox_xy_bits = 0;
+    uint8_t bbox_wh_bits = 0;
+    uint8_t advance_width_bits = 0;
+    uint8_t compression_algorithm = 0;
+    uint8_t subpixel_rendering = 0;
+
+    uint32_t cmap_record_offset = 0;
+    uint32_t cmap_record_size = 0;
+    uint32_t loca_record_offset = 0;
+    uint32_t loca_record_size = 0;
+    uint32_t glyf_record_offset = 0;
+    uint32_t glyf_record_size = 0;
+
+    uint8_t* cmap_data = nullptr;         // cmap table payload (without record header)
+    uint32_t cmap_data_size = 0;
+    CMapSubtable* cmap_subtables = nullptr;
+    uint32_t cmap_subtable_count = 0;
+
+    uint32_t* loca_table = nullptr;
+    uint32_t loca_entries = 0;
+
+    font_type_t getType(void) const override { return ft_ttf; }
+
+    virtual ~BFFfont();
+
+    bool loadFont(DataWrapper* data) override;
+    bool unloadFont(void) override;
+    void getDefaultMetric(FontMetrics *metrics) const override;
+    bool updateFontMetric(FontMetrics *metrics, uint16_t uniCode) const override;
+    size_t drawChar(LGFXBase* gfx, int32_t x, int32_t y, uint16_t c, const TextStyle* style, FontMetrics* metrics, int32_t& filled_x) const override;
+
+  private:
+    bool mapCodepointToGlyph(uint32_t codepoint, uint16_t* glyph_id) const;
+    bool getGlyphOffsetAndLength(uint16_t glyph_id, uint32_t* offset, uint32_t* length) const;
+    bool loadGlyphInfo(uint16_t glyph_id, GlyphInfo* info) const;
+    bool decodeGlyphBitmap(uint16_t glyph_id, GlyphInfo* info, uint8_t** out_bitmap) const;
   };
 
 //----------------------------------------------------------------------------
