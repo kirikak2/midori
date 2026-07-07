@@ -48,6 +48,24 @@ module UI
     _log(text.to_s)
   end
 
+  # Screen indices (must match ui_common.h ui_screen_index_t order)
+  SCREEN_MAIN      = 0
+  SCREEN_PADS      = 1
+  SCREEN_MIDI_INFO = 2
+  SCREEN_LOGS      = 3
+  SCREEN_SCRIPTS   = 4
+  SCREEN_SETTINGS  = 5
+
+  # Switch the active screen (0-based; see SCREEN_* constants)
+  def self.set_screen(index)
+    _set_screen(index)
+  end
+
+  # Currently active screen index
+  def self.current_screen
+    _current_screen
+  end
+
   # Get number of pending UI events
   # @return [Integer] Number of events in queue
   def self.events_available

@@ -50,6 +50,10 @@ bool picoruby_ui_pad_get_state(int index);
 void picoruby_ui_pad_set_label(int index, const char *label);
 void picoruby_ui_pad_set_color(int index, int color);
 
+/* Screen switching (diagnostic + control) */
+void picoruby_ui_set_screen(int index);
+int  picoruby_ui_current_screen(void);
+
 #ifdef __cplusplus
 }
 #endif

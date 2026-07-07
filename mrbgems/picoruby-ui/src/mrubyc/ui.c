@@ -144,6 +144,24 @@ c_ui_log(mrbc_vm *vm, mrbc_value v[], int argc)
 }
 
 /*
+ * UI._set_screen(index) / UI._current_screen
+ */
+static void
+c_ui_set_screen(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    if (argc >= 1 && mrbc_type(v[1]) == MRBC_TT_INTEGER) {
+        picoruby_ui_set_screen((int)mrbc_integer(v[1]));
+    }
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_current_screen(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    SET_INT_RETURN(picoruby_ui_current_screen());
+}
+
+/*
  * UI._pad_set(index, label, color, type)
  */
 static void
@@ -262,6 +280,8 @@ mrbc_ui_init(mrbc_vm *vm)
     mrbc_define_method(vm, module_UI, "_bpm", c_ui_bpm);
     mrbc_define_method(vm, module_UI, "_set_bpm", c_ui_set_bpm);
     mrbc_define_method(vm, module_UI, "_log", c_ui_log);
+    mrbc_define_method(vm, module_UI, "_set_screen", c_ui_set_screen);
+    mrbc_define_method(vm, module_UI, "_current_screen", c_ui_current_screen);
 
     /* Pad methods */
     mrbc_define_method(vm, module_UI, "_pad_set", c_ui_pad_set);

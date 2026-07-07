@@ -110,3 +110,18 @@ void picoruby_ui_pad_set_color(int index, int color)
     if (index < 0 || index >= UI_PAD_COUNT) return;
     ui_pad_set_color((uint8_t)index, (pad_color_t)color);
 }
+
+/* Screen switching (declared in ui_manager.h; use externs to avoid pulling a
+ * C++ header into this C file). */
+extern void ui_set_screen(ui_screen_index_t index);
+extern ui_screen_index_t ui_get_current_screen(void);
+
+void picoruby_ui_set_screen(int index)
+{
+    ui_set_screen((ui_screen_index_t)index);
+}
+
+int picoruby_ui_current_screen(void)
+{
+    return (int)ui_get_current_screen();
+}
