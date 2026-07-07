@@ -323,6 +323,48 @@ MIDI.sleep_ms(500)  # 500ms待機、MIDI入力も処理
 3. **SysEx非対応**: 現在の実装では未対応
 4. **複数デバイス非対応**: 1デバイスのみサポート
 
+## USB-MIDI Device (Tab5)
+
+上記の USB **Host** とは別に、M5Stack Tab5 (ESP32-P4) では本機自身が USB **Device**
+として振る舞える。USB-A が Host、**USB-C が Device**。
+
+### 構成
+
+- **TinyUSB** による **CDC + MIDI コンポジットデバイス**。PC 側には
+  `Midori MIDI`（VID:PID `303a:4009`）として列挙される（CDC はシリアルコンソール兼用）。
+- ESP32-P4 は USB PHY を 2 つ持つ。既定では USB-Serial-JTAG が USB-C 側 PHY に繋がっているため、
+  起動時に PHY の mux を切り替えて USB-OTG(FS) を USB-C 側へ割り当てている
+  （`usb_serial_jtag_ll_phy_select(1)`）。この時点で USB-Serial-JTAG は切断される。
+- ボード設定 `HAS_USB_MIDI_DEVICE`（Tab5 のみ true）でビルドに含まれる。
+
+### TX（device → host）の直列化 — 重要
+
+`tud_midi_packet_write()` は TinyUSB device task（`tud_task`, Core 1）と**同一コアで**呼ばないと
+usbd/FIFO 状態を壊す（別コア並列で VM ヒープ破壊クラッシュを観測）。MIDI 送信は
+複数の文脈（VM task=Core 1、esp_timer のノートスケジューラ/クロック=Core 0）から要求されるため、
+**全送信を FreeRTOS キューへ積み、Core 1 に固定した専用タスク 1 本だけが
+`tud_midi_packet_write()` を呼ぶ**構成にしてある。これにより要求元のコアに依らず tud_task と直列化される。
+
+### RX（host → device）
+
+`tud_midi_rx_cb()`（TinyUSB task）が 4 バイトパケットを SPSC リングバッファへ積み、
+Ruby task が `USB_MIDI_DEVICE_read_packet()` で取り出す。
+
+### Ruby からの利用
+
+`MIDIDevices.usb_midi_device`（遅延初期化で `require 'usb_midi_device'`）→ `MIDI::Device.new` の
+transport として使う。picoruby-midi の transport-mask では USB device = `0x04`。
+API 一覧は [MIDI_DEVICES.md](MIDI_DEVICES.md) を参照。
+
+### 関連ファイル（Device 側）
+
+- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/ports/esp32/usb_midi_device.c`:
+  TinyUSB 初期化、TX キュー + Core-1 送信タスク、RX リングバッファ
+- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/src/mrubyc/usb_midi_device.c`:
+  mruby/c バインディング（`USB_MIDI_DEVICE` クラス）
+- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/mrblib/usb_midi_device.rb`: Ruby API
+- `examples/usb_midi_device_pad.rb`: 動作確認サンプル
+
 ## 関連ファイル
 
 - `main/usb_midi_host.c`: USB Hostドライバ、転送処理

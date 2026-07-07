@@ -58,6 +58,19 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_MIDI_COUNT=1
 
+# Use the full 16MB flash (Tab5 hardware). Needed for the coredump
+# partition which sits beyond the first 2MB.
+# CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Save a core dump to flash on panic. The console runs over TinyUSB CDC,
+# which dies together with a crash, so on-console panic output is not
+# reliable on Tab5. Retrieve after reboot with:
+#   idf.py coredump-info   (device in download mode: BOOT + RESET)
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
 # Enable mbedtls CMAC support for PicoRuby
 CONFIG_MBEDTLS_CMAC_C=y
 
@@ -68,3 +81,4 @@ CONFIG_MBEDTLS_CMAC_C=y
 # CONFIG_ESP_BROWNOUT_DET_LVL_SEL_6 is not set
 CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
 CONFIG_ESP_BROWNOUT_DET_LVL=5
+

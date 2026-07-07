@@ -3,3 +3,5 @@
 nvs,      data, nvs,     0x9000,  0x6000,
 phy_init, data, phy,     0xf000,  0x1000,
 factory,  app,  factory, 0x10000, 0x1F0000,
+# Core dump storage (task stacks only; CAPTURE_DRAM fails to write here).
+coredump, data, coredump, 0x200000, 0x10000,

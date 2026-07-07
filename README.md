@@ -1,10 +1,11 @@
 # Midori
 
-**MIDI on Ruby Interpreter** — Orchestrate connected MIDI devices using PicoRuby scripts. Runs on ESP32-S3 with USB MIDI host capabilities.
+**MIDI on Ruby Interpreter** — Orchestrate connected MIDI devices using PicoRuby scripts. Runs on ESP32-S3 / ESP32-P4 with USB MIDI host (and, on Tab5, USB MIDI device) capabilities.
 
 ## Features
 
 - **USB MIDI Host** — Connect USB MIDI devices (synthesizers, keyboards, etc.) directly
+- **USB MIDI Device** — On M5Stack Tab5, the board itself acts as a USB MIDI device to a host PC over USB-C (TinyUSB CDC + MIDI composite; appears as `Midori MIDI`)
 - **Hot-plug Support** — Automatic detection and recovery on device connection/disconnection
 - **PicoRuby Scripting** — Program MIDI sequences with Ruby scripts
 - **BPM Loop** — `MIDI.bpm_loop` for BPM-synced loops with automatic MIDI Clock output
@@ -19,8 +20,10 @@
 | Board | Notes |
 |-------|-------|
 | M5Stack CoreS3 | Touch screen UI available |
-| M5Stack Tab5 | Touch screen UI available |
+| M5Stack Tab5 (ESP32-P4) | Touch screen UI; USB-A = MIDI host, USB-C = MIDI device |
 | Freenove ESP32-S3 | Script operation via serial console |
+
+See [docs/MIDI_DEVICES.md](docs/MIDI_DEVICES.md) for per-board MIDI device availability and the `MIDIDevices` API (`sam2695` / `usb_midi_host` / `usb_midi_device`).
 
 ## Tested MIDI Devices (USB)
 

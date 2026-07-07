@@ -13,7 +13,14 @@ SDカード内のスクリプトから簡単にアクセスできるようにな
 | m5stack (CoreS3) | ○ (17,18) | ○ | - |
 | m5stack_with_usbserial | ○ (17,18) | - | - |
 | freenove (ESP32-S3) | ○ (17,18) | ○ | - |
-| m5stack_tab5 (P4) | ○ (53,54 / Port A) | ○ | ○ (未実装) |
+| m5stack_tab5 (P4) | ○ (53,54 / Port A) | ○ (USB-A) | ○ (USB-C) |
+
+> **USB-MIDI Host と USB-MIDI Device の違い**
+> - **Host**: 本機に USB MIDI 機器（シンセ・キーボード等）を接続して制御する（本機がホスト）。
+> - **Device**: 本機を PC 等のホストに接続し、**本機自身が USB MIDI デバイスとして振る舞う**。
+>   PC 側には `Midori MIDI`（VID:PID `303a:4009`, CDC + MIDI コンポジット）として見える。
+>   Tab5 では USB-A が Host、**USB-C が Device**（TinyUSB。詳細は
+>   [USB_MIDI_IMPLEMENTATION.md](USB_MIDI_IMPLEMENTATION.md) の「USB-MIDI Device (Tab5)」節）。
 
 ## 推奨: MIDIDevicesモジュールを使用する方法
 
@@ -44,14 +51,32 @@ else
   puts "SAM2695 not available on this board"
 end
 
-# USB-MIDIを使う場合
+# USB-MIDI Host を使う場合（本機に接続された MIDI 機器を制御）
 if usb
   usb_device = MIDI::Device.new(usb)
   # ... USB-MIDIデバイスを使用
 else
   puts "USB-MIDI Host not available on this board"
 end
+
+# USB-MIDI Device を使う場合（本機を PC 等のホストへ MIDI 出力）
+usb_dev = MIDIDevices.usb_midi_device
+if usb_dev
+  device = MIDI::Device.new(usb_dev)
+  # connected? で PC 側が本機を認識したか確認できる
+  UI.log(usb_dev.connected? ? "Host connected" : "Host not connected yet")
+
+  UI.pad(1, label: "C4", color: :red, type: :trigger) do
+    device.trigger(60, 110, duration: 150)  # PC の MIDI IN に Note が届く
+  end
+else
+  puts "USB-MIDI Device not available on this board"
+end
 ```
+
+サンプル: [`examples/usb_midi_device_pad.rb`](../examples/usb_midi_device_pad.rb)
+（Tab5 の USB-C を PC に接続し、パッドのタップを MIDI Note として送信）。
+PC 側の確認例: `aseqdump -p "Midori MIDI"`（Linux）。
 
 ## 従来の方法（互換性のため残存）
 
@@ -105,9 +130,10 @@ MIDIデバイスは以下のタイミングで初期化されます：
 MIDIDevicesモジュールの初期化は `main_task_base.rb` で以下のように行われます：
 
 ```ruby
-# UI Mode/Script Mode共通の初期化処理
-MIDIDevices.init_sam2695
-MIDIDevices.init_usb_midi_host
+# 各デバイスは初回アクセス時に遅延初期化される（lazy init）
+MIDIDevices.sam2695          # -> init_sam2695
+MIDIDevices.usb_midi_host    # -> init_usb_midi_host
+MIDIDevices.usb_midi_device  # -> init_usb_midi_device（require 'usb_midi_device'）
 ```
 
 ### BoardConfig の生成
@@ -136,7 +162,19 @@ MIDIDevicesモジュールから取得したデバイスが nil の場合：
 2. 該当するボードの設定セクションで `SAM2695_TX_PIN` などを変更
 3. リビルド: `idf.py build`
 
+## USB-MIDI Device の Ruby API
+
+`MIDIDevices.usb_midi_device` が返すオブジェクトは `MIDI::Device.new` の transport として
+使えるほか、以下の低レベル API を持ちます（通常は `MIDI::Device` 経由で使えば十分）:
+
+| メソッド | 説明 |
+|---|---|
+| `connected?` | PC 等のホストが本機を enumerate 済みなら true |
+| `send_packet(cable, cin, m1, m2, m3)` | USB-MIDI 4バイトパケットを host へ送信（0=成功 / -1=失敗） |
+| `bytes_available` | ホストから受信済み（host→device）のバイト数 |
+| `read_available` | 受信済み 4バイトパケットを binary String で返す（無ければ nil） |
+| `transport_id` | picoruby-midi の transport マスク識別子（USB device = `4`） |
+
 ## 今後の予定
 
-- **USB-MIDI Device対応**: M5Stack Tab5でのUSB-MIDI Device機能実装
 - **動的デバイス切り替え**: スクリプト実行中のデバイス切り替え機能
