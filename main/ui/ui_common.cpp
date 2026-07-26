@@ -152,6 +152,33 @@ uint16_t ui_darken_color(uint16_t color)
     return (r << 11) | (g << 5) | b;
 }
 
+// Pads whose appearance changed and still need to be repainted (bit N = pad N).
+// Set from whichever task calls ui_pad_set*/ui_pad_clear* (typically the
+// PicoRuby task via UI.pad / UI.pad_color / UI.pad_label) and consumed by the
+// UI task in ScreenPads::update(). Drawing must not happen in the setters --
+// only the UI task may touch the LCD.
+static uint32_t s_pad_dirty = 0;
+
+#define UI_PAD_DIRTY_ALL ((1u << UI_PAD_COUNT) - 1u)
+
+void ui_pad_mark_dirty(uint8_t index)
+{
+    if (index >= UI_PAD_COUNT) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    s_pad_dirty |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+uint32_t ui_pad_take_dirty(void)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+    uint32_t mask = s_pad_dirty;
+    s_pad_dirty = 0;
+    portEXIT_CRITICAL(&s_ui_mutex);
+    return mask;
+}
+
 // Pad functions
 void ui_pad_set(uint8_t index, const char* label, pad_color_t color, pad_type_t type)
 {
@@ -164,6 +191,7 @@ void ui_pad_set(uint8_t index, const char* label, pad_color_t color, pad_type_t 
     g_pads[index].color = color;
     g_pads[index].type = type;
     g_pads[index].state = false;
+    s_pad_dirty |= (1u << index);
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
@@ -175,6 +203,7 @@ void ui_pad_clear(uint8_t index)
     g_pads[index].assigned = false;
     g_pads[index].label[0] = '\0';
     g_pads[index].state = false;
+    s_pad_dirty |= (1u << index);
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
@@ -186,6 +215,7 @@ void ui_pad_clear_all(void)
         g_pads[i].label[0] = '\0';
         g_pads[i].state = false;
     }
+    s_pad_dirty = UI_PAD_DIRTY_ALL;
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
@@ -208,13 +238,18 @@ void ui_pad_set_label(uint8_t index, const char* label)
     portENTER_CRITICAL(&s_ui_mutex);
     strncpy(g_pads[index].label, label, sizeof(g_pads[index].label) - 1);
     g_pads[index].label[sizeof(g_pads[index].label) - 1] = '\0';
+    s_pad_dirty |= (1u << index);
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
 void ui_pad_set_color(uint8_t index, pad_color_t color)
 {
     if (index >= UI_PAD_COUNT) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
     g_pads[index].color = color;
+    s_pad_dirty |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
 }
 
 const pad_config_t* ui_pad_get_config(uint8_t index)

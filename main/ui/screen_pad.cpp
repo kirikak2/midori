@@ -53,6 +53,8 @@ void ScreenPads::enter()
     }
     ui_clear_content_area();
     draw();
+    // Everything was just painted, so any pending per-pad requests are stale.
+    ui_pad_take_dirty();
 }
 
 void ScreenPads::leave()
@@ -75,6 +77,20 @@ void ScreenPads::update()
     if (m_needsRedraw) {
         draw();
         m_needsRedraw = false;
+        ui_pad_take_dirty();
+        return;
+    }
+
+    // Repaint pads that a script changed via UI.pad / UI.pad_color /
+    // UI.pad_label. Those run on the PicoRuby task and only mark the pad dirty;
+    // this is where the change actually reaches the screen.
+    uint32_t dirty = ui_pad_take_dirty();
+    if (dirty == 0) return;
+
+    for (int i = 0; i < UI_PAD_COUNT; i++) {
+        if (dirty & (1u << i)) {
+            drawPad(i);
+        }
     }
 }
 

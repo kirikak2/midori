@@ -201,6 +201,15 @@ void ui_pad_set_label(uint8_t index, const char* label);
 void ui_pad_set_color(uint8_t index, pad_color_t color);
 const pad_config_t* ui_pad_get_config(uint8_t index);
 
+// Pad repaint tracking.
+// ui_pad_set/ui_pad_clear/ui_pad_set_label/ui_pad_set_color only mutate the
+// shared pad state -- they cannot draw, because they run on the caller's task
+// (PicoRuby) and only the UI task may touch the LCD. They instead mark the pad
+// dirty here, and ScreenPads::update() repaints whatever it takes.
+// ui_pad_take_dirty() returns a bitmask (bit N = pad N) and clears it.
+void ui_pad_mark_dirty(uint8_t index);
+uint32_t ui_pad_take_dirty(void);
+
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);
 void ui_event_push(const ui_event_t* event);
