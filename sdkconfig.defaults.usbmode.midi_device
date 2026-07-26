@@ -1,0 +1,29 @@
+# USB port mode: USB-MIDI DEVICE (TinyUSB CDC + MIDI composite)
+#
+# Appended to a board's sdkconfig.defaults.<board> by switch_board.sh.
+#
+# The USB connector is handed to TinyUSB, so the board enumerates on a
+# PC/tablet as a USB-MIDI instrument plus a CDC serial port. Console output
+# is redirected to that CDC interface at runtime (tinyusb_console_init()),
+# so `idf.py monitor` still works over the same cable.
+#
+# ESP32-S3 (Freenove / CoreS3): TinyUSB takes the shared USB PHY, so the
+#   USB-MIDI host is disabled in this build (CONFIG_USB_MIDI_HOST_ENABLED is
+#   derived to n). ESP-IDF's usb_phy driver does the PHY hand-over.
+# ESP32-P4 (Tab5): only affects USB-C (the FSLS PHY mux is swapped in
+#   picoruby-usb_midi_device); the USB-A host port keeps working.
+#
+# NOTE: USB-Serial/JTAG is disconnected from the connector in this mode.
+# Hardware JTAG debugging is unavailable and `idf.py flash` requires
+# entering download mode manually (hold BOOT, tap RESET).
+CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE=y
+
+# USB-Serial/JTAG must not fight TinyUSB for the PHY: keep the primary
+# console on UART and disable the secondary USB-Serial/JTAG console.
+# (CONFIG_ESP_CONSOLE_USB_CDC is ESP-IDF's own ROM CDC driver, available
+# only on S2/S3 and incompatible with driving TinyUSB ourselves.)
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# TinyUSB device stack: CDC + MIDI composite
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_MIDI_COUNT=1

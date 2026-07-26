@@ -8,12 +8,25 @@ SDカード内のスクリプトから簡単にアクセスできるようにな
 
 ## ボード別の利用可能デバイス
 
-| ボード名 | SAM2695 | USB-MIDI Host | USB-MIDI Device |
-|---------|---------|---------------|-----------------|
-| m5stack (CoreS3) | ○ (17,18) | ○ | - |
-| m5stack_with_usbserial | ○ (17,18) | - | - |
-| freenove (ESP32-S3) | ○ (17,18) | ○ | - |
-| m5stack_tab5 (P4) | ○ (53,54 / Port A) | ○ (USB-A) | ○ (USB-C) |
+利用可能なデバイスは **ボード × USBポートモード** の組み合わせで決まります。
+USBポートモードは `./switch_board.sh <board> [host|serial|midi_device]` で選択します。
+
+| ボード名 | USBモード | SAM2695 | USB-MIDI Host | USB-MIDI Device |
+|---------|----------|---------|---------------|-----------------|
+| m5stack (CoreS3) | host (既定) | ○ (17,18) | ○ (USB-C) | - |
+| m5stack (CoreS3) | serial | ○ (17,18) | - | - |
+| m5stack (CoreS3) | midi_device | ○ (17,18) | - | ○ (USB-C) |
+| freenove (ESP32-S3) | host (既定) | ○ (17,18) | ○ (USB-C) | - |
+| freenove (ESP32-S3) | serial | ○ (17,18) | - | - |
+| freenove (ESP32-S3) | midi_device | ○ (17,18) | - | ○ (USB-C) |
+| m5stack_tab5 (P4) | midi_device (既定) | ○ (53,54 / Port A) | ○ (USB-A) | ○ (USB-C) |
+| m5stack_tab5 (P4) | serial | ○ (53,54 / Port A) | ○ (USB-A) | - |
+
+> ESP32-S3ボードはUSBコネクタが1つ、USB PHYも1つしかないため、
+> Host（USB-OTG）と Device（USB-Serial/JTAG もしくは TinyUSB）は排他です。
+> `serial` / `midi_device` を選ぶと `BoardConfig::HAS_USB_MIDI_HOST` が
+> `false` になり、`MIDIDevices.usb_midi_host` は `nil` を返します。
+> Tab5 は USB-A が常に Host なので、モードは USB-C の役割のみを決めます。
 
 > **USB-MIDI Host と USB-MIDI Device の違い**
 > - **Host**: 本機に USB MIDI 機器（シンセ・キーボード等）を接続して制御する（本機がホスト）。

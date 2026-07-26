@@ -1,6 +1,8 @@
 # M5Stack Tab5 specific settings (ESP32-P4)
-# CONFIG_USB_MIDI_BOARD_FREENOVE is not set
-# CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 is not set
+#
+# Board settings only. The USB-C port mode (USB serial / USB-MIDI device)
+# lives in sdkconfig.defaults.usbmode.*, which switch_board.sh appends to
+# this file. The USB-A host port is always available on Tab5.
 CONFIG_USB_MIDI_BOARD_M5STACK_TAB5=y
 
 # Target: ESP32-P4 (RISC-V dual-core 400MHz)
@@ -8,6 +10,14 @@ CONFIG_IDF_TARGET="esp32p4"
 
 # Enable experimental features (required for 200MHz PSRAM)
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# ESP32-P4 minimum chip revision (early silicon).
+# The Tab5's ESP32-P4 is Rev v1.3. ESP-IDF v5.5.5 raised the default minimum
+# to Rev v3.1, which is a different, INCOMPATIBLE silicon family and rejects
+# v1.x hardware at flash time ("requires chip revision v3.1-v3.99"). Opt into
+# pre-v3 support and pin the minimum to Rev v1.0 so v1.3 boots.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
 
 # Custom partition table
 # CONFIG_PARTITION_TABLE_SINGLE_APP is not set
@@ -43,29 +53,14 @@ CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED=y
 CONFIG_USB_MIDI_LCD_FONT_SIZE=4
 CONFIG_USB_MIDI_LCD_BACKLIGHT_LEVEL=200
 
-# Tab5 has both USB-C (device/serial) and USB-A (host)
-# USB-C is now a TinyUSB composite device (CDC + MIDI).
-# NOTE: CONFIG_ESP_CONSOLE_USB_CDC is NOT available for ESP32-P4 (only S2/S3),
-# so the secondary USB-Serial-JTAG console is disabled instead. The USB-C
-# connector itself is handed to TinyUSB at runtime by swapping the FSLS PHY
-# mux (usb_serial_jtag_ll_phy_select) in picoruby-usb_midi_device; console
-# output is then redirected to USB CDC via tinyusb_console_init().
-# NOTE: Hardware JTAG debugging via USB-C is no longer available, and
-# idf.py flash now requires entering download mode manually (BOOT + RESET).
-CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
-
-# TinyUSB device stack for the USB-C FS OTG port
-CONFIG_TINYUSB_CDC_ENABLED=y
-CONFIG_TINYUSB_MIDI_COUNT=1
-
 # Use the full 16MB flash (Tab5 hardware). Needed for the coredump
 # partition which sits beyond the first 2MB.
 # CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
-# Save a core dump to flash on panic. The console runs over TinyUSB CDC,
-# which dies together with a crash, so on-console panic output is not
-# reliable on Tab5. Retrieve after reboot with:
+# Save a core dump to flash on panic. In USB-MIDI device mode the console
+# runs over TinyUSB CDC, which dies together with a crash, so on-console
+# panic output is not reliable on Tab5. Retrieve after reboot with:
 #   idf.py coredump-info   (device in download mode: BOOT + RESET)
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y

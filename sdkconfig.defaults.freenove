@@ -1,6 +1,9 @@
 # Freenove ESP32-S3 specific settings
+#
+# Board settings only. The USB port mode (USB-MIDI host / USB serial /
+# USB-MIDI device) lives in sdkconfig.defaults.usbmode.*, which
+# switch_board.sh appends to this file.
 CONFIG_USB_MIDI_BOARD_FREENOVE=y
-# CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 is not set
 
 # Target
 CONFIG_IDF_TARGET="esp32s3"
@@ -9,6 +12,12 @@ CONFIG_IDF_TARGET="esp32s3"
 # CONFIG_PARTITION_TABLE_SINGLE_APP is not set
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Freenove ESP32-S3 WROOM N8R8 has 8MB flash. Needed for the coredump
+# partition, which sits beyond the first 2MB - the 2MB default rejects
+# partitions.csv outright. Raise to 16MB on an N16R8 module.
+# CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 
 # Enable PSRAM (Octal mode for Freenove)
 CONFIG_SPIRAM=y

@@ -15,7 +15,7 @@ set(INCLUDE_DIRS
 # Platform-specific sources
 if(CONFIG_USB_MIDI_BOARD_FREENOVE)
     list(APPEND SRCS "platform/platform_freenove.c")
-elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
     list(APPEND SRCS
         "platform/platform_m5stack.cpp"
         "lcd_console/lcd_console.cpp"

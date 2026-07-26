@@ -44,14 +44,37 @@ The following devices have been confirmed to work as USB MIDI hosts. MIDI-DIN is
 
 ### Board Selection
 
-Run the switch script for your target board:
+Run the switch script for your target board, optionally followed by the USB
+port mode:
 
 ```bash
-./switch_board.sh m5stack              # M5Stack CoreS3
-./switch_board.sh m5stack_with_usbserial # M5Stack CoreS3 using USB-Serial mode (for develop)
-./switch_board.sh m5stack_tab5         # M5Stack Tab5 (ESP32-P4)
-./switch_board.sh freenove             # Freenove ESP32-S3 (for develop)
+./switch_board.sh <board> [host|serial|midi_device]
+
+./switch_board.sh m5stack                  # M5Stack CoreS3, USB-MIDI host (default)
+./switch_board.sh m5stack serial           # ... USB-Serial/JTAG console (for develop)
+./switch_board.sh m5stack midi_device      # ... USB-MIDI device (TinyUSB CDC + MIDI)
+./switch_board.sh m5stack_tab5             # M5Stack Tab5 (ESP32-P4), USB-C as USB-MIDI device (default)
+./switch_board.sh m5stack_tab5 serial      # ... USB-C as USB-Serial/JTAG console
+./switch_board.sh freenove                 # Freenove ESP32-S3 (for develop)
+./switch_board.sh freenove midi_device     # ... as a USB-MIDI device
 ```
+
+USB port modes:
+
+| Mode | USB port role | Console | USB-MIDI host |
+|------|---------------|---------|---------------|
+| `host` | USB-OTG host | UART | yes |
+| `serial` | USB-Serial/JTAG (flash + JTAG) | USB | ESP32-S3: no / Tab5: USB-A |
+| `midi_device` | TinyUSB CDC + MIDI device | USB CDC | ESP32-S3: no / Tab5: USB-A |
+
+Freenove and CoreS3 have a single USB connector wired to one USB PHY, so the
+host and device roles are mutually exclusive there. On the Tab5 the mode only
+selects what the USB-C port does — USB-A is always a USB-MIDI host.
+
+> **Note**: in `midi_device` mode USB-Serial/JTAG is disconnected from the
+> connector, so `idf.py flash` requires download mode (hold BOOT, tap RESET)
+> and hardware JTAG debugging is unavailable. `idf.py monitor` still works:
+> the console is redirected to the TinyUSB CDC interface.
 
 ### Instructions
 

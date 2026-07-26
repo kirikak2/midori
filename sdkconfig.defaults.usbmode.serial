@@ -1,0 +1,15 @@
+# USB port mode: USB-SERIAL/JTAG CONSOLE (USB device)
+#
+# Appended to a board's sdkconfig.defaults.<board> by switch_board.sh.
+#
+# The USB connector is driven by the built-in USB-Serial/JTAG controller:
+# console, `idf.py flash` and hardware JTAG debugging all work over it.
+#
+# ESP32-S3 (Freenove / CoreS3): this takes the shared USB PHY away from the
+#   USB-OTG controller, so the USB-MIDI host is disabled in this build
+#   (CONFIG_USB_MIDI_HOST_ENABLED is derived to n).
+# ESP32-P4 (Tab5): only affects USB-C; the USB-A host port keeps working.
+CONFIG_USB_MIDI_USB_MODE_SERIAL=y
+
+# Route the console to USB-Serial/JTAG instead of UART
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

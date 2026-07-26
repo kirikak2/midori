@@ -323,19 +323,33 @@ MIDI.sleep_ms(500)  # 500ms待機、MIDI入力も処理
 3. **SysEx非対応**: 現在の実装では未対応
 4. **複数デバイス非対応**: 1デバイスのみサポート
 
-## USB-MIDI Device (Tab5)
+## USB-MIDI Device (Tab5 / CoreS3 / Freenove)
 
-上記の USB **Host** とは別に、M5Stack Tab5 (ESP32-P4) では本機自身が USB **Device**
-として振る舞える。USB-A が Host、**USB-C が Device**。
+上記の USB **Host** とは別に、本機自身が USB **Device** として振る舞える。
+どのポートがどの役割になるかは USBポートモード（`./switch_board.sh <board> midi_device`、
+Kconfig の `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE`）で決まる。
+
+| ボード | Device ポート | 同時に Host |
+|-------|--------------|------------|
+| M5Stack Tab5 (ESP32-P4) | USB-C | ○（USB-A / 別 PHY） |
+| M5Stack CoreS3 / Freenove (ESP32-S3) | USB-C（唯一のコネクタ） | ✕（PHY を共有） |
 
 ### 構成
 
 - **TinyUSB** による **CDC + MIDI コンポジットデバイス**。PC 側には
   `Midori MIDI`（VID:PID `303a:4009`）として列挙される（CDC はシリアルコンソール兼用）。
-- ESP32-P4 は USB PHY を 2 つ持つ。既定では USB-Serial-JTAG が USB-C 側 PHY に繋がっているため、
+- **ESP32-P4** は USB PHY を 2 つ持つ。既定では USB-Serial-JTAG が USB-C 側 PHY に繋がっているため、
   起動時に PHY の mux を切り替えて USB-OTG(FS) を USB-C 側へ割り当てている
-  （`usb_serial_jtag_ll_phy_select(1)`）。この時点で USB-Serial-JTAG は切断される。
-- ボード設定 `HAS_USB_MIDI_DEVICE`（Tab5 のみ true）でビルドに含まれる。
+  （`usb_serial_jtag_ll_phy_select(1)`。このコードは `CONFIG_IDF_TARGET_ESP32P4` 限定）。
+- **ESP32-S3** は USB-Serial-JTAG と USB-OTG が PHY を 1 つ共有する。PHY の引き渡しは
+  ESP-IDF の `usb_phy` ドライバ（`tinyusb_driver_install()` 内）が行うので追加コードは不要。
+  ただし USB-OTG を Device として使うため、**USB-MIDI Host は同時に使えない**
+  （`CONFIG_USB_MIDI_HOST_ENABLED` が n、`BoardConfig::HAS_USB_MIDI_HOST` が false になる）。
+- いずれの場合も、この時点で USB-Serial-JTAG は切断される（書き込みは BOOT + RESET で
+  ダウンロードモードに入る必要があり、JTAG デバッグは使えない）。コンソール出力は
+  `tinyusb_console_init()` で CDC 側へリダイレクトされる。
+- ボード設定 `HAS_USB_MIDI_DEVICE`（= `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE`）で
+  ビルドに含まれる。
 
 ### TX（device → host）の直列化 — 重要
 

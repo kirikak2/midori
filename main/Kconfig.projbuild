@@ -16,15 +16,7 @@ menu "USB MIDI Host Configuration"
             bool "M5Stack CoreS3 SE"
             help
                 M5Stack CoreS3 SE board with shared USB-C.
-                USB is used for USB-MIDI host.
                 Logs output to LCD display.
-
-        config USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
-            bool "M5Stack CoreS3 SE (USB Serial Debug)"
-            help
-                M5Stack CoreS3 SE board with USB serial for debugging.
-                USB is used for serial console (no USB-MIDI).
-                Logs output to both LCD and serial console.
 
         config USB_MIDI_BOARD_M5STACK_TAB5
             bool "M5Stack Tab5 (ESP32-P4)"
@@ -35,8 +27,66 @@ menu "USB MIDI Host Configuration"
                 Larger screen supports 4x3 pad grid (12 pads).
     endchoice
 
+    choice USB_MIDI_USB_MODE
+        prompt "USB port mode"
+        default USB_MIDI_USB_MODE_HOST
+        help
+            Selects what the USB device-capable port is used for.
+
+            On ESP32-S3 boards (Freenove / CoreS3) there is a single USB
+            connector wired to one internal USB PHY, shared by the USB-OTG
+            controller and the USB-Serial/JTAG controller. Only one of the
+            three modes below can be active in a given build.
+
+            On the Tab5 (ESP32-P4) this setting only describes the USB-C
+            port. The USB-A port is always a USB-MIDI host, independent of
+            this choice.
+
+        config USB_MIDI_USB_MODE_HOST
+            bool "USB-MIDI host (no USB device)"
+            help
+                The USB port acts as a USB-MIDI host (connect a keyboard,
+                groovebox, etc.). Console output goes to UART.
+
+                On Tab5 this means the USB-C port is left unused.
+
+        config USB_MIDI_USB_MODE_SERIAL
+            bool "USB-Serial/JTAG console (device)"
+            help
+                The USB port is driven by the built-in USB-Serial/JTAG
+                controller: serial console, flashing and JTAG debugging all
+                work over it.
+
+                On ESP32-S3 this disables the USB-MIDI host, since the
+                USB-OTG controller cannot have the PHY at the same time.
+
+        config USB_MIDI_USB_MODE_MIDI_DEVICE
+            bool "USB-MIDI device (TinyUSB CDC + MIDI)"
+            help
+                The USB port is driven by TinyUSB as a composite CDC + MIDI
+                device, so the board shows up as a USB-MIDI instrument on a
+                PC/tablet. The console is redirected to the CDC interface.
+
+                USB-Serial/JTAG is disconnected in this mode, so flashing
+                requires entering download mode manually (BOOT + RESET) and
+                hardware JTAG debugging is unavailable.
+
+                On ESP32-S3 this disables the USB-MIDI host, since the
+                USB-OTG controller is used for the device role instead.
+    endchoice
+
+    config USB_MIDI_HOST_ENABLED
+        bool
+        default y if USB_MIDI_BOARD_M5STACK_TAB5
+        default y if USB_MIDI_USB_MODE_HOST
+        default n
+        help
+            Derived (not user-visible): whether a USB-MIDI host controller
+            is available in this build. Tab5 always has one on USB-A; the
+            single-port ESP32-S3 boards only have one in USB host mode.
+
     menu "M5Stack Display Settings"
-        depends on USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL || USB_MIDI_BOARD_M5STACK_TAB5
+        depends on USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_TAB5
 
         config USB_MIDI_LCD_FONT_SIZE
             int "LCD Font Size (pixels)"
@@ -63,7 +113,7 @@ menu "USB MIDI Host Configuration"
                 Enable SD card support for loading app.rb script.
 
         menu "M5Stack CoreS3 SD Card Pins"
-            depends on (USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL) && USB_MIDI_SDCARD_ENABLED
+            depends on USB_MIDI_BOARD_M5STACK_CORES3 && USB_MIDI_SDCARD_ENABLED
 
             config USB_MIDI_SDCARD_M5_CLK
                 int "SD CLK GPIO"

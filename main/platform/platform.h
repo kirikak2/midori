@@ -30,7 +30,7 @@ void platform_deinit(void);
  */
 void platform_update(void);
 
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3) || defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL) || defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3) || defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
 /**
  * @brief Show a status message on LCD (non-log display area)
  * @param status Status message to display

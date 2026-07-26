@@ -8,8 +8,10 @@
  *
  * What remains in this file:
  *   - Platform bring-up (LCD, etc.)
- *   - Optional USB-MIDI Host driver bring-up (skipped on the
- *     CoreS3 USB-Serial board variant)
+ *   - Optional USB-MIDI Device bring-up (CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE)
+ *   - Optional USB-MIDI Host driver bring-up (CONFIG_USB_MIDI_HOST_ENABLED;
+ *     off on the single-port ESP32-S3 boards whenever the USB port is
+ *     given to a device role instead)
  *   - PicoRuby supervisor bring-up
  *   - The platform-update tick loop
  */
@@ -24,47 +26,40 @@
 #include "picoruby-esp32.h"
 #include "picoruby_supervisor.h"
 
-#ifndef CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
+#if CONFIG_USB_MIDI_HOST_ENABLED
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_host/include/usb_midi_host.h"
 #endif
 
+#if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
 #include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/include/usb_midi_device.h"
+#endif
 
 static const char *TAG = "MIDORI";
 
-#ifdef CONFIG_USB_MIDI_BOARD_M5STACK_CORES3_USB_SERIAL
-/* USB Serial Debug Mode - USB-MIDI Host disabled */
 void app_main(void)
 {
     ESP_ERROR_CHECK(platform_init());
 
-    ESP_LOGI(TAG, "USB Serial Debug Mode - USB-MIDI disabled");
-    ESP_LOGI(TAG, "Starting PicoRuby supervisor...");
-    supervisor_init();
-
-    while (1) {
-        platform_update();
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
-#else
-/* USB-MIDI Host Mode */
-void app_main(void)
-{
-    ESP_ERROR_CHECK(platform_init());
-
-#ifdef CONFIG_USB_MIDI_BOARD_M5STACK_TAB5
-    /* Tab5: start USB-C device (CDC + MIDI) before USB-A host */
+#if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
+    /* Start the USB device role (CDC + MIDI) first. On Tab5 this is the
+     * USB-C port and the USB-A host comes up right after; on the ESP32-S3
+     * boards it owns the only USB port, so no host is started at all. */
     ESP_LOGI(TAG, "Starting USB-MIDI Device driver (CDC + MIDI)...");
     if (USB_MIDI_DEVICE_start() != 0) {
         ESP_LOGE(TAG, "Failed to start USB-MIDI Device driver");
     }
+#elif CONFIG_USB_MIDI_USB_MODE_SERIAL
+    ESP_LOGI(TAG, "USB-Serial/JTAG console mode");
 #endif
 
+#if CONFIG_USB_MIDI_HOST_ENABLED
     ESP_LOGI(TAG, "Starting USB-MIDI Host driver...");
     if (USB_MIDI_HOST_start_driver() != 0) {
         ESP_LOGE(TAG, "Failed to start USB-MIDI Host driver");
     }
+#else
+    ESP_LOGI(TAG, "USB-MIDI Host disabled (USB port used as a device)");
+#endif
 
     ESP_LOGI(TAG, "Starting PicoRuby supervisor...");
     supervisor_init();
@@ -74,4 +69,3 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-#endif

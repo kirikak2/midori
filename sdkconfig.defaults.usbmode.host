@@ -1,0 +1,12 @@
+# USB port mode: USB-MIDI HOST (no USB device role)
+#
+# Appended to a board's sdkconfig.defaults.<board> by switch_board.sh.
+#
+# ESP32-S3 (Freenove / CoreS3): the single USB connector is driven by the
+#   USB-OTG controller in host mode, so a USB-MIDI instrument can be plugged
+#   into the board. USB-Serial/JTAG cannot use the PHY at the same time, so
+#   the console stays on UART.
+# ESP32-P4 (Tab5): USB-A is a USB-MIDI host regardless of this setting; this
+#   mode simply leaves the USB-C port unused (console on UART + secondary
+#   USB-Serial/JTAG, which is the ESP-IDF default).
+CONFIG_USB_MIDI_USB_MODE_HOST=y

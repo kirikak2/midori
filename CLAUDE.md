@@ -529,12 +529,24 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 
 ### ボード別利用可能デバイス
 
-| ボード | SAM2695 | USB-MIDI Host | USB-MIDI Device |
-|-------|---------|---------------|-----------------|
-| m5stack | ○ (17,18) | ○ | - |
-| m5stack_with_usbserial | ○ (17,18) | - | - |
-| freenove | ○ (17,18) | ○ | - |
-| m5stack_tab5 | ○ (53,54 / Port A) | ○ (USB-A) | ○ (USB-C / TinyUSB) |
+利用可能なデバイスは **ボード × USBポートモード** で決まる（USBポートモードは
+`./switch_board.sh <board> [host|serial|midi_device]` で選択。後述の
+「USBポートモード（2026-07-25）」を参照）。
+
+| ボード | USBモード | SAM2695 | USB-MIDI Host | USB-MIDI Device |
+|-------|----------|---------|---------------|-----------------|
+| m5stack | host (既定) | ○ (17,18) | ○ (USB-C) | - |
+| m5stack | serial | ○ (17,18) | - | - |
+| m5stack | midi_device | ○ (17,18) | - | ○ (USB-C / TinyUSB) |
+| freenove | host (既定) | ○ (17,18) | ○ (USB-C) | - |
+| freenove | serial | ○ (17,18) | - | - |
+| freenove | midi_device | ○ (17,18) | - | ○ (USB-C / TinyUSB) |
+| m5stack_tab5 | midi_device (既定) | ○ (53,54 / Port A) | ○ (USB-A) | ○ (USB-C / TinyUSB) |
+| m5stack_tab5 | serial | ○ (53,54 / Port A) | ○ (USB-A) | - |
+
+ESP32-S3ボード（m5stack / freenove）はUSBコネクタが1つ・USB PHYも1つなので、
+Host（USB-OTG）とDevice（USB-Serial/JTAG または TinyUSB）は**排他**。
+Tab5はUSB-Aが常にHostなので、モードはUSB-Cポートの役割のみを決める。
 
 ### アーキテクチャ
 
@@ -615,20 +627,75 @@ device = MIDI::Device.new(sam)
 2. 該当するボード設定セクション（`if(CONFIG_USB_MIDI_BOARD_*)`）で以下を設定：
    - `SAM2695_TX_PIN` / `SAM2695_RX_PIN`
    - `HAS_SAM2695` (true/false)
-   - `HAS_USB_MIDI_HOST` (true/false)
-   - `HAS_USB_MIDI_DEVICE` (true/false)
 3. リビルド: `idf.py build`
+
+`HAS_USB_MIDI_HOST` / `HAS_USB_MIDI_DEVICE` はボード分岐では設定しない。
+USBポートモード（後述）から自動導出される。
 
 **例**: M5Stack Tab5の設定
 ```cmake
 if(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
-  set(BOARD_NAME "M5Stack Tab5")
+  set(BOARD_NAME "M5Stack Tab5 (${USB_MODE_NAME})")
   # ... SD card settings ...
   # MIDI devices (Port A / UART)
   set(SAM2695_TX_PIN 53)  # Port A pin2 (SDA)
   set(SAM2695_RX_PIN 54)  # Port A pin1 (SCL)
   set(HAS_SAM2695 true)
-  set(HAS_USB_MIDI_HOST true)
-  set(HAS_USB_MIDI_DEVICE true)   # Tab5: USB-C acts as USB-MIDI device (TinyUSB)
 endif()
 ```
+
+## USBポートモード（2026-07-25）
+
+### 概要
+
+USBコネクタ（device 側になり得るポート）の役割を、ボードとは独立した設定として
+選べるようにした。ESP32-S3 ボードでも Tab5 と同様に TinyUSB で USB-MIDI デバイス
+として動作させられる。
+
+| モード | USBポートの役割 | コンソール | USB-MIDI Host |
+|-------|----------------|-----------|---------------|
+| `host` | USB-OTG ホスト | UART | ○ |
+| `serial` | USB-Serial/JTAG（書き込み・JTAG も可） | USB | S3: ✕ / Tab5: USB-A のみ |
+| `midi_device` | TinyUSB CDC + MIDI デバイス | USB CDC | S3: ✕ / Tab5: USB-A のみ |
+
+ESP32-S3（m5stack / freenove）は USB コネクタ 1 つ・USB PHY 1 つを USB-OTG と
+USB-Serial/JTAG で共有するため、Host と Device は排他。Tab5 は USB-A が常に Host。
+
+### 切り替え方法
+
+```bash
+./switch_board.sh <board> [host|serial|midi_device]
+
+./switch_board.sh m5stack midi_device   # CoreS3 を USB-MIDI デバイスに
+./switch_board.sh m5stack serial        # CoreS3 を USB シリアルコンソールに（開発用）
+./switch_board.sh m5stack_tab5          # Tab5（既定は midi_device）
+```
+
+`sdkconfig.defaults` は「ボード設定 + モード設定」の連結で生成される：
+- `sdkconfig.defaults.<board>` … ボード固有（ターゲット、PSRAM、SDピン、flashサイズ等）
+- `sdkconfig.defaults.usbmode.<mode>` … USBモード固有（コンソール経路、TinyUSB設定）
+
+旧 `m5stack_with_usbserial` は `m5stack serial` に置き換えた（旧名でも動くよう
+switch_board.sh 側でエイリアスしている）。
+
+**注意**: `midi_device` モードでは USB-Serial/JTAG が切断されるため、書き込み時は
+BOOT を押しながら RESET でダウンロードモードに入る必要がある。`idf.py monitor` は
+TinyUSB CDC 経由で使える。
+
+### Kconfig / 実装
+
+- `main/Kconfig.projbuild`
+  - `choice USB_MIDI_USB_MODE` … `USB_MIDI_USB_MODE_HOST` /
+    `USB_MIDI_USB_MODE_SERIAL` / `USB_MIDI_USB_MODE_MIDI_DEVICE`
+  - `CONFIG_USB_MIDI_HOST_ENABLED` … 導出値（非表示）。Tab5 は常に y、
+    S3 は host モードのみ y
+- `main/usb_midi_host.c` … `CONFIG_USB_MIDI_HOST_ENABLED` /
+  `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE` で起動するドライバを切り替え
+- `components/picoruby-esp32/CMakeLists.txt` … 上記から `HAS_USB_MIDI_HOST` /
+  `HAS_USB_MIDI_DEVICE` を導出して board_config.rb を生成
+- `picoruby-usb_midi_device/ports/esp32/*.c` … `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE`
+  でガード（未設定時はスタブ）。P4 の PHY mux 切り替えは
+  `CONFIG_IDF_TARGET_ESP32P4` 限定で、S3 では ESP-IDF の `usb_phy` ドライバが
+  PHY を USB-OTG に引き渡す
+- `components/picoruby-esp32/build_config/xtensa-esp.rb` … S3 でも
+  `picoruby-usb_midi_device` gem をビルドに含める
