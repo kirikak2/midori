@@ -372,17 +372,17 @@ API 一覧は [MIDI_DEVICES.md](MIDI_DEVICES.md) を参照。
 
 ### 関連ファイル（Device 側）
 
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/ports/esp32/usb_midi_device.c`:
+- `mrbgems/picoruby-usb_midi_device/ports/esp32/usb_midi_device.c`:
   TinyUSB 初期化、TX キュー + Core-1 送信タスク、RX リングバッファ
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/src/mrubyc/usb_midi_device.c`:
+- `mrbgems/picoruby-usb_midi_device/src/mrubyc/usb_midi_device.c`:
   mruby/c バインディング（`USB_MIDI_DEVICE` クラス）
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/mrblib/usb_midi_device.rb`: Ruby API
+- `mrbgems/picoruby-usb_midi_device/mrblib/usb_midi_device.rb`: Ruby API
 - `examples/usb_midi_device_pad.rb`: 動作確認サンプル
 
 ## 関連ファイル
 
 - `main/usb_midi_host.c`: USB Hostドライバ、転送処理
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/ports/esp32/midi.c`: MIDI入力タスク、イベントパース
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi/ports/esp32/usb_midi.c`: USB-MIDIブリッジ（TX Queue, RX Ring Buffer）
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-sam2695/ports/esp32/sam2695.c`: SAM2695 UART通信、入力タスク
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/mrblib/midi_input.rb`: Ruby側のMIDI入力API
+- `mrbgems/picoruby-midi/ports/esp32/midi.c`: MIDI入力タスク、イベントパース
+- `mrbgems/picoruby-usb_midi_host/ports/esp32/usb_midi_host.c`: USB-MIDIブリッジ（TX Queue, RX Ring Buffer）
+- `mrbgems/picoruby-uart_midi/ports/esp32/uart_midi.c`: UART MIDI（SAM2695）通信、入力タスク
+- `mrbgems/picoruby-midi/mrblib/midi_input.rb`: Ruby側のMIDI入力API

@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # Debug script to show what events MML parser generates at specific clocks
 
-require_relative '../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi-mml/mrblib/midi_mml'
+require_relative '../mrbgems/picoruby-midi-mml/mrblib/midi_mml'
 
 # MML from bach_air.rb
 violin1_mml = "r2 o5 f+1&8 b16 g16 f+32 e32 d16 c+16 d16 c+4 o4 b16 a8. o5 a2&16 f+16 c16 o4 b16 o5 e16 d+16 a16 g16 g2&16 e16 o4 b16 a16 o5 d16 c+16 g16 f+16 f+4. g+16 a16 d8 d32 e32 f+8 e16 e16 d16 c+16 o4 b16 b32 o5 c+32 d8. c+16 o4 b16 a2 o5 f+1&8 b16 g16 f+32 e32 d16 c+16 d16 c+4 o4 b16 a8. o5 a2&16 f+16 c16 o4 b16 o5 e16 d+16 a16 g16 g2&16 e16 o4 b16 a16 o5 d16 c+16 g16 f+16 f+4. g+16 a16 d8 d32 e32 f+8 e16 e16 d16 c+16 o4 b16 b32 o5 c+32 d8. c+16 o4 b16 a2 o5 c+4&16 d32 c+32 o4 b32 o5 c+32 o4 a16 o5 a4. c8 o4 b8 o5 b8. a16 g16 f+16 g4&32 f+32 e32 d32 c+16 o4 b16 a+16 b16 o5 c+8. d16 e8. f+16 g4 f+8 e16 d16 c+16 o4 b16 o5 c+16 d32 e32 d16 c+16 o4 b2 o5 d4&16 f+16 e16 d16 b4. a16 g+16 f+32 e32 a16 o4 a8 b8. o5 c+32 d32 c+8. o4 b16 a4 o5 d4. f+16 e16 e4. g16 f+16 f+4. a16 g16 g2 o4 a4&16 o5 c+16 e16 g16 g16 e16 f+4&16 g32 a32 d4&16 f+16 a16 o6 c16 o5 b4. d8 c+16 e16 g4 o4 b8 a8 o5 e16 f+32 g16. f+8 e16 d32 c+32 o4 b8 o5 c+16 d8 c+16 d16 d2 c+4&16 d32 c+32 o4 b32 o5 c+32 o4 a16 o5 a4. c8 o4 b8 o5 b8. a16 g16 f+16 g4&32 f+32 e32 d32 c+16 o4 b16 a+16 b16 o5 c+8. d16 e8. f+16 g4 f+8 e16 d16 c+16 o4 b16 o5 c+16 d32 e32 d16 c+16 o4 b2 o5 d4&16 f+16 e16 d16 b4. a16 g+16 f+32 e32 a16 o4 a8 b8. o5 c+32 d32 c+8. o4 b16 a4 o5 d4. f+16 e16 e4. g16 f+16 f+4. a16 g16 g2 o4 a4&16 o5 c+16 e16 g16 g16 e16 f+4&16 g32 a32 d4&16 f+16 a16 o6 c16 o5 b4. d8 c+16 e16 g4 o4 b8 a8 o5 e16 f+32 g16. f+8 e16 d32 c+32 o4 b8 o5 c+16 d8 c+16 d16 d4.&16.&32"

@@ -64,7 +64,7 @@ static sysex_accumulator_t g_sam_sysex = {0};  // わずか 12 byte
 SysEx 進行中だけ 512 byte を消費し、それ以外はゼロ。
 結果として `.bss` 増分は ~1 KiB → ~24 byte に激減、LCD も正常に表示されるようになった。
 
-コミット: `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/ports/esp32/midi.c`
+コミット: `mrbgems/picoruby-midi/ports/esp32/midi.c`
 
 ## ガイドライン
 

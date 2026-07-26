@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # Debug script to trace how tied notes are parsed
 
-$:.unshift File.expand_path('../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/mrblib', __dir__)
+$:.unshift File.expand_path('../mrbgems/picoruby-midi/mrblib', __dir__)
 
 # Monkey-patch the Sequence class to add debug output
 module MIDI

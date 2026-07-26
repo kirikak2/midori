@@ -27,11 +27,11 @@
 #include "picoruby_supervisor.h"
 
 #if CONFIG_USB_MIDI_HOST_ENABLED
-#include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_host/include/usb_midi_host.h"
+#include "../mrbgems/picoruby-usb_midi_host/include/usb_midi_host.h"
 #endif
 
 #if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
-#include "../components/picoruby-esp32/picoruby/mrbgems/picoruby-usb_midi_device/include/usb_midi_device.h"
+#include "../mrbgems/picoruby-usb_midi_device/include/usb_midi_device.h"
 #endif
 
 static const char *TAG = "MIDORI";

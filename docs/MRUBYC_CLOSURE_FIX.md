@@ -229,7 +229,7 @@ end
 
 → 実機で MML drift 解消、bach_air.rb 再生 OK。**ただし根本原因は mrubyc 側にあるので、後で試行 7 でちゃんと直した**。
 
-`while` 化自体は **call stack を浅く保つ** という別の利点もあるので、mrubyc 修正後も **midi_mml.rb の `while` rewrite は採用継続** ([picoruby commit `d6da5220`](../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi-mml/mrblib/midi_mml.rb))。
+`while` 化自体は **call stack を浅く保つ** という別の利点もあるので、mrubyc 修正後も **midi_mml.rb の `while` rewrite は採用継続** ([picoruby commit `d6da5220`](../mrbgems/picoruby-midi-mml/mrblib/midi_mml.rb))。
 
 ### 試行 6: mrubyc に refcount tombstone を仕込む (失敗、ボツ)
 
@@ -298,7 +298,7 @@ Fix use-after-free of callinfo when a closure outlives its parent
 
 ### 補足変更 (picoruby-midi-mml)
 
-- `loop do` → `while true` ([commit `d6da5220`](../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi-mml/mrblib/midi_mml.rb))。mrubyc 修正でセマンティクス的には不要だが、`while` の方が **call stack が浅く** 安全という別の理由で採用継続。
+- `loop do` → `while true` ([commit `d6da5220`](../mrbgems/picoruby-midi-mml/mrblib/midi_mml.rb))。mrubyc 修正でセマンティクス的には不要だが、`while` の方が **call stack が浅く** 安全という別の理由で採用継続。
 - `dots.times do` → `while i < dots` (同上)。
 
 ### トレードオフ
@@ -336,4 +336,4 @@ mrubyc upstream (`github.com/mrubyc/mrubyc`) への PR を予定。ブランチ 
 5. **「修正の修正」の回帰に注意**。bc2ee1d は UAF を直したが、snapshot-only writes に倒したことで MRI 互換セマンティクスを失い、同期 block の rebind 伝播が壊れた (Phase 3)。**snapshot は読み専用、書きは live にも mirror** というハイブリッド設計でようやく両立した (試行 7)。
 6. **「聞こえ方が変わった」レベルの曖昧な症状はログ + 理論値 diff の枠組みを最初に作る**。`LoggingDevice` ラッパと `debug_mml_events.rb` の timeline ダンプを作るのに 30 分、出力 diff から原因特定まで数分。ホスト CRuby と実機 mrubyc を同じ Ruby ソースで走らせて diff できる枠組みは応用が効く。
 7. **完璧な意味論より crash しない方がマシ**。`OP_SETUPVAR` の slab 再利用誤動作 (試行 7 のトレードオフ) は理論上残るが、async write が稀な現実では実用上問題なし。完璧解 (refcount + 完全な closure semantics) は将来の仕事として upstream に委ねる。
-8. **`while` を選ぶ別の理由**。`loop do` / `n.times do` を `while` に書き換えるのは mrubyc 修正で意味論的には不要になったが、**call stack を浅く保つ** という独立した利点があるので keep ([picoruby-midi-mml の `commit d6da5220`](../components/picoruby-esp32/picoruby/mrbgems/picoruby-midi-mml/mrblib/midi_mml.rb))。組込み環境では block 呼び出しが多いと再帰で stack を食いやすい。
+8. **`while` を選ぶ別の理由**。`loop do` / `n.times do` を `while` に書き換えるのは mrubyc 修正で意味論的には不要になったが、**call stack を浅く保つ** という独立した利点があるので keep ([picoruby-midi-mml の `commit d6da5220`](../mrbgems/picoruby-midi-mml/mrblib/midi_mml.rb))。組込み環境では block 呼び出しが多いと再帰で stack を食いやすい。

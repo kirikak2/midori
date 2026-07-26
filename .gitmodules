@@ -4,3 +4,21 @@
 [submodule "mrbgems/picoruby-dfrobot_rotary_encoder"]
 	path = mrbgems/picoruby-dfrobot_rotary_encoder
 	url = https://github.com/kirikak2/picoruby-dfrobot_rotary_encoder.git
+[submodule "mrbgems/picoruby-midi"]
+	path = mrbgems/picoruby-midi
+	url = https://github.com/kirikak2/picoruby-midi.git
+[submodule "mrbgems/picoruby-midi-mml"]
+	path = mrbgems/picoruby-midi-mml
+	url = https://github.com/kirikak2/picoruby-midi-mml.git
+[submodule "mrbgems/picoruby-usb_midi_host"]
+	path = mrbgems/picoruby-usb_midi_host
+	url = https://github.com/kirikak2/picoruby-usb_midi_host.git
+[submodule "mrbgems/picoruby-usb_midi_device"]
+	path = mrbgems/picoruby-usb_midi_device
+	url = https://github.com/kirikak2/picoruby-usb_midi_device.git
+[submodule "mrbgems/picoruby-uart_midi"]
+	path = mrbgems/picoruby-uart_midi
+	url = https://github.com/kirikak2/picoruby-uart_midi.git
+[submodule "mrbgems/picoruby-sam2695"]
+	path = mrbgems/picoruby-sam2695
+	url = https://github.com/kirikak2/picoruby-sam2695.git

@@ -115,8 +115,8 @@ device.trigger(60, 100, duration: 200, channel: 0)
 ### C側実装
 
 **主要ファイル**:
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/ports/esp32/midi.c` - スケジューラ実装
-- `components/picoruby-esp32/picoruby/mrbgems/picoruby-midi/include/midi.h` - API定義
+- `mrbgems/picoruby-midi/ports/esp32/midi.c` - スケジューラ実装
+- `mrbgems/picoruby-midi/include/midi.h` - API定義
 
 **内部動作**:
 1. `MIDI_Note_trigger()` が呼ばれると即座にnote_on送信
@@ -125,6 +125,34 @@ device.trigger(60, 100, duration: 200, channel: 0)
 4. off_timeを過ぎたノートはnote_offを送信
 
 ## PicoRuby関連
+
+### midori-local mrbgem の置き場所（2026-07-27）
+
+MIDI 系および midori 固有の mrbgem は、picoruby サブモジュールの外側、
+リポジトリ直下の [mrbgems/](mrbgems/) に置く（それぞれ独立した git サブモジュール、
+`picoruby-ui` のみ通常ディレクトリ）：
+
+| gem | 内容 |
+|-----|------|
+| `mrbgems/picoruby-midi` | MIDI プロトコル層（パーサ / スケジューラ / クロック） |
+| `mrbgems/picoruby-midi-mml` | MML パーサ + プレイヤ |
+| `mrbgems/picoruby-usb_midi_host` | USB-MIDI Host トランスポート |
+| `mrbgems/picoruby-usb_midi_device` | USB-MIDI Device トランスポート（TinyUSB） |
+| `mrbgems/picoruby-uart_midi` | UART MIDI トランスポート |
+| `mrbgems/picoruby-sam2695` | SAM2695 ラッパ（uart_midi 上の薄い層） |
+| `mrbgems/picoruby-ui` | M5Stack UI |
+| `mrbgems/picoruby-dfrobot_rotary_encoder` | DFRobot SEN0502 |
+
+これらは upstream picoruby には含めない方針のため、`components/picoruby-esp32/picoruby/mrbgems/`
+から移動した。ビルドへの取り込みは以下の 2 箇所：
+
+- `components/picoruby-esp32/build_config/{xtensa,riscv}-esp.rb` …
+  `conf.gem File.expand_path('../../../mrbgems/<gem>', __dir__)`
+- `components/picoruby-esp32/CMakeLists.txt` … ESP32 port の C ファイル /
+  include ディレクトリを `${CMAKE_SOURCE_DIR}/mrbgems/<gem>/...` で参照
+
+**注意**: gem の `mrblib/*.rb` や C を変更したら `idf.py fullclean`
+（`idf.py build` だけでは gem の .rb が再コンパイルされないことがある）。
 
 ### 重要：main_task.rbは自動生成ファイル
 
