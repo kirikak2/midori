@@ -422,6 +422,25 @@ Available commands:
 - エラーハンドリング：未知のコマンド入力時にヘルプ表示
 - バッファオーバーフロー検出：コマンドが長すぎる場合の処理
 
+### PicoModem（Web ターミナルからのファイル転送 / 2026-08-02）
+
+詳細は [docs/PICOMODEM.md](docs/PICOMODEM.md) を参照。
+
+PicoRuby web terminal から SD カードへファイルを Upload / Download する機能。
+R2P2 と同じ PicoModem プロトコル（RBTP）で、ブラウザ側は upstream のまま使える。
+
+ホストが裸の `STX (0x02)` を送るとコンソールタスクが `ACK (0x06)` を返して raw
+モードに入り、以降のバイトを `picorb_hal_stdin_push()` で PicoRuby の stdin へ
+流し込む。プロトコル本体は Ruby 側の `PicoModem.session($stdin, ConsoleIO.new)`
+が処理する（ファイル I/O は PicoRuby VFS でしか `/sd` に到達できないため）。
+
+- `picoruby-picomodem` / `crc` / `pack` は `picoruby-shell` の依存として**既に
+  組み込み済み**。gem 側の変更は無し
+- 送信は VFS の `\n`→`\r\n` 変換を避けるため `ConsoleIO#write`
+  （CDC は TinyUSB 直、それ以外は line-ending を一時的に LF へ）
+- セッション中は `esp_log_level_set("*", ESP_LOG_NONE)` でログを抑止
+- 動作確認済みは `midi_device`（CDC）モードのみ。スクリプト実行中は不可
+
 ### スクリプトロードとESP32リスタート
 
 #### 問題の背景
