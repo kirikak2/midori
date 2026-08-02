@@ -720,10 +720,44 @@ TinyUSB CDC 経由で使える。
 - `main/usb_midi_host.c` … `CONFIG_USB_MIDI_HOST_ENABLED` /
   `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE` で起動するドライバを切り替え
 - `components/picoruby-esp32/CMakeLists.txt` … 上記から `HAS_USB_MIDI_HOST` /
-  `HAS_USB_MIDI_DEVICE` を導出して board_config.rb を生成
-- `picoruby-usb_midi_device/ports/esp32/*.c` … `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE`
-  でガード（未設定時はスタブ）。P4 の PHY mux 切り替えは
+  `HAS_USB_MIDI_DEVICE` を導出して board_config.rb を生成。加えて
+  `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE=y` のとき
+  `target_compile_definitions` で gem に USB アイデンティティを注入する
+  （後述）
+- `picoruby-usb_midi_device/ports/esp32/*.c` … gem 自身は Midori の Kconfig を
+  参照せず `USB_MIDI_DEVICE_ENABLED` / `USB_MIDI_DEVICE_WITH_CDC` でガード
+  （未定義時はスタブ / MIDI 単機能）。P4 の PHY mux 切り替えは
   `CONFIG_IDF_TARGET_ESP32P4` 限定で、S3 では ESP-IDF の `usb_phy` ドライバが
   PHY を USB-OTG に引き渡す
 - `components/picoruby-esp32/build_config/xtensa-esp.rb` … S3 でも
   `picoruby-usb_midi_device` gem をビルドに含める
+
+### picoruby-usb_midi_device への設定注入（2026-08-02）
+
+gem は製品名を持たない汎用 USB-MIDI デバイス（既定は MIDI 単機能・
+"PicoRuby MIDI"）で、Midori 固有の値はすべてビルド定義で外から与える。
+一覧と既定値は
+[mrbgems/picoruby-usb_midi_device/include/usb_midi_device_config.h](mrbgems/picoruby-usb_midi_device/include/usb_midi_device_config.h)。
+
+`components/picoruby-esp32/CMakeLists.txt`（ボード分岐の直後）:
+
+| 定義 | 値 |
+|------|-----|
+| `USB_MIDI_DEVICE_ENABLED` | 1（`CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE` のとき） |
+| `USB_MIDI_DEVICE_WITH_CDC` | 1（コンソール / `idf.py monitor` を同じ USB-C に載せるため） |
+| `USB_MIDI_DEVICE_MANUFACTURER` | `"Midori"` |
+| `USB_MIDI_DEVICE_PRODUCT` | `"Midori Tab5"` / `"Midori CoreS3"` / `"Midori Freenove"` |
+| `USB_MIDI_DEVICE_SERIAL` | `"MIDORI-<BOARD>-001"` |
+
+CDC を有効にすると IAD 複合デバイスになり PID とエンドポイント番号が
+変わる（`CONFIG_TINYUSB_CDC_ENABLED=y` が必要）。CDC の受信データは
+gem 側では解釈せず、アプリが登録したコールバックへ渡す：
+
+```c
+#include "usb_midi_device.h"
+static void my_cdc_rx(const uint8_t *data, size_t len, void *arg) { /* TinyUSB task */ }
+USB_MIDI_DEVICE_set_cdc_rx_callback(my_cdc_rx, NULL);
+```
+
+（Midori のシリアルコンソールは `tinyusb_console_init()` が stdin/stdout を
+CDC に張るので従来どおり `getchar()` ベースのままでよい。）
