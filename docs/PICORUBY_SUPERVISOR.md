@@ -216,6 +216,35 @@ static void cleanup_vm(void)
 }
 ```
 
+## スクリプトの明示的停止（2026-08-02）
+
+`supervisor_stop_script()` が停止経路。Scripts 画面の `[Stop]` ボタンと
+シリアルコンソールの `stop` コマンドから呼ばれる。
+
+```c
+bool supervisor_stop_script(void);  // 実行中でなければ false
+```
+
+- `supervisor_is_script_running()` は「Script モードで走っているか」を返す
+  （UI モードでも PicoRuby タスクは存在するため、`s_current_script[0]` も見る）
+- `CMD_STOP_SCRIPT` ハンドラは 停止 → MIDI cleanup → `cleanup_vm()` →
+  `reset_ui_state()` → `clear_script_request_flags()` → UI モード再起動、の順
+- `clear_script_request_flags()` は `g_stop_requested` /
+  `g_script_change_requested` / `g_requested_script` を消す。これを怠ると次に
+  ロードしたスクリプトが `stop_requested?` を見て即座に終了する
+  （CLAUDE.md「解決済みの問題（2026-03-15）」と同じ症状）
+- `reset_ui_state()` は M5Stack ボードでのみ `ui_pad_clear_all()` と
+  `ui_event_init()` を呼び、スクリプトが残したパッド設定と未処理の
+  パッドイベントを捨てる
+
+### タスクの回収
+
+`picoruby_runner_task()` は完了を通知したあと `vTaskSuspend(NULL)` で自分を
+止め、Supervisor が削除する流れになっている。以前はどの経路も
+`s_picoruby_task = NULL` にするだけで `vTaskDelete()` を呼んでおらず、
+スクリプト切り替えのたびに 16KB のスタックがリークしていた。現在は
+`reap_picoruby_task()` に集約している。
+
 ## スクリプト切り替えのトリガー
 
 ### 1. Ruby側からのリクエスト

@@ -427,8 +427,7 @@ SDカード内のRubyスクリプトファイルを一覧表示し、選択実�
 │    > test/                             │  ← サブディレクトリ
 │                                        │
 │                                        │
-│                                        │
-│                                        │
+│         [ Refresh ]  [ Stop ]          │  ← ボタン行
 ├────────────────────────────────────────┤
 │   [◀]       [Run]    Scripts   [▶]    │
 └────────────────────────────────────────┘
@@ -448,8 +447,43 @@ SDカード内のRubyスクリプトファイルを一覧表示し、選択実�
 | 操作 | アクション |
 |------|------------|
 | ファイルタップ | 選択（ハイライト） |
-| 中央ボタン [Run] | 選択中のスクリプトを実行 |
+| 中央ボタン [Run] | 選択中のスクリプトを実行（実行中なら切り替え） |
+| [Refresh] | SDカードを再マウントしてリスト再読み込み |
+| [Stop] | 実行中スクリプトを停止してUIモードへ復帰 |
 | スワイプ上下 | リストスクロール |
+
+#### スクリプトの明示的停止（2026-08-02）
+
+`[Stop]` は `supervisor_stop_script()` を呼ぶだけで、実際の停止処理は
+Supervisor タスク上で走る（UIタスクはブロックしない）：
+
+```
+[Stop] タップ
+   ↓
+supervisor_stop_script()          ← 実行中でなければ false を返す（ボタンはグレーアウト）
+   ↓ CMD_STOP_SCRIPT をキューへ
+Supervisor: stop_picoruby_task()  ← g_stop_requested を立てて最大5秒待つ
+   ↓                                 応じなければ vTaskDelete で強制終了
+picoruby_esp32_midi_cleanup()     ← All Sound Off / All Notes Off / MIDI Stop
+   ↓
+cleanup_vm() → reset_ui_state()   ← パッド設定とUIイベントキューをクリア
+   ↓
+clear_script_request_flags()      ← g_stop_requested 等をクリア（次のスクリプトが即終了するのを防ぐ）
+   ↓
+start_picoruby_task(NULL)         ← UIモードで再起動
+```
+
+`[Running]` バッジと `[Stop]` の活性状態は `ScreenScripts::syncRunningState()` が
+`supervisor_get_current_script()` をポーリングして同期する。スクリプトが自然終了
+した場合もバッジは自動的に消える。
+
+**スクリプト側の作法**: 停止はまず協調的に行われるため、独自の長いループを書く
+場合は `ScriptManager#stop_requested?` を見て `break` すること。`MIDI.bpm_loop` は
+内部でチェック済み。チェックしないスクリプトは5秒後に強制終了される。
+
+シリアルコンソールからは `stop` コマンドで同じ処理を実行できる（UIを持たない
+ボード向け。スクリプト実行中はRuby側がコマンドキューを読まないため、C側で完結
+する経路になっている）。
 
 #### スクリプト切り替え処理
 

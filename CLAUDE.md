@@ -332,8 +332,11 @@ M5Stack以外のボード（Freenove等）では、USB-MIDIを使用するため
 - エコーの `printf()` は CDC 書き込み（`tud_cdc_n_write_flush`）になるため、
   MIDI TX タスクと同様に **tud_task と同じ Core 1 に固定**する
 
-コマンド: `load <path>`（キュー経由で Ruby に渡す）/ `heap` / `restart` / `help`。
+コマンド: `load <path>`（キュー経由で Ruby に渡す）/ `stop` / `heap` / `restart` / `help`。
 `load` の実ロードは PicoRuby VFS が必要なため Ruby 側で行う（C の `fopen` は不可）。
+`stop` だけは C 側で完結させる（`supervisor_stop_script()` を直接呼ぶ）。スクリプト
+実行中は Ruby 側がコマンドキューを読まないため、キューに積んでも実行中の
+スクリプトには届かないから。
 
 **ScriptManagerのメソッド**:
 ```ruby
@@ -583,6 +586,13 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 **主要ファイル**:
 - `components/picoruby-esp32/picoruby_supervisor.c` - Supervisor実装
 - `components/picoruby-esp32/mrblib/main_task_base.rb` - メインRubyコード
+
+**スクリプトの明示的停止（2026-08-02）**:
+Scripts 画面の `[Stop]` ボタン、またはシリアルコンソールの `stop` コマンドから
+`supervisor_stop_script()` を呼ぶと、実行中スクリプトを止めて UI モードに戻る。
+協調停止（`stop_requested?`）を5秒待ち、応じないスクリプトは強制終了される。
+独自の長いループを書くスクリプトは `ScriptManager#stop_requested?` を見て
+`break` すること（`MIDI.bpm_loop` はチェック済み）。
 
 ## ボード別MIDIデバイス設定（2026-04-11）
 

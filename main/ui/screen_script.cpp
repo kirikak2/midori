@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "../../components/picoruby-esp32/picoruby-esp32.h"
+#include "../../components/picoruby-esp32/picoruby_supervisor.h"
 }
 
 static const char* TAG = "SCREEN_SCRIPT";
@@ -25,24 +26,26 @@ static constexpr int LIST_START_Y = UI_CONTENT_Y + 10;
 static constexpr int LIST_MARGIN = 15;
 static constexpr int ITEM_TEXT_SIZE = 2;
 static constexpr int ITEM_HEIGHT = 40;
-static constexpr int REFRESH_BUTTON_HEIGHT = 50;
-static constexpr int REFRESH_BUTTON_WIDTH = 180;
-static constexpr int REFRESH_BUTTON_MARGIN = 10;
+static constexpr int BUTTON_HEIGHT = 50;
+static constexpr int BUTTON_WIDTH = 180;
+static constexpr int BUTTON_MARGIN = 10;
+static constexpr int BUTTON_GAP = 20;
 #else
 static constexpr int LIST_START_Y = UI_CONTENT_Y + 5;
 static constexpr int LIST_MARGIN = 8;
 static constexpr int ITEM_TEXT_SIZE = 1;
 static constexpr int ITEM_HEIGHT = 20;
-static constexpr int REFRESH_BUTTON_HEIGHT = 30;
-static constexpr int REFRESH_BUTTON_WIDTH = 100;
-static constexpr int REFRESH_BUTTON_MARGIN = 5;
+static constexpr int BUTTON_HEIGHT = 30;
+static constexpr int BUTTON_WIDTH = 100;
+static constexpr int BUTTON_MARGIN = 5;
+static constexpr int BUTTON_GAP = 10;
 #endif
 
-// Vertical area available for list items (between LIST_START_Y and the refresh button)
+// Vertical area available for list items (between LIST_START_Y and the button row)
 static constexpr int LIST_BOTTOM_PADDING = 4;
 static constexpr int LIST_AREA_HEIGHT =
     UI_CONTENT_HEIGHT - (LIST_START_Y - UI_CONTENT_Y)
-    - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN - LIST_BOTTOM_PADDING;
+    - BUTTON_HEIGHT - BUTTON_MARGIN - LIST_BOTTOM_PADDING;
 
 ScreenScripts::ScreenScripts()
     : m_scriptCount(0)
@@ -51,6 +54,8 @@ ScreenScripts::ScreenScripts()
     , m_isActive(false)
     , m_needsRedraw(false)
     , m_refreshButtonPressed(false)
+    , m_stopButtonPressed(false)
+    , m_scriptRunning(false)
     , m_scriptListVersion(0)
     , m_pressStartY(0)
     , m_pressStartScrollOffset(0)
@@ -113,6 +118,8 @@ void ScreenScripts::enter()
         }
     }
 
+    syncRunningState();
+
     draw();
     m_needsRedraw = false;
 }
@@ -145,9 +152,46 @@ void ScreenScripts::update()
         m_needsRedraw = true;
     }
 
+    syncRunningState();
+
     if (m_needsRedraw) {
         draw();
         m_needsRedraw = false;
+    }
+}
+
+/*
+ * The supervisor owns the truth about what is running: it stores the full
+ * path while a script task is alive and clears it when it falls back to UI
+ * mode. Mirroring it here means the [Running] badge and the Stop button
+ * follow a script that ended on its own, not just one we stopped.
+ */
+void ScreenScripts::syncRunningState()
+{
+    const char* path = supervisor_get_current_script();
+
+    char basename[MAX_FILENAME_LEN];
+    basename[0] = '\0';
+    if (path != nullptr && path[0] != '\0') {
+        const char* slash = strrchr(path, '/');
+        const char* name = slash ? slash + 1 : path;
+        strncpy(basename, name, MAX_FILENAME_LEN - 1);
+        basename[MAX_FILENAME_LEN - 1] = '\0';
+    }
+
+    bool running = (basename[0] != '\0');
+    if (running == m_scriptRunning && strcmp(basename, m_currentScript) == 0) {
+        return;
+    }
+
+    m_scriptRunning = running;
+    memcpy(m_currentScript, basename, sizeof(m_currentScript));
+    if (!running) {
+        m_stopButtonPressed = false;
+    }
+
+    if (m_isActive) {
+        m_needsRedraw = true;
     }
 }
 
@@ -184,8 +228,8 @@ void ScreenScripts::drawScriptList()
         drawScrollIndicator();
     }
 
-    // Draw refresh button at the bottom
-    drawRefreshButton();
+    // Draw the button row at the bottom
+    drawButtons();
 }
 
 void ScreenScripts::drawScrollIndicator()
@@ -210,13 +254,44 @@ void ScreenScripts::drawScrollIndicator()
     M5.Lcd.fillRect(trackX, thumbY, trackW, thumbH, UI_COLOR_WHITE);
 }
 
-void ScreenScripts::drawRefreshButton()
+// [ Refresh ] [ Stop ], centered as a pair in the bottom row
+void ScreenScripts::buttonRect(ButtonId id, int* x, int* y, int* w, int* h) const
 {
-    int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
-    int buttonX = (UI_SCREEN_WIDTH - REFRESH_BUTTON_WIDTH) / 2;  // Center horizontally
+    int rowWidth = BUTTON_COUNT * BUTTON_WIDTH + (BUTTON_COUNT - 1) * BUTTON_GAP;
+    int rowX = (UI_SCREEN_WIDTH - rowWidth) / 2;
 
-    ui_draw_button(buttonX, buttonY, REFRESH_BUTTON_WIDTH, REFRESH_BUTTON_HEIGHT, "Refresh",
+    *x = rowX + (int)id * (BUTTON_WIDTH + BUTTON_GAP);
+    *y = UI_CONTENT_Y + UI_CONTENT_HEIGHT - BUTTON_HEIGHT - BUTTON_MARGIN;
+    *w = BUTTON_WIDTH;
+    *h = BUTTON_HEIGHT;
+}
+
+int ScreenScripts::hitTestButton(int px, int py) const
+{
+    for (int id = 0; id < BUTTON_COUNT; id++) {
+        int x, y, w, h;
+        buttonRect((ButtonId)id, &x, &y, &w, &h);
+        if (px >= x && px <= x + w && py >= y && py <= y + h) {
+            return id;
+        }
+    }
+    return -1;
+}
+
+void ScreenScripts::drawButtons()
+{
+    int x, y, w, h;
+
+    buttonRect(BUTTON_REFRESH, &x, &y, &w, &h);
+    ui_draw_button(x, y, w, h, "Refresh",
                    UI_COLOR_BLUE, UI_COLOR_WHITE, m_refreshButtonPressed);
+
+    // Stop is greyed out while no script is running (nothing to stop)
+    buttonRect(BUTTON_STOP, &x, &y, &w, &h);
+    ui_draw_button(x, y, w, h, "Stop",
+                   m_scriptRunning ? UI_COLOR_RED : UI_COLOR_DARKGRAY,
+                   m_scriptRunning ? UI_COLOR_WHITE : UI_COLOR_GRAY,
+                   m_stopButtonPressed);
 }
 
 void ScreenScripts::drawScriptItem(int index, int y)
@@ -286,22 +361,26 @@ void ScreenScripts::onTouch(int touchId, int x, int y, bool pressed)
 {
     (void)touchId;  // Single touch for script selection
 
-    // Refresh button hit test matches drawRefreshButton geometry
-    int buttonY = UI_CONTENT_Y + UI_CONTENT_HEIGHT - REFRESH_BUTTON_HEIGHT - REFRESH_BUTTON_MARGIN;
-    int buttonX = (UI_SCREEN_WIDTH - REFRESH_BUTTON_WIDTH) / 2;
-    int buttonW = REFRESH_BUTTON_WIDTH;
-    int buttonH = REFRESH_BUTTON_HEIGHT;
-
-    if (x >= buttonX && x <= buttonX + buttonW &&
-        y >= buttonY && y <= buttonY + buttonH) {
+    int button = hitTestButton(x, y);
+    if (button >= 0) {
         if (pressed) {
-            m_refreshButtonPressed = true;
-            m_needsRedraw = true;
+            if (button == BUTTON_REFRESH) {
+                m_refreshButtonPressed = true;
+                m_needsRedraw = true;
+            } else if (button == BUTTON_STOP && m_scriptRunning) {
+                m_stopButtonPressed = true;
+                m_needsRedraw = true;
+            }
         } else {
-            if (m_refreshButtonPressed) {
+            if (button == BUTTON_REFRESH && m_refreshButtonPressed) {
                 ESP_LOGI(TAG, "Refresh button clicked");
                 refreshFromSD();
                 m_refreshButtonPressed = false;
+                m_needsRedraw = true;
+            } else if (button == BUTTON_STOP && m_stopButtonPressed) {
+                ESP_LOGI(TAG, "Stop button clicked");
+                requestStop();
+                m_stopButtonPressed = false;
                 m_needsRedraw = true;
             }
         }
@@ -309,8 +388,9 @@ void ScreenScripts::onTouch(int touchId, int x, int y, bool pressed)
     }
 
     // Reset button state if touch drifted off the button
-    if (!pressed && m_refreshButtonPressed) {
+    if (!pressed && (m_refreshButtonPressed || m_stopButtonPressed)) {
         m_refreshButtonPressed = false;
+        m_stopButtonPressed = false;
         m_needsRedraw = true;
     }
 
@@ -358,13 +438,33 @@ void ScreenScripts::onNavCenter()
         snprintf(full_path, sizeof(full_path), "%s/%s",
                  CONFIG_USB_MIDI_SDCARD_MOUNT_POINT, filename);
 
-        // Request script change from PicoRuby task
+        // Request script change from PicoRuby task. The [Running] badge is
+        // not set here: syncRunningState() raises it once the supervisor has
+        // actually started the task, and lowers it again when it ends.
         if (picoruby_esp32_request_script_change(full_path)) {
             ESP_LOGI(TAG, "Script change request sent: %s", full_path);
-            setCurrentScript(filename);
         } else {
             ESP_LOGE(TAG, "Failed to request script change");
         }
+    }
+}
+
+/*
+ * Ask the supervisor to end the running script and fall back to UI mode.
+ * Only the request is made here -- stopping the PicoRuby task, the MIDI
+ * cleanup and the VM reset all happen on the supervisor task, so the UI
+ * task never blocks. syncRunningState() picks up the result.
+ */
+void ScreenScripts::requestStop()
+{
+    if (!m_scriptRunning) {
+        return;
+    }
+
+    if (supervisor_stop_script()) {
+        ESP_LOGI(TAG, "Stop request sent");
+    } else {
+        ESP_LOGW(TAG, "Stop request rejected (no script running?)");
     }
 }
 
@@ -378,6 +478,8 @@ const char* ScreenScripts::getNavCenterLabel()
     return "Run";
 }
 
+// Note: syncRunningState() re-derives this from the supervisor on every
+// update(), so an external override only lasts until the next poll.
 void ScreenScripts::setCurrentScript(const char* filename)
 {
     if (filename) {
