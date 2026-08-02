@@ -25,6 +25,7 @@
 #include "platform.h"
 #include "picoruby-esp32.h"
 #include "picoruby_supervisor.h"
+#include "console_input.h"
 
 #if CONFIG_USB_MIDI_HOST_ENABLED
 #include "../mrbgems/picoruby-usb_midi_host/include/usb_midi_host.h"
@@ -60,6 +61,12 @@ void app_main(void)
 #else
     ESP_LOGI(TAG, "USB-MIDI Host disabled (USB port used as a device)");
 #endif
+
+    /* Console input task. In USB-MIDI-Device mode it must be started after
+     * USB_MIDI_DEVICE_start() so it can hook the gem's CDC receive
+     * callback - the gem drains the CDC FIFO itself, so without the hook
+     * every keystroke would be discarded. */
+    console_input_start();
 
     ESP_LOGI(TAG, "Starting PicoRuby supervisor...");
     supervisor_init();

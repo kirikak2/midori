@@ -299,27 +299,46 @@ c_script_manager_clear_request(mrbc_vm *vm, mrbc_value v[], int argc)
 M5Stack以外のボード（Freenove等）では、USB-MIDIを使用するためシリアルコンソールが利用できる。
 このため、シリアルコンソールからスクリプトを実行できる機能を追加した。
 
-#### C側実装（picoruby-esp32.c）
+#### C側実装（console_input.c / 2026-08-02 改訂）
 
-**バッファ管理**:
-```c
-static char s_console_buffer[256];
-static int s_console_buffer_pos = 0;
+コンソール入力は専用タスク [components/picoruby-esp32/console_input.c](components/picoruby-esp32/console_input.c)
+が担当する（`console_input_start()` を app_main から呼ぶ）。データフロー：
+
+```
+[midi_device モード]
+  TinyUSB task --console_cdc_rx_cb()--> StreamBuffer(1KB) --+
+[host / serial モード]                                      |
+  console task が getchar() をポーリング(10ms) -------------+
+                                                            v
+                             console task (prio 4 / Core 1)
+                             エコー・行編集・コマンド解釈
+                                                            |
+                                          コマンドキュー <---+
+                                                            |
+                        ScriptManager#check_console (VM) <---+
 ```
 
-**`c_script_manager_check_console()` 関数**:
-- `getchar()` で非ブロッキングでシリアル入力をチェック
-- エコーバック機能（入力した文字を即座に表示）
-- バックスペース処理（0x08/0x7F）：`printf("\b \b")` で画面上の文字を削除
-- `load /sd/app.rb` 形式のコマンドを検出
-- `picoruby_esp32_request_script_change()` を呼び出し
-- 未知のコマンドにはヘルプを表示
-- プロンプト `> ` を自動表示
+**重要**: `midi_device` モードでは `picoruby-usb_midi_device` が esp_tinyusb に
+`.callback_rx` を登録しており、そのハンドラが RX イベントごとに
+`tinyusb_cdcacm_read()` で CDC FIFO を吸い出す。アプリ側が
+`USB_MIDI_DEVICE_set_cdc_rx_callback()` を登録していないと**入力バイトはそこで
+捨てられ**、CDC VFS 経由の `getchar()` には何も残らない（2026-08-02 に「キー入力が
+効かない／反応が悪い」の原因として判明）。
 
-**ScriptManagerに追加されたメソッド**:
+タスクを分けている理由：
+- CDC コールバックは TinyUSB タスク上で走るため、コピーして即 return する必要がある
+- 行編集・エコーを優先度 4 で行い、100ms スリープする Ruby VM タスク（優先度 3）から
+  切り離す。VM が寝ている間・スクリプト実行中でも取りこぼさない
+- エコーの `printf()` は CDC 書き込み（`tud_cdc_n_write_flush`）になるため、
+  MIDI TX タスクと同様に **tud_task と同じ Core 1 に固定**する
+
+コマンド: `load <path>`（キュー経由で Ruby に渡す）/ `heap` / `restart` / `help`。
+`load` の実ロードは PicoRuby VFS が必要なため Ruby 側で行う（C の `fopen` は不可）。
+
+**ScriptManagerのメソッド**:
 ```ruby
 sm = ScriptManager.new
-console_script = sm.check_console  # => "/sd/app.rb" or nil
+console_script = sm.check_console  # => "/sd/app.rb" or nil（キューから取り出すだけ）
 ```
 
 #### Ruby側実装（main_task_base.rb）
