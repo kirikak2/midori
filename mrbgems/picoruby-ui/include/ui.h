@@ -23,6 +23,10 @@ typedef struct {
     bool pad_state;      /* For pad events */
     bool sync_mode;      /* For sync mode events */
     uint8_t screen;      /* For screen change events */
+    uint8_t hit_ball;    /* For tombola hit events */
+    uint8_t hit_side;    /* For tombola hit events */
+    uint8_t hit_note;    /* For tombola hit events */
+    uint8_t hit_velocity;/* For tombola hit events */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -32,6 +36,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_PAD_RELEASE   3
 #define PICORUBY_UI_EVENT_SYNC_MODE     4
 #define PICORUBY_UI_EVENT_SCREEN_CHANGE 5
+#define PICORUBY_UI_EVENT_TOMBOLA_HIT   6
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -53,6 +58,23 @@ void picoruby_ui_pad_set_color(int index, int color);
 /* Screen switching (diagnostic + control) */
 void picoruby_ui_set_screen(int index);
 int  picoruby_ui_current_screen(void);
+
+/* Tombola sequencer.
+ * Parameters are string-keyed so this bridge stays fixed in size as the
+ * sequencer grows knobs; see ui_common.h for the accepted names. */
+void  picoruby_ui_tombola_reset(void);
+void  picoruby_ui_tombola_start(void);
+void  picoruby_ui_tombola_stop(void);
+bool  picoruby_ui_tombola_running(void);
+bool  picoruby_ui_tombola_set_f(const char *name, float value);
+bool  picoruby_ui_tombola_set_i(const char *name, int value);
+float picoruby_ui_tombola_get_f(const char *name);
+int   picoruby_ui_tombola_get_i(const char *name);
+void  picoruby_ui_tombola_set_scale(const uint8_t *notes, int len);
+int   picoruby_ui_tombola_add_ball(int note, int channel, int color, float velocity_scale);
+bool  picoruby_ui_tombola_remove_ball(int index);
+void  picoruby_ui_tombola_clear_balls(void);
+int   picoruby_ui_tombola_ball_count(void);
 
 #ifdef __cplusplus
 }

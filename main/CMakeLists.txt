@@ -27,6 +27,7 @@ elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB
         "ui/screen_midi_info.cpp"
         "ui/screen_script.cpp"
         "ui/screen_settings.cpp"
+        "ui/screen_tombola.cpp"
     )
 endif()
 

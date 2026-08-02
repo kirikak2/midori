@@ -22,6 +22,10 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->pad_state = false;
     event->sync_mode = false;
     event->screen = 0;
+    event->hit_ball = 0;
+    event->hit_side = 0;
+    event->hit_note = 0;
+    event->hit_velocity = 0;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -46,6 +50,13 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
         case UI_EVENT_SCREEN_CHANGE:
             event->type = PICORUBY_UI_EVENT_SCREEN_CHANGE;
             event->screen = ui_evt.data.screen;
+            break;
+        case UI_EVENT_TOMBOLA_HIT:
+            event->type = PICORUBY_UI_EVENT_TOMBOLA_HIT;
+            event->hit_ball = ui_evt.data.tombola.ball;
+            event->hit_side = ui_evt.data.tombola.side;
+            event->hit_note = ui_evt.data.tombola.note;
+            event->hit_velocity = ui_evt.data.tombola.velocity;
             break;
         default:
             break;
@@ -124,4 +135,71 @@ void picoruby_ui_set_screen(int index)
 int picoruby_ui_current_screen(void)
 {
     return (int)ui_get_current_screen();
+}
+
+/* Tombola sequencer */
+
+void picoruby_ui_tombola_reset(void)
+{
+    ui_tombola_reset();
+}
+
+void picoruby_ui_tombola_start(void)
+{
+    ui_tombola_start();
+}
+
+void picoruby_ui_tombola_stop(void)
+{
+    ui_tombola_stop();
+}
+
+bool picoruby_ui_tombola_running(void)
+{
+    return ui_tombola_running();
+}
+
+bool picoruby_ui_tombola_set_f(const char *name, float value)
+{
+    return ui_tombola_set_f(name, value);
+}
+
+bool picoruby_ui_tombola_set_i(const char *name, int value)
+{
+    return ui_tombola_set_i(name, value);
+}
+
+float picoruby_ui_tombola_get_f(const char *name)
+{
+    return ui_tombola_get_f(name);
+}
+
+int picoruby_ui_tombola_get_i(const char *name)
+{
+    return ui_tombola_get_i(name);
+}
+
+void picoruby_ui_tombola_set_scale(const uint8_t *notes, int len)
+{
+    ui_tombola_set_scale(notes, len);
+}
+
+int picoruby_ui_tombola_add_ball(int note, int channel, int color, float velocity_scale)
+{
+    return ui_tombola_add_ball(note, channel, (uint16_t)color, velocity_scale);
+}
+
+bool picoruby_ui_tombola_remove_ball(int index)
+{
+    return ui_tombola_remove_ball(index);
+}
+
+void picoruby_ui_tombola_clear_balls(void)
+{
+    ui_tombola_clear_balls();
+}
+
+int picoruby_ui_tombola_ball_count(void)
+{
+    return ui_tombola_ball_count();
 }

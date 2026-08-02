@@ -5,6 +5,7 @@
 #include "screen_midi_info.h"
 #include "screen_script.h"
 #include "screen_settings.h"
+#include "screen_tombola.h"
 #include <M5Unified.h>
 #include "esp_log.h"
 
@@ -99,6 +100,7 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_LOGS] = &getScreenLog();
     m_screens[UI_SCREEN_SCRIPTS] = &getScreenScripts();
     m_screens[UI_SCREEN_SETTINGS] = &getScreenSettings();
+    m_screens[UI_SCREEN_TOMBOLA] = &getScreenTombola();
 }
 
 void UIManager::update()
@@ -143,6 +145,11 @@ void UIManager::update()
 
     // Handle touch input
     handleTouch();
+
+    // Step the tombola sequencer. Deliberately outside the current-screen
+    // check: a running patch must keep playing while the user is looking at
+    // another screen.
+    ui_tombola_tick();
 
     // Update current screen
     if (m_screens[m_currentIndex]) {

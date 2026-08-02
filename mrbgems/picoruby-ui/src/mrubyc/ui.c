@@ -26,6 +26,7 @@ c_ui_pop_event(mrbc_vm *vm, mrbc_value v[], int argc)
         case PICORUBY_UI_EVENT_PAD_RELEASE:  type_str = "pad_release"; break;
         case PICORUBY_UI_EVENT_SYNC_MODE:    type_str = "sync_mode"; break;
         case PICORUBY_UI_EVENT_SCREEN_CHANGE: type_str = "screen_change"; break;
+        case PICORUBY_UI_EVENT_TOMBOLA_HIT:  type_str = "tombola_hit"; break;
         default:                             type_str = "unknown"; break;
     }
 
@@ -69,6 +70,25 @@ c_ui_pop_event(mrbc_vm *vm, mrbc_value v[], int argc)
             mrbc_value key_screen = mrbc_symbol_value(mrbc_str_to_symid("screen"));
             mrbc_value val_screen = mrbc_integer_value(event.screen);
             mrbc_hash_set(&hash, &key_screen, &val_screen);
+            break;
+        }
+        case PICORUBY_UI_EVENT_TOMBOLA_HIT:
+        {
+            mrbc_value key_ball = mrbc_symbol_value(mrbc_str_to_symid("ball"));
+            mrbc_value val_ball = mrbc_integer_value(event.hit_ball);
+            mrbc_hash_set(&hash, &key_ball, &val_ball);
+
+            mrbc_value key_side = mrbc_symbol_value(mrbc_str_to_symid("side"));
+            mrbc_value val_side = mrbc_integer_value(event.hit_side);
+            mrbc_hash_set(&hash, &key_side, &val_side);
+
+            mrbc_value key_note = mrbc_symbol_value(mrbc_str_to_symid("note"));
+            mrbc_value val_note = mrbc_integer_value(event.hit_note);
+            mrbc_hash_set(&hash, &key_note, &val_note);
+
+            mrbc_value key_vel = mrbc_symbol_value(mrbc_str_to_symid("velocity"));
+            mrbc_value val_vel = mrbc_integer_value(event.hit_velocity);
+            mrbc_hash_set(&hash, &key_vel, &val_vel);
             break;
         }
         default:
@@ -265,6 +285,220 @@ c_ui_pad_set_color(mrbc_vm *vm, mrbc_value v[], int argc)
     SET_NIL_RETURN();
 }
 
+/* ------------------------------------------------------------------------
+ * Tombola sequencer
+ *
+ * The Ruby-visible object is UI::Tombola (defined in mrblib/ui.rb); these are
+ * the raw module functions it drives. Parameters go through _tombola_set_f /
+ * _tombola_set_i keyed by name so adding a knob never touches this file.
+ * ------------------------------------------------------------------------ */
+
+/* Accept either a Symbol or a String for parameter names. */
+static const char *
+tombola_param_name(mrbc_value *v)
+{
+    if (mrbc_type(*v) == MRBC_TT_SYMBOL) {
+        return mrbc_symbol_cstr(v);
+    }
+    if (mrbc_type(*v) == MRBC_TT_STRING) {
+        return (const char *)mrbc_string_cstr(v);
+    }
+    return NULL;
+}
+
+static float
+tombola_to_f(mrbc_value *v)
+{
+    if (mrbc_type(*v) == MRBC_TT_FLOAT)   return (float)v->d;
+    if (mrbc_type(*v) == MRBC_TT_INTEGER) return (float)v->i;
+    return 0.0f;
+}
+
+/*
+ * UI._tombola_set_f(name, value) / UI._tombola_set_i(name, value)
+ */
+static void
+c_ui_tombola_set_f(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 2) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    const char *name = tombola_param_name(&v[1]);
+    if (name == NULL) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    SET_BOOL_RETURN(picoruby_ui_tombola_set_f(name, tombola_to_f(&v[2])));
+}
+
+static void
+c_ui_tombola_set_i(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 2) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    const char *name = tombola_param_name(&v[1]);
+    if (name == NULL) {
+        SET_FALSE_RETURN();
+        return;
+    }
+
+    int value;
+    switch (mrbc_type(v[2])) {
+        case MRBC_TT_INTEGER: value = (int)v[2].i; break;
+        case MRBC_TT_FLOAT:   value = (int)v[2].d; break;
+        case MRBC_TT_TRUE:    value = 1; break;
+        case MRBC_TT_FALSE:
+        case MRBC_TT_NIL:     value = 0; break;
+        default:
+            SET_FALSE_RETURN();
+            return;
+    }
+    SET_BOOL_RETURN(picoruby_ui_tombola_set_i(name, value));
+}
+
+/*
+ * UI._tombola_get_f(name) / UI._tombola_get_i(name)
+ */
+static void
+c_ui_tombola_get_f(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    if (argc < 1) {
+        SET_FLOAT_RETURN(0.0);
+        return;
+    }
+    const char *name = tombola_param_name(&v[1]);
+    SET_FLOAT_RETURN(name ? picoruby_ui_tombola_get_f(name) : 0.0f);
+}
+
+static void
+c_ui_tombola_get_i(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 1) {
+        SET_INT_RETURN(0);
+        return;
+    }
+    const char *name = tombola_param_name(&v[1]);
+    SET_INT_RETURN(name ? picoruby_ui_tombola_get_i(name) : 0);
+}
+
+/*
+ * UI._tombola_set_scale(array_of_note_numbers)
+ */
+static void
+c_ui_tombola_set_scale(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 1 || mrbc_type(v[1]) != MRBC_TT_ARRAY) {
+        SET_NIL_RETURN();
+        return;
+    }
+
+    uint8_t notes[16];
+    int len = mrbc_array_size(&v[1]);
+    if (len > (int)sizeof(notes)) len = (int)sizeof(notes);
+
+    int count = 0;
+    for (int i = 0; i < len; i++) {
+        mrbc_value item = mrbc_array_get(&v[1], i);
+        if (mrbc_type(item) != MRBC_TT_INTEGER) continue;
+        int note = (int)item.i;
+        if (note < 0)   note = 0;
+        if (note > 127) note = 127;
+        notes[count++] = (uint8_t)note;
+    }
+
+    if (count > 0) {
+        picoruby_ui_tombola_set_scale(notes, count);
+    }
+    SET_NIL_RETURN();
+}
+
+/*
+ * UI._tombola_add_ball(note, channel, color, velocity_scale)
+ * note / channel may be nil to inherit the sequencer's defaults.
+ * Returns the ball index, or -1 when all slots are taken.
+ */
+static void
+c_ui_tombola_add_ball(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 4) {
+        SET_INT_RETURN(-1);
+        return;
+    }
+
+    int note    = (mrbc_type(v[1]) == MRBC_TT_INTEGER) ? (int)v[1].i : -1;
+    int channel = (mrbc_type(v[2]) == MRBC_TT_INTEGER) ? (int)v[2].i : -1;
+    int color   = (mrbc_type(v[3]) == MRBC_TT_INTEGER) ? (int)v[3].i : 0xFFFF;
+    float scale = tombola_to_f(&v[4]);
+    if (scale <= 0.0f) scale = 1.0f;
+
+    SET_INT_RETURN(picoruby_ui_tombola_add_ball(note, channel, color, scale));
+}
+
+static void
+c_ui_tombola_remove_ball(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 1 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    SET_BOOL_RETURN(picoruby_ui_tombola_remove_ball((int)v[1].i));
+}
+
+static void
+c_ui_tombola_clear_balls(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    picoruby_ui_tombola_clear_balls();
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_tombola_ball_count(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    SET_INT_RETURN(picoruby_ui_tombola_ball_count());
+}
+
+static void
+c_ui_tombola_start(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    picoruby_ui_tombola_start();
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_tombola_stop(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    picoruby_ui_tombola_stop();
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_tombola_reset(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    picoruby_ui_tombola_reset();
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_tombola_running(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    SET_BOOL_RETURN(picoruby_ui_tombola_running());
+}
+
 /*
  * Gem initialization
  */
@@ -290,4 +524,19 @@ mrbc_ui_init(mrbc_vm *vm)
     mrbc_define_method(vm, module_UI, "_pad_get_state", c_ui_pad_get_state);
     mrbc_define_method(vm, module_UI, "_pad_set_label", c_ui_pad_set_label);
     mrbc_define_method(vm, module_UI, "_pad_set_color", c_ui_pad_set_color);
+
+    /* Tombola methods */
+    mrbc_define_method(vm, module_UI, "_tombola_set_f", c_ui_tombola_set_f);
+    mrbc_define_method(vm, module_UI, "_tombola_set_i", c_ui_tombola_set_i);
+    mrbc_define_method(vm, module_UI, "_tombola_get_f", c_ui_tombola_get_f);
+    mrbc_define_method(vm, module_UI, "_tombola_get_i", c_ui_tombola_get_i);
+    mrbc_define_method(vm, module_UI, "_tombola_set_scale", c_ui_tombola_set_scale);
+    mrbc_define_method(vm, module_UI, "_tombola_add_ball", c_ui_tombola_add_ball);
+    mrbc_define_method(vm, module_UI, "_tombola_remove_ball", c_ui_tombola_remove_ball);
+    mrbc_define_method(vm, module_UI, "_tombola_clear_balls", c_ui_tombola_clear_balls);
+    mrbc_define_method(vm, module_UI, "_tombola_ball_count", c_ui_tombola_ball_count);
+    mrbc_define_method(vm, module_UI, "_tombola_start", c_ui_tombola_start);
+    mrbc_define_method(vm, module_UI, "_tombola_stop", c_ui_tombola_stop);
+    mrbc_define_method(vm, module_UI, "_tombola_reset", c_ui_tombola_reset);
+    mrbc_define_method(vm, module_UI, "_tombola_running", c_ui_tombola_running);
 }

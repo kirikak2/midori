@@ -1,0 +1,196 @@
+# Tombola シーケンサー
+
+回転する多角形の中でボールが跳ね、壁に当たった瞬間にノートを発音する物理
+シミュレーション型シーケンサー。グリッドに乗らない、非周期的で有機的なリズムを
+作るためのもの。
+
+- 実装: [main/ui/screen_tombola.cpp](../main/ui/screen_tombola.cpp)（物理・描画・発音）
+- Ruby API: `UI::Tombola`（[mrbgems/picoruby-ui/mrblib/ui.rb](../mrbgems/picoruby-ui/mrblib/ui.rb)）
+- 対応ボード: M5Stack CoreS3 / M5Stack Tab5（画面が必要）。Freenove ではすべて
+  no-op（[main/platform/platform_freenove.c](../main/platform/platform_freenove.c) のスタブ）
+
+## 構成
+
+```
+ [PicoRuby task]                    [UI task (app_main, 10ms周期)]
+  UI::Tombola                        ui_update()
+    └ UI._tombola_set_i(:sides, 8) ──→ g_model (mutex)
+                                        └ ui_tombola_tick()
+                                            ├ 物理ステップ
+                                            ├ 衝突 → MIDI_Note_trigger()   ← 発音はここ
+                                            └ 衝突 → ui_event_push()       ← notify時のみ
+    UI.process ←─────────────────── イベントキュー
+      └ on_hit ブロック
+```
+
+**発音は C++ 側が担当する。** 衝突を検出した同じフレームで
+`MIDI_Note_trigger()`（既存のノートスケジューラ）を呼ぶので、ノートのタイミングは
+スクリプトが `UI.process` をどれだけ細かく回すかに依存しない。`on_hit` を登録すると
+同じ衝突が Ruby にもキュー経由で届く（表示・記録用）。Ruby だけで鳴らしたい場合は
+`t.sound = false` で C++ 側の発音を切る。
+
+`ui_tombola_tick()` は現在の画面に関係なく `ui_update()` から毎回呼ばれる。
+Tombola 画面から離れても演奏は止まらない。
+
+## 座標系
+
+物理は**正規化座標**で計算する。多角形の外接円半径を 1.0、原点を中心とし、
+ピクセルへの変換は描画時にのみ行う。これにより 320x240 の CoreS3 と 1280x720 の
+Tab5 で**まったく同じ挙動**になる（速度・重力・ボールサイズはすべて「外接円半径/秒」
+などの単位）。
+
+描画レートはボードで変える（Tab5: 約60fps / CoreS3: 約30fps）。CoreS3 は SPI
+パネルなので多角形の消去＋再描画の帯域が効いてくるため。物理ステップは
+どちらも 10ms のまま。
+
+## Ruby API
+
+```ruby
+require 'midi'
+require 'ui'
+
+t = UI::Tombola.new(sides: 6, rotation: 12, gravity: 0.5,
+                    device: MIDI::Device.new(MIDIDevices.sam2695))
+t.scale = [36, 38, 42, 45, 46, 49]
+t.add_ball(color: :red)
+t.start
+t.show
+```
+
+C++ 側の状態はグローバルなシングルトンなので、**Tombola は同時に 1 つ**。
+`Tombola.new` は既定値にリセットしてから引数を適用する。
+
+### パラメータ
+
+| メソッド | 既定値 | 範囲 | 内容 |
+|---|---|---|---|
+| `sides` | 6 | 3〜16 | 多角形の辺の数。音列の長さでもある（辺 N → `scale[N % scale.size]`） |
+| `rotation` | 12.0 | -600〜600 | 回転速度 RPM。負で逆回転 |
+| `radius` | 0.85 | 0.2〜1.0 | 描画サイズ（画面に対する比） |
+| `gravity` | 0.5 | 0.0〜4.0 | 重力の強さ |
+| `gravity_mode` | `:down` | `:down` `:center` `:none` | 下向き／中心引力／無重力 |
+| `bounce` | 0.9 | 0.0〜1.2 | 反発係数。1.0 超で跳ねるたびに加速する |
+| `friction` | 0.99 | 0.0〜1.0 | 接線方向の減衰（1.0 で摩擦なし） |
+| `spin_transfer` | 0.3 | 0.0〜1.0 | 回転する壁からボールへ渡る運動量。**0 にすると重力ありのパッチは底に溜まって鳴らなくなる** |
+| `ball_size` | 0.05 | 0.005〜0.4 | ボール半径（多角形に対する比） |
+| `scale` | `[36,38,42,45,46,49]` | 最大16要素 | 辺 → ノート番号 |
+| `channel` | 9 | 0〜15 | 既定 MIDI チャンネル（GM ドラム） |
+| `duration` | 120 | 1〜10000 | ノート長 ms |
+| `velocity_range` | `[40,127]` | 1〜127 | 衝突速度をこの範囲へマップ |
+| `retrigger_ms` | 30 | 0〜5000 | 同じボールの連続発音の最小間隔 |
+| `max_voices` | 8 | 1〜16 | 1ステップあたりの最大発音数 |
+| `sound` | true | — | C++ 側で発音するか（`sound?` で参照） |
+| `touch_add` | true | — | 多角形の内側をタップしてボール追加（`touch_add?` で参照） |
+| `device` | — | — | 出力先。`MIDI::Device` かトランスポートを渡す |
+
+すべて実行中に変更できる。エンコーダやパッドに割り当てるのが本来の使い方：
+
+```ruby
+UI.pad(1, label: "Faster") { t.rotation = t.rotation + 4 }
+UI.pad(2, label: "Sides+") { t.sides = t.sides + 1 }
+```
+
+### ボール
+
+```ruby
+t.add_ball                                    # scale から音程、既定 ch
+t.add_ball(note: 36, channel: 9, color: :red) # 固定ノート（ドラム用）
+t.add_ball(velocity_scale: 0.7)               # このボールだけ弱く
+t.balls          #=> 現在の個数
+t.balls = 5      # 個数を合わせる
+t.remove_ball(0)
+t.clear_balls
+```
+
+最大 16 個。`add_ball` は空きがなければ `-1` を返す。
+`note:` を省いたボールは当たった辺で音程が決まり、`note:` を与えたボールは常に
+その音を鳴らす（辺とボールのハイブリッド）。
+
+### 衝突の受け取り
+
+```ruby
+t.on_hit do |hit|
+  # hit => {ball: 0, side: 3, note: 45, velocity: 96}
+  UI.log("side #{hit[:side]} note #{hit[:note]}")
+end
+
+loop do
+  UI.process   # ← これを回さないとブロックは呼ばれない
+  sleep_ms 5
+end
+```
+
+`on_hit` を登録すると C++ 側の通知フラグが立ち、衝突が UI イベントキューへ流れる。
+キューは有限なので、`UI.process` を回さないまま放置すると溢れて捨てられる（音自体は
+C++ 側が鳴らすので影響しない）。
+
+### 開始・停止
+
+```ruby
+t.start      # ボールが 0 個なら 3 個スポーンする
+t.stop
+t.running?
+t.reset      # 全パラメータを既定値に戻し、ボールを全消去
+t.show       # Tombola 画面へ切り替え
+```
+
+画面下部の中央ナビボタンが `Start` / `Stop` になっている。
+
+## 画面
+
+- 多角形: 実行中はシアン、停止中はグレー
+- 直前に当たった辺が約 90ms 白く光る
+- プレイエリア左上に `N6 12rpm G0.50 B0.90 x3`（辺数 / 回転 / 重力 / 反発 / ボール数）
+- 多角形の内側をタップするとその位置にボールが増える（`touch_add`）
+
+### ダブルバッファリング
+
+プレイエリア（コンテンツ領域に収まる最大の正方形）全体を `LGFX_Sprite` に
+オフスクリーン描画し、1 回の `pushSprite` で置き換える。直接パネルへ描くと
+「線と円を消してから描き直す」ことになり、30〜60fps ではっきりちらつく。
+
+- サイズは **半径パラメータの最大値に合わせて固定**（Tab5: 620x620 ≈ 768KB /
+  CoreS3: 180x180 ≈ 65KB）。`radius` を変えてもバッファを取り直さなくて済む
+- 確保は `screen_main.cpp` / `screen_log.cpp` と同じ手順で、内部 RAM →
+  失敗したら PSRAM の順（Tab5 は PSRAM 必須）
+- 確保できなかった場合は、直接パネルへ「前フレームを消してから描く」方式に
+  フォールバックする（ちらつくが動く）
+- HUD もスプライトの中に描く。同じバッファに載せないと、そこだけ別タイミングで
+  更新されて単独でちらつくため
+- スプライトは画面を離れても解放しない（再入場が多く、確保のほうが高くつく）
+
+## ロータリーエンコーダから操作する
+
+[examples/tombola.rb](../examples/tombola.rb) は DFRobot Visual Rotary Encoder
+(SEN0502) を最大 4 台まで自動検出して、主要パラメータに割り当てる。
+
+| 台目 | I2C アドレス | 回すと | クリックすると |
+|---|---|---|---|
+| 1 | 0x54 | `rotation`（-60〜60 rpm） | `add_ball` |
+| 2 | 0x55 | `sides`（3〜16） | `clear_balls` |
+| 3 | 0x56 | `gravity`（0.0〜2.0） | — |
+| 4 | 0x57 | `bounce`（0.0〜1.2） | — |
+
+- 検出はアドレス順。繋がっていない分は飛ばされ、0 台でもスクリプトは動く
+- 起動時と、パッドで同じパラメータを動かしたときに、現在値をエンコーダの
+  カウンタへ書き戻す（LED リングとノブ位置が実際の値を指すようにするため）
+- ボタンは「押下でフラグを立てて読んだらクリア」方式で 1 クリックでも複数回
+  立つので、エッジ検出＋300ms のロックアウトで 1 回に落としている
+
+**Tab5 では Port A (53/54) が SAM2695 の UART と同じピン**なので、エンコーダと
+SAM2695 は同時に使えない。examples/tombola.rb はエンコーダが 1 台でも見つかったら
+出力を USB-MIDI デバイス（USB-C）→ USB-MIDI ホストの順に選び直す。
+
+## 初版に入れていないもの
+
+- **`quantize`**: 衝突を BPM グリッドへスナップさせる機能。発音を遅延キューに
+  載せる必要があるため見送り
+- **`gap`**: 辺の 1 つに穴を開けてボールが出入りする版
+- 複数 Tombola の同時実行（C++ 側の状態がシングルトンのため）
+
+## 既知の制約
+
+- ボールが壁に沿って転がると `retrigger_ms` の間隔で鳴り続ける。うるさい場合は
+  `retrigger_ms` を上げるか `bounce` を上げて転がらせない
+- `bounce` を 1.0 より大きくすると系にエネルギーが入り続け、最終的に速度クランプ
+  （8 半径/秒）に張り付く

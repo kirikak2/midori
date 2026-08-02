@@ -101,3 +101,78 @@ ui_screen_index_t ui_get_current_screen(void)
 {
     return UI_SCREEN_MAIN;
 }
+
+// Tombola stubs - the sequencer lives in ui/screen_tombola.cpp, which is only
+// built for the M5Stack boards. Scripts that touch UI::Tombola on Freenove get
+// a silent no-op rather than a link error.
+
+void ui_tombola_reset(void)
+{
+}
+
+void ui_tombola_start(void)
+{
+}
+
+void ui_tombola_stop(void)
+{
+}
+
+bool ui_tombola_running(void)
+{
+    return false;
+}
+
+void ui_tombola_tick(void)
+{
+}
+
+bool ui_tombola_set_f(const char *name, float value)
+{
+    (void)name; (void)value;
+    return false;
+}
+
+bool ui_tombola_set_i(const char *name, int value)
+{
+    (void)name; (void)value;
+    return false;
+}
+
+float ui_tombola_get_f(const char *name)
+{
+    (void)name;
+    return 0.0f;
+}
+
+int ui_tombola_get_i(const char *name)
+{
+    (void)name;
+    return 0;
+}
+
+void ui_tombola_set_scale(const uint8_t *notes, int len)
+{
+    (void)notes; (void)len;
+}
+
+int ui_tombola_add_ball(int note, int channel, uint16_t color, float velocity_scale)
+{
+    (void)note; (void)channel; (void)color; (void)velocity_scale;
+    return -1;
+}
+
+bool ui_tombola_remove_ball(int index)
+{
+    (void)index;
+    return false;
+}
+
+void ui_tombola_clear_balls(void)
+{
+}
+
+int ui_tombola_ball_count(void)
+{
+    return 0;
+}

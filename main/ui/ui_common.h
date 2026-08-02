@@ -61,9 +61,11 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         6
+#define UI_SCREEN_COUNT         7
 
 // Screen indices
+// New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
+// values, so renumbering an existing entry would break SD-card scripts.
 typedef enum {
     UI_SCREEN_MAIN = 0,
     UI_SCREEN_PADS,
@@ -71,6 +73,7 @@ typedef enum {
     UI_SCREEN_LOGS,
     UI_SCREEN_SCRIPTS,
     UI_SCREEN_SETTINGS,
+    UI_SCREEN_TOMBOLA,
 } ui_screen_index_t;
 
 // BPM configuration
@@ -130,6 +133,21 @@ typedef struct {
     bool state;              // Current state (toggle/momentary)
 } pad_config_t;
 
+// --- Tombola sequencer ---------------------------------------------------
+// Physics runs in normalized units: the polygon's circumradius is 1.0 and the
+// origin is the polygon centre, so the same patch behaves identically on the
+// 320x240 CoreS3 and the 1280x720 Tab5. Pixels only enter at draw time.
+#define UI_TOMBOLA_MAX_BALLS    16
+#define UI_TOMBOLA_MIN_SIDES     3
+#define UI_TOMBOLA_MAX_SIDES    16
+#define UI_TOMBOLA_MAX_SCALE    16
+
+typedef enum {
+    TOMBOLA_GRAVITY_DOWN = 0,   // Constant downward pull (classic)
+    TOMBOLA_GRAVITY_CENTER,     // Pull toward the polygon centre
+    TOMBOLA_GRAVITY_NONE,       // Free floating: even, non-decaying patterns
+} tombola_gravity_mode_t;
+
 // Log source type
 typedef enum {
     LOG_SOURCE_ESP,      // ESP-IDF ESP_LOGx
@@ -158,6 +176,7 @@ typedef enum {
     UI_EVENT_PAD_RELEASE,     // Pad was released
     UI_EVENT_SYNC_MODE,       // Sync mode was toggled
     UI_EVENT_SCREEN_CHANGE,   // Screen was changed
+    UI_EVENT_TOMBOLA_HIT,     // A tombola ball hit a wall
 } ui_event_type_t;
 
 // UI Event structure
@@ -171,6 +190,12 @@ typedef struct {
         } pad;
         bool sync_mode;      // For UI_EVENT_SYNC_MODE
         uint8_t screen;      // For UI_EVENT_SCREEN_CHANGE
+        struct {
+            uint8_t ball;    // For UI_EVENT_TOMBOLA_HIT
+            uint8_t side;
+            uint8_t note;
+            uint8_t velocity;
+        } tombola;
     } data;
 } ui_event_t;
 
@@ -209,6 +234,32 @@ const pad_config_t* ui_pad_get_config(uint8_t index);
 // ui_pad_take_dirty() returns a bitmask (bit N = pad N) and clears it.
 void ui_pad_mark_dirty(uint8_t index);
 uint32_t ui_pad_take_dirty(void);
+
+// Tombola functions.
+// Every setter here is called from the PicoRuby task and only mutates shared
+// state; ui_tombola_tick() (UI task) does the stepping and the drawing.
+void ui_tombola_reset(void);          // Restore defaults and drop every ball
+void ui_tombola_start(void);
+void ui_tombola_stop(void);
+bool ui_tombola_running(void);
+void ui_tombola_tick(void);           // Physics step, called from ui_update()
+
+// Named parameter access. Keeping this string-keyed lets the Ruby binding stay
+// two functions wide no matter how many knobs the sequencer grows.
+// Float keys : rotation radius gravity bounce friction spin_transfer ball_size
+// Int keys   : sides gravity_mode channel duration velocity_min velocity_max
+//              retrigger_ms max_voices transport sound touch_add notify
+bool  ui_tombola_set_f(const char* name, float value);
+bool  ui_tombola_set_i(const char* name, int value);
+float ui_tombola_get_f(const char* name);
+int   ui_tombola_get_i(const char* name);
+
+void ui_tombola_set_scale(const uint8_t* notes, int len);
+// note < 0 / channel < 0 mean "inherit from the scale / default channel".
+int  ui_tombola_add_ball(int note, int channel, uint16_t color, float velocity_scale);
+bool ui_tombola_remove_ball(int index);
+void ui_tombola_clear_balls(void);
+int  ui_tombola_ball_count(void);
 
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);

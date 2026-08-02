@@ -528,6 +528,36 @@ ESP32-S3 + PSRAM環境では、ヒープサイズを**2MB**に設定:
 2. **信頼性**: Cache error や MMU fault が発生しない
 3. **シンプル**: 複雑なメモリ管理が不要
 
+## Tombola シーケンサー（2026-08-03）
+
+詳細は [docs/TOMBOLA.md](docs/TOMBOLA.md) を参照。
+
+回転する多角形の中でボールが跳ね、壁との衝突でノートを鳴らす物理シミュレーション型
+シーケンサー。Ruby からは `UI::Tombola` として使う（M5Stack CoreS3 / Tab5 のみ。
+Freenove では no-op スタブ）。
+
+**発音は C++ 側**（[main/ui/screen_tombola.cpp](main/ui/screen_tombola.cpp)）が
+衝突と同じフレームで `MIDI_Note_trigger()` を呼ぶ。ノートのタイミングが
+`UI.process` のポーリング間隔に左右されないようにするため。`on_hit` を登録すると
+同じ衝突が UI イベントキュー経由で Ruby にも届く（`sound = false` で C++ 発音を切れる）。
+
+物理は**正規化座標**（外接円半径 = 1.0）で計算し、ピクセル変換は描画時のみ。
+CoreS3（320x240）と Tab5（1280x720）で挙動を一致させるため。
+
+`ui_tombola_tick()` は現在の画面に関係なく `ui_update()` から呼ばれるので、
+別画面を見ている間も演奏は止まらない。
+
+```ruby
+t = UI::Tombola.new(sides: 6, rotation: 12, gravity: 0.5,
+                    device: MIDI::Device.new(MIDIDevices.sam2695))
+t.scale = [36, 38, 42, 45, 46, 49]  # 辺 N → scale[N % size]
+t.add_ball(color: :red)
+t.start
+UI.pad(1, label: "Faster") { t.rotation = t.rotation + 4 }
+```
+
+サンプル: [examples/tombola.rb](examples/tombola.rb)
+
 ## 既知の課題
 
 ### USB MIDIデバイスの電源ON順序問題（2026-03-18）
