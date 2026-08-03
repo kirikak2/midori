@@ -13,8 +13,8 @@
 #   |-----|------------|----------------|
 #   | 1台目 | rotation   | add_ball       |
 #   | 2台目 | sides      | clear_balls    |
-#   | 3台目 | gravity    | -              |
-#   | 4台目 | bounce     | -              |
+#   | 3台目 | gravity    | オクターブ -1  |
+#   | 4台目 | bounce     | オクターブ +1  |
 #
 # 検出は DIP スイッチのアドレス順 (0x54, 0x55, 0x56, 0x57)。繋がっていない
 # 分は黙って飛ばされるので、0 台でもこのスクリプトはそのまま動く。
@@ -120,6 +120,27 @@ class EncoderKnob
   end
 end
 
+# ---- オクターブシフト ------------------------------------------------
+# scale をまるごと ±12 半音して入れ直す。1 音でも 0-127 を外れるならシフト
+# 自体を諦める: 端に当たった音だけクランプすると音列の形が崩れてしまう。
+def shift_octave(t, direction)
+  notes = t.scale
+  return unless notes
+
+  semitones = direction * 12
+  shifted = []
+  i = 0
+  while i < notes.size
+    v = notes[i] + semitones
+    return if v < 0 || v > 127
+    shifted << v
+    i += 1
+  end
+
+  t.scale = shifted
+  UI.log("octave #{direction > 0 ? '+' : '-'}1 -> #{shifted[0]}")
+end
+
 # ---- エンコーダ検出 (Port A) -----------------------------------------
 # 直前まで SAM2695(UART) が同じピンを使っていた場合のルーティング残りを剥がす。
 # ピンがそのボードに無ければ I2C ごと諦めて 0 台で続行する。
@@ -203,6 +224,7 @@ t.show
 # ---- エンコーダ割り当て ----------------------------------------------
 # 1台目 rotation / 2台目 sides / 3台目 gravity / 4台目 bounce。
 # それぞれ Tombola 側のクランプ範囲より狭い、演奏に使いやすい幅にしてある。
+# クリックは add_ball / clear_balls / オクターブ -1 / オクターブ +1。
 knobs = []
 knob_rotation = nil
 knob_sides = nil
@@ -230,21 +252,25 @@ if encoders[1]
 end
 
 if encoders[2]
-  knobs << EncoderKnob.new(
+  knob_gravity = EncoderKnob.new(
     enc: encoders[2], label: "gravity",
     min: 0.0, max: 2.0, integer: false,
     getter: Proc.new { t.gravity },
     setter: Proc.new { |v| t.gravity = v }
   )
+  knob_gravity.on_click { shift_octave(t, -1) }
+  knobs << knob_gravity
 end
 
 if encoders[3]
-  knobs << EncoderKnob.new(
+  knob_bounce = EncoderKnob.new(
     enc: encoders[3], label: "bounce",
     min: 0.0, max: 1.2, integer: false,
     getter: Proc.new { t.bounce },
     setter: Proc.new { |v| t.bounce = v }
   )
+  knob_bounce.on_click { shift_octave(t, 1) }
+  knobs << knob_bounce
 end
 
 # LED リングを現在値に合わせてから回し始める
