@@ -175,7 +175,7 @@ t = UI::Tombola.new(
   rotation: 12,          # RPM, negative to spin the other way
   gravity: 0.5,
   gravity_mode: :down,
-  bounce: 0.9,
+  bounce: 0.8,
   spin_transfer: 0.3,    # Without this the balls settle at the bottom
   channel: 9,
   duration: 120,

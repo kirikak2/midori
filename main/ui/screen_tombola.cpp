@@ -46,13 +46,15 @@ static constexpr float MAX_DT = 0.05f;
 
 static constexpr int64_t FLASH_US = 90000;  // Hit highlight duration
 
+// Frame pacing. Pushing the play area is the dominant cost of this screen
+// (620x620x16bpp is 768KB a frame on Tab5, and CoreS3 pushes its 65KB over
+// SPI), and it buys little above 30fps for balls this size. Physics keeps its
+// own 10ms step either way, so the note timing does not change with this.
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
-static constexpr int64_t DRAW_INTERVAL_US = 16000;  // ~60fps on the MIPI panel
+static constexpr int64_t DRAW_INTERVAL_US = 33000;  // ~30fps
 static constexpr int HUD_TEXT_SIZE = 2;
 #else
-// CoreS3 drives its panel over SPI, so pushing the play area costs real
-// bandwidth; redraw at ~30fps while physics keeps its 10ms step.
-static constexpr int64_t DRAW_INTERVAL_US = 33000;
+static constexpr int64_t DRAW_INTERVAL_US = 50000;  // ~20fps
 static constexpr int HUD_TEXT_SIZE = 1;
 #endif
 
@@ -173,7 +175,7 @@ void modelDefaults()
 
     m.gravity = 0.5f;
     m.gravityMode = TOMBOLA_GRAVITY_DOWN;
-    m.bounce = 0.9f;
+    m.bounce = 0.8f;
     m.friction = 0.99f;
     m.spinTransfer = 0.3f;
     m.ballSize = 0.05f;
@@ -237,6 +239,17 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
     const float apothem = cosf((float)M_PI / (float)sides);
     const float ballR = clampFloat(m.ballSize, 0.005f, 0.4f);
     const float wallLimit = apothem - ballR;
+    const float wallLimitSq = wallLimit * wallLimit;
+
+    // Outward normals, once per step rather than once per ball per side: the
+    // inner loop was by far the biggest consumer of cosf/sinf in the build.
+    float normX[UI_TOMBOLA_MAX_SIDES];
+    float normY[UI_TOMBOLA_MAX_SIDES];
+    for (int s = 0; s < sides; s++) {
+        float phi = m.angle + ((float)s + 0.5f) * step;
+        normX[s] = cosf(phi);
+        normY[s] = sinf(phi);
+    }
 
     for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
         Ball& b = m.balls[i];
@@ -271,22 +284,25 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
         b.x += b.vx * dt;
         b.y += b.vy * dt;
 
+        // A ball closer to the centre than the wall cannot be touching any of
+        // them, because p.n <= |p| for a unit normal. Most balls are in flight
+        // most frames, so this skips the side scan nearly every time.
+        float distSq = b.x * b.x + b.y * b.y;
+        if (distSq < wallLimitSq) continue;
+
         // Find the most deeply violated side. The polygon is convex, so a
         // single half-space test per side is enough.
         int worstSide = -1;
         float worstDepth = 0.0f;
         float worstNx = 0.0f, worstNy = 0.0f;
         for (int s = 0; s < sides; s++) {
-            float phi = m.angle + ((float)s + 0.5f) * step;  // Outward normal
-            float nx = cosf(phi);
-            float ny = sinf(phi);
-            float d = b.x * nx + b.y * ny;
+            float d = b.x * normX[s] + b.y * normY[s];
             float depth = d - wallLimit;
             if (depth > worstDepth) {
                 worstDepth = depth;
                 worstSide = s;
-                worstNx = nx;
-                worstNy = ny;
+                worstNx = normX[s];
+                worstNy = normY[s];
             }
         }
         if (worstSide < 0) continue;
@@ -318,8 +334,16 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
         float friction = clampFloat(m.friction, 0.0f, 1.0f);
         float spin = clampFloat(m.spinTransfer, 0.0f, 1.0f);
 
-        b.vx = -bounce * relNx + friction * relTx + spin * wallVx;
-        b.vy = -bounce * relNy + friction * relTy + spin * wallVy;
+        // Resolve in the wall's frame, then return to the world frame by adding
+        // the wall velocity back whole. spin_transfer drags the tangential
+        // component toward the wall's own speed instead of adding a share of it
+        // on top: adding it meant a ball moving against the rotation was kicked
+        // further every bounce, so the balls kept gaining speed even at
+        // bounce < 1.0. Blending keeps |v_t| between the ball's and the wall's,
+        // which cannot run away.
+        float tangential = friction * (1.0f - spin);
+        b.vx = -bounce * relNx + tangential * relTx + wallVx;
+        b.vy = -bounce * relNy + tangential * relTy + wallVy;
 
         m.flashSide = worstSide;
         m.flashUntilUs = nowUs + FLASH_US;
@@ -587,7 +611,9 @@ ScreenTombola::ScreenTombola()
     , m_drawnAngle(0.0f)
     , m_drawnRadius(0.0f)
     , m_hasDrawnFrame(false)
+    , m_lastDrawUs(0)
 {
+    memset(&m_lastKey, 0, sizeof(m_lastKey));
     // Runs during static init, before app_main: the model must be usable by
     // the time PicoRuby (or any other task) can reach the ui_tombola_* API.
     g_mutex = xSemaphoreCreateMutexStatic(&g_mutexBuf);
@@ -699,11 +725,20 @@ void ScreenTombola::drawPolygon(LovyanGFX* g, int cx, int cy, float radius, floa
 {
     if (sides < UI_TOMBOLA_MIN_SIDES) return;
 
+    // One cos/sin pair per vertex rather than one per line end. The polygon is
+    // drawn twice a frame (erase the old angle, paint the new one), so this
+    // used to be the busiest trigonometry in the screen.
+    int px[UI_TOMBOLA_MAX_SIDES];
+    int py[UI_TOMBOLA_MAX_SIDES];
+    float step = 2.0f * (float)M_PI / (float)sides;
     for (int i = 0; i < sides; i++) {
-        int x0, y0, x1, y1;
-        polygonPoint(cx, cy, radius, angle, i, sides, x0, y0);
-        polygonPoint(cx, cy, radius, angle, i + 1, sides, x1, y1);
-        g->drawLine(x0, y0, x1, y1, color);
+        float a = angle + (float)i * step;
+        px[i] = cx + (int)(cosf(a) * radius);
+        py[i] = cy + (int)(sinf(a) * radius);
+    }
+    for (int i = 0; i < sides; i++) {
+        int j = (i + 1) % sides;
+        g->drawLine(px[i], py[i], px[j], py[j], color);
     }
 }
 
@@ -784,54 +819,110 @@ void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy)
     m_hasDrawnFrame = true;
 }
 
-void ScreenTombola::eraseFrame()
+// Paints the previous frame's marks black. Used on both paths -- inside the
+// sprite it replaces a full-buffer fillScreen, which on Tab5 is 768KB of
+// writes that only a few hundred pixels actually needed.
+void ScreenTombola::eraseFrame(LovyanGFX* g, int ox, int oy)
 {
-    // Fallback path only. With the sprite there is nothing to erase: the whole
-    // play area is rebuilt off-screen and replaced in one push.
     if (!m_hasDrawnFrame) return;
 
     int cx, cy;
     float radius;
     geometry(cx, cy, radius);
 
-    drawPolygon(&M5.Lcd, cx, cy, m_drawnRadius, m_drawnAngle, m_drawnSides, UI_COLOR_BLACK);
+    drawPolygon(g, cx - ox, cy - oy, m_drawnRadius, m_drawnAngle, m_drawnSides,
+                UI_COLOR_BLACK);
     for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
         if (!m_drawnBalls[i].active) continue;
-        M5.Lcd.fillCircle(m_drawnBalls[i].x, m_drawnBalls[i].y,
-                          m_drawnBalls[i].r, UI_COLOR_BLACK);
+        g->fillCircle(m_drawnBalls[i].x - ox, m_drawnBalls[i].y - oy,
+                      m_drawnBalls[i].r, UI_COLOR_BLACK);
     }
 }
 
-void ScreenTombola::paintFrame()
+void ScreenTombola::paintFrame(bool fullRepaint)
 {
+    bool clear = fullRepaint || !m_hasDrawnFrame;
+
     if (m_sprite) {
-        m_sprite->fillScreen(UI_COLOR_BLACK);
+        if (clear) {
+            m_sprite->fillScreen(UI_COLOR_BLACK);
+        } else {
+            eraseFrame(m_sprite, BOX_X, BOX_Y);
+        }
         renderFrame(m_sprite, BOX_X, BOX_Y);
         m_sprite->pushSprite(BOX_X, BOX_Y);
         return;
     }
 
     M5.Lcd.startWrite();
-    eraseFrame();
+    if (clear) {
+        M5.Lcd.fillRect(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK);
+    } else {
+        eraseFrame(&M5.Lcd, 0, 0);
+    }
     renderFrame(&M5.Lcd, 0, 0);
     M5.Lcd.endWrite();
+}
+
+// True when anything the frame shows differs from what was last drawn.
+bool ScreenTombola::frameChanged()
+{
+    FrameKey key;
+
+    modelLock();
+    key.sides = clampInt(g_model.sides, UI_TOMBOLA_MIN_SIDES, UI_TOMBOLA_MAX_SIDES);
+    key.angle = g_model.angle;
+    key.radius = g_model.radiusRatio;
+    key.ballSize = g_model.ballSize;
+    key.rotationRpm = g_model.rotationRpm;
+    key.gravity = g_model.gravity;
+    key.bounce = g_model.bounce;
+    key.flash = (esp_timer_get_time() < g_model.flashUntilUs);
+    key.running = g_model.running;
+    key.ballCount = 0;
+    for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
+        if (g_model.balls[i].active) key.ballCount++;
+    }
+    modelUnlock();
+
+    bool same = key.sides == m_lastKey.sides &&
+                key.ballCount == m_lastKey.ballCount &&
+                key.angle == m_lastKey.angle &&
+                key.radius == m_lastKey.radius &&
+                key.ballSize == m_lastKey.ballSize &&
+                key.rotationRpm == m_lastKey.rotationRpm &&
+                key.gravity == m_lastKey.gravity &&
+                key.bounce == m_lastKey.bounce &&
+                key.flash == m_lastKey.flash &&
+                key.running == m_lastKey.running;
+
+    m_lastKey = key;
+    return !same;
 }
 
 void ScreenTombola::update()
 {
     if (!m_isActive) return;
 
-    static int64_t lastDraw = 0;
     int64_t now = esp_timer_get_time();
-    if (now - lastDraw < DRAW_INTERVAL_US) return;
-    lastDraw = now;
+    if (now - m_lastDrawUs < DRAW_INTERVAL_US) return;
 
-    paintFrame();
+    // While the sequencer is stopped the balls and the polygon hold still, so
+    // repaint only when something visible actually moved. A parked Tombola
+    // screen then costs nothing. (frameChanged() must run either way: it is
+    // what keeps the comparison baseline current.)
+    bool changed = frameChanged();
+    if (!changed && !ui_tombola_running()) return;
+
+    m_lastDrawUs = now;
+    paintFrame(false);
 }
 
 void ScreenTombola::draw()
 {
     // Full repaint requested by the UIManager: nothing on screen is ours yet.
     m_hasDrawnFrame = false;
-    paintFrame();
+    m_lastDrawUs = esp_timer_get_time();
+    frameChanged();
+    paintFrame(true);
 }

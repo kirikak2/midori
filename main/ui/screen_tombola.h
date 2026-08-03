@@ -47,6 +47,25 @@ private:
     float m_drawnRadius;
     bool m_hasDrawnFrame;
 
+    int64_t m_lastDrawUs;
+
+    // Everything the frame actually shows. While the sequencer is stopped
+    // nothing moves, so an unchanged key means the repaint can be skipped
+    // outright.
+    struct FrameKey {
+        int sides;
+        int ballCount;
+        float angle;
+        float radius;
+        float ballSize;
+        float rotationRpm;
+        float gravity;
+        float bounce;
+        bool flash;
+        bool running;
+    };
+    FrameKey m_lastKey;
+
     void geometry(int& cx, int& cy, float& radius);
     void polygonPoint(int cx, int cy, float radius, float angle, int i, int sides,
                       int& px, int& py);
@@ -55,8 +74,9 @@ private:
     // Composes one frame into g. ox/oy is g's origin in screen coordinates
     // (the sprite's top-left, or 0,0 when drawing straight to the panel).
     void renderFrame(LovyanGFX* g, int ox, int oy);
-    void eraseFrame();
-    void paintFrame();
+    void eraseFrame(LovyanGFX* g, int ox, int oy);
+    void paintFrame(bool fullRepaint);
+    bool frameChanged();
 };
 
 // Global instance
