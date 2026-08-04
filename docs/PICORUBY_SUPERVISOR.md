@@ -24,7 +24,7 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │           PicoRuby Task (Priority 3)                  │   │
 │  │  - main_task.rb を実行                                 │   │
-│  │  - UI Mode または Script Mode                          │   │
+│  │  - UI Mode / Script Mode / irb Mode                    │   │
 │  │  - 完了後 Supervisor に通知                            │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -50,6 +50,15 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 - 最小限の初期化（machine/watchdog/shell）
 - 指定されたスクリプトを実行
 - 完了後、Supervisorに通知
+
+### irb Mode
+- Script Mode と同じ最小限の初期化
+- `Shell#start(:irb)` でシリアルコンソール上の対話セッションを実行
+  （1行ごとに PicoRuby の Sandbox でコンパイル / 実行）
+- 擬似スクリプトパス `SUPERVISOR_IRB_PATH`（`":irb"`）として要求スクリプトの
+  スロットを流れるため、停止・VMクリーンアップ・UI復帰の経路は Script Mode と共通
+- `quit` / `exit` / Ctrl-D で終了、Supervisorに通知
+- 詳細は [IRB.md](IRB.md)
 
 ## 実行フロー
 
@@ -127,7 +136,7 @@ Supervisor に通知 (EVT_TASK_COMPLETED)
 
 | ファイル | 説明 |
 |---------|------|
-| `mrblib/main_task_base.rb` | メインの Ruby コード（UI/Script モード分岐） |
+| `mrblib/main_task_base.rb` | メインの Ruby コード（UI/Script/irb モード分岐） |
 | `board_config.rb.in` | ボード設定テンプレート |
 
 **注意**: `mrblib/main_task.rb` は CMake によって自動生成されるファイル。直接編集しないこと。
@@ -140,6 +149,9 @@ void supervisor_init(void);
 
 // スクリプトリクエスト（NULLでUIモード）
 bool supervisor_request_script(const char *script_path);
+
+// irb セッションのリクエスト（= supervisor_request_script(SUPERVISOR_IRB_PATH)）
+bool supervisor_request_irb(void);
 
 // スクリプト停止
 bool supervisor_stop_script(void);
@@ -191,6 +203,13 @@ sm.set_ready
 
 # シリアルコンソール入力チェック
 script = sm.check_console  # => "/sd/app.rb" or nil
+
+# irb モードで起動されたか（get_autorun_script は irb のとき nil を返す）
+sm.irb_requested?  # => true / false
+
+# irb セッションの開始 / 終了（コンソールの受け渡し。ensure で必ず irb_end）
+sm.irb_begin
+sm.irb_end
 ```
 
 ## VMクリーンアップ処理

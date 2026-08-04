@@ -332,9 +332,11 @@ M5Stack以外のボード（Freenove等）では、USB-MIDIを使用するため
 - エコーの `printf()` は CDC 書き込み（`tud_cdc_n_write_flush`）になるため、
   MIDI TX タスクと同様に **tud_task と同じ Core 1 に固定**する
 
-コマンド: `load <path>`（キュー経由で Ruby に渡す）/ `stop` / `heap` / `restart` / `help`。
+コマンド: `load <path>`（キュー経由で Ruby に渡す）/ `irb` / `stop` / `heap` /
+`restart` / `help`。
 `load` の実ロードは PicoRuby VFS が必要なため Ruby 側で行う（C の `fopen` は不可）。
-`stop` だけは C 側で完結させる（`supervisor_stop_script()` を直接呼ぶ）。スクリプト
+`stop` と `irb` だけは C 側で完結させる（`supervisor_stop_script()` /
+`supervisor_request_irb()` を直接呼ぶ）。スクリプト
 実行中は Ruby 側がコマンドキューを読まないため、キューに積んでも実行中の
 スクリプトには届かないから。
 
@@ -443,6 +445,26 @@ R2P2 と同じ PicoModem プロトコル（RBTP）で、ブラウザ側は upstr
   （CDC は TinyUSB 直、それ以外は line-ending を一時的に LF へ）
 - セッション中は `esp_log_level_set("*", ESP_LOG_NONE)` でログを抑止
 - 動作確認済みは `midi_device`（CDC）モードのみ。スクリプト実行中は不可
+
+### irb（インタラクティブモード / 2026-08-04）
+
+詳細は [docs/IRB.md](docs/IRB.md) を参照。
+
+コンソール（`midi_device` モードでは USB CDC）から `irb` と打つと、Supervisor が
+**SD カードのスクリプトと同じ扱い**で irb セッションを起動する（専用の PicoRuby
+タスク + まっさらな VM、終了したら UI モードへ復帰）。1 行ごとの評価は
+`picoruby-shell` の `Shell#start(:irb)` が **PicoRuby の Sandbox** で行う
+（`Kernel.load` のスクリプト実行と同じ機構）。
+
+- 擬似スクリプトパス `SUPERVISOR_IRB_PATH`（`":irb"`）で要求スクリプトのスロットを
+  流れるので、停止 / VM クリーンアップ / UI 復帰の経路は分岐なしで再利用される
+- `irb` コマンドは `stop` と同様 C 側で完結（`supervisor_request_irb()`）
+- セッション中はコンソールタスクが `CONSOLE_MODE_IRB` になり、行編集をやめて
+  バイトを `picorb_hal_stdin_push()` へ流す（行編集は Ruby 側の `Editor::Line`）。
+  host / serial モードでは picoruby-machine の `stdin_reader` と取り合いになるため
+  コンソールタスクは stdin を読まない
+- 端末モードは cooked のまま（Ctrl-C / Ctrl-Z がシグナルとして届くため）
+- irb は `stop_requested?` を見ないので、UI の Stop は 5 秒タイムアウト後の強制停止
 
 ### スクリプトロードとESP32リスタート
 
