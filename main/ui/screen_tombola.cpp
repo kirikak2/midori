@@ -1,5 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_tombola.h"
+#include "ui_ppa.h"
 #include <M5Unified.h>
 #include <cmath>
 #include <cstring>
@@ -850,7 +851,12 @@ void ScreenTombola::paintFrame(bool fullRepaint)
             eraseFrame(m_sprite, BOX_X, BOX_Y);
         }
         renderFrame(m_sprite, BOX_X, BOX_Y);
-        m_sprite->pushSprite(BOX_X, BOX_Y);
+        // Tab5 can hand the blit to the P4's pixel accelerator; everywhere
+        // else (and if it is unavailable) this falls back to the per-line
+        // memcpy inside pushSprite.
+        if (!ui_ppa::blit(m_sprite, BOX_X, BOX_Y)) {
+            m_sprite->pushSprite(BOX_X, BOX_Y);
+        }
         return;
     }
 

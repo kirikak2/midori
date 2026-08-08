@@ -165,6 +165,68 @@ t.show       # Tombola 画面へ切り替え
 - 停止中は「表示に出る値」が前フレームと同じなら描画自体を飛ばす。止めた
   Tombola 画面を開きっぱなしにしてもコストがかからない
 
+### PPA によるブリット（Tab5 / ESP32-P4 のみ）
+
+Tab5 のパネルは**フレームバッファパネル**で、LovyanGFX は MIPI-DSI が
+そのまま走査する PSRAM 上のバッファへ直接描く。バス転送は無い代わりに、
+`pushSprite()` は [Panel_FrameBufferBase::writeImage()](../managed_components/m5stack__m5gfx/src/lgfx/v1/panel/Panel_FrameBufferBase.cpp)
+でのコピーになる。しかも**回転が入っているので `memcpy` の速い経路にすら乗らない**
+（`writeImage()` が `memcpy` を使うのは回転 0 のときだけで、それ以外は 1 画素ずつ
+回転付き `pixelcopy` を通る）。プレイエリアなら毎フレーム 384,400 画素。
+
+ESP32-P4 の PPA（Pixel-Processing Accelerator）はこの「回転付き 2D ブロック
+コピー」をそのまま DMA で行える。[main/ui/ui_ppa.cpp](../main/ui/ui_ppa.cpp) が
+`ppa_do_scale_rotate_mirror()` を等倍で呼ぶ。
+
+- PPA ができるのは**塗りつぶし / ブリット / 拡大・回転・ミラー**だけ。線や円は
+  描けないので、スプライトへの描画自体は今までどおり LovyanGFX が行う
+- フレームバッファのアドレスは `Panel_DSI::config_detail().buffer`（public）から
+  取る。`esp_lcd_dpi_panel_get_frame_buffer()` に渡したのと同じポインタ
+
+**座標系に注意（実際にこれで画面が化けた）**: フレームバッファは
+`config().panel_width/panel_height` = **720x1280 の縦長**で、1280x720 は
+`setRotation(3)` 後の論理座標。`M5.Lcd.width()` を `out.pic_w` に渡すと
+存在しないストライドでアドレス計算することになり、全面的に破綻する。
+
+論理座標のブロックをパネル座標へ写す対応（LovyanGFX の
+`drawPixelPreclipped()` の式を角に適用して導出。残る画素単位の項がちょうど
+PPA の**反時計回り**回転になる）:
+
+| rotation | パネル上の原点 | PPA の角度 |
+|---|---|---|
+| 0 | (x, y) | 0 |
+| 1 | (hl - y - h, x) | 270 |
+| 2 | (wl - x - w, hl - y - h) | 180 |
+| 3 | (y, wl - x - w) | 90 |
+
+wl / hl は論理側の幅・高さ。`offset_rotation != 0` の場合は
+`_internal_rotation` が `getRotation()` と一致しなくなるのでフォールバックする。
+
+**バイト順にも注意**: スプライトは `setColorDepth(16)` = `rgb565_2Byte`
+（バイトスワップ有り）、Tab5 のパネルは `rgb565_nonswapped`。PPA は生の画素を
+運ぶだけなので、両者の depth が違うときは `op.byte_swap` を立てる。
+- キャッシュの同期は **PPA ドライバがやってくれる**（入力を writeback、出力を
+  invalidate）。アプリ側で `esp_cache_msync()` を呼ぶ必要はない。ただし
+  **出力バッファのアドレスとサイズ**はキャッシュライン境界に揃っている必要が
+  ある（1280x720x2 = 1,843,200 バイトなので条件は満たす）
+- 使えない場合（P4 以外、パネルが Panel_DSI でない、クライアント確保に失敗）は
+  `false` を返して `pushSprite()` にフォールバックする
+- **トランザクションプールは 4 個**。1 個では足りない。`UIManager::update()` は
+  同じ周回で `screen->update()` と `screen->draw()` を両方呼ぶことがあり、
+  ブリットが数µs 間隔で連続する。さらにドライバの ISR は
+  「**セマフォを渡してからプールへ返す**」順序（`ppa_transaction_done_cb`）で、
+  借りる側は `xQueueReceive(..., 0)` のタイムアウト 0。プールが 1 個だと
+  2 回目が空振りして `ESP_FAIL` になる
+- エラーの扱いを 2 段に分ける。`ESP_ERR_INVALID_ARG`（アラインメントやジオメトリ）は
+  何度やっても通らないので恒久フォールバック。それ以外（プール枯渇など）は
+  **そのフレームだけ** `pushSprite()` に落ちて、次のフレームでまた PPA を試す。
+  一時的な失敗で加速を永久に手放さないため
+
+**注意**: `esp_driver_ppa` を `PRIV_REQUIRES` に足す条件は
+`CONFIG_IDF_TARGET_ESP32P4` ではなく **`IDF_TARGET`** で書くこと。コンポーネントの
+依存関係は `CONFIG_*` がまだ存在しない早期展開パスで集められるため、`CONFIG_`
+での分岐は黙って常に false になる。
+
 ## ロータリーエンコーダから操作する
 
 [examples/tombola.rb](../examples/tombola.rb) は DFRobot Visual Rotary Encoder

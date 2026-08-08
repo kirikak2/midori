@@ -21,6 +21,7 @@ elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB
         "lcd_console/lcd_console.cpp"
         "ui/ui_common.cpp"
         "ui/ui_manager.cpp"
+        "ui/ui_ppa.cpp"
         "ui/screen_log.cpp"
         "ui/screen_main.cpp"
         "ui/screen_pad.cpp"
@@ -39,6 +40,14 @@ endif()
 # so main only needs the legacy 'driver' component for whatever else it
 # might pull in.
 set(PRIV_REQUIRES_LIST driver esp_tinyusb)
+
+# ui/ui_ppa.cpp drives the ESP32-P4's pixel accelerator (Tab5 only).
+# Keyed off IDF_TARGET, not CONFIG_IDF_TARGET_ESP32P4: requirements are
+# collected in an early expansion pass where the CONFIG_ variables do not
+# exist yet, so a CONFIG_ conditional here would silently never fire.
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND PRIV_REQUIRES_LIST esp_driver_ppa)
+endif()
 
 idf_component_register(
     SRCS ${SRCS}
