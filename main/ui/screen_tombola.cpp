@@ -39,8 +39,16 @@ static constexpr float GRAVITY_UNIT = 4.0f;
 static constexpr float MAX_SPEED = 8.0f;
 
 // Impact speed (circumradii/s) mapped to the bottom / top of velocity_range.
-static constexpr float IMPACT_SOFT = 0.2f;
-static constexpr float IMPACT_HARD = 4.0f;
+//
+// Contacts below IMPACT_MIN make no note at all. Wall contacts are dominated
+// by grazes: simulating the default patch shows half of them below 0.15 and
+// 91% below 0.5, because a ball settling into a corner touches the wall over
+// and over with an ever smaller normal speed. Those are not hits, and letting
+// them through at velocity_range's floor is what made a resting ball sound
+// exactly as loud as a real bounce. IMPACT_HARD is where the mapping
+// saturates; 99.9% of impacts land under 3.0.
+static constexpr float IMPACT_MIN  = 0.15f;
+static constexpr float IMPACT_HARD = 3.0f;
 
 // A stalled UI task must not make the simulation explode on the next step.
 static constexpr float MAX_DT = 0.05f;
@@ -185,7 +193,7 @@ void modelDefaults()
     m.scaleLen = (int)sizeof(DEFAULT_SCALE);
     m.channel = 9;
     m.durationMs = 120;
-    m.velMin = 40;
+    m.velMin = 16;   // The softest audible bounce, not a floor under every graze
     m.velMax = 127;
     m.retriggerMs = 30;
     m.maxVoices = 8;
@@ -409,7 +417,10 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
         m.flashSide = worstSide;
         m.flashUntilUs = nowUs + FLASH_US;
 
-        // Note emission
+        // Note emission. A contact too soft to be a hit is still resolved
+        // above -- it just does not play.
+        if (vn < IMPACT_MIN) continue;
+
         if (m.retriggerMs > 0 &&
             b.lastHitUs != 0 &&
             (nowUs - b.lastHitUs) < (int64_t)m.retriggerMs * 1000) {
@@ -429,7 +440,7 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
             continue;
         }
 
-        float t = (vn - IMPACT_SOFT) / (IMPACT_HARD - IMPACT_SOFT);
+        float t = (vn - IMPACT_MIN) / (IMPACT_HARD - IMPACT_MIN);
         t = clampFloat(t, 0.0f, 1.0f);
         int vel = m.velMin + (int)(t * (float)(m.velMax - m.velMin));
         vel = clampInt((int)((float)vel * b.velScale), 1, 127);
