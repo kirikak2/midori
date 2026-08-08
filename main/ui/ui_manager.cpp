@@ -41,6 +41,7 @@ UIManager::UIManager()
     }
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
         m_touchStates[i].isPressed = false;
+        m_touchStates[i].inContent = false;
         m_touchStates[i].x = 0;
         m_touchStates[i].y = 0;
     }
@@ -193,6 +194,7 @@ void UIManager::handleTouch()
         if (!m_touchStates[touchId].isPressed) {
             // New touch start
             m_touchStates[touchId].isPressed = true;
+            m_touchStates[touchId].inContent = false;
             m_touchStates[touchId].x = x;
             m_touchStates[touchId].y = y;
 
@@ -214,31 +216,34 @@ void UIManager::handleTouch()
                 }
             } else {
                 // Content area - pass to current screen with touch ID
+                m_touchStates[touchId].inContent = true;
                 if (m_screens[m_currentIndex]) {
                     m_screens[m_currentIndex]->onTouch(touchId, x, y, true);
                 }
             }
         } else {
-            // Touch point moved - update position
+            // Touch point moved
             m_touchStates[touchId].x = x;
             m_touchStates[touchId].y = y;
+            if (m_touchStates[touchId].inContent && m_screens[m_currentIndex]) {
+                m_screens[m_currentIndex]->onTouchMove(touchId, x, y);
+            }
         }
     }
 
     // Check for released touch points
     for (int touchId = 0; touchId < MAX_TOUCH_POINTS; touchId++) {
         if (m_touchStates[touchId].isPressed && !currentlyPressed[touchId]) {
-            // Touch released
-            int y = m_touchStates[touchId].y;
-
-            // Only send release to content area touches
-            if (y >= UI_STATUS_BAR_HEIGHT && y < UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT) {
-                if (m_screens[m_currentIndex]) {
-                    m_screens[m_currentIndex]->onTouch(touchId, m_touchStates[touchId].x, m_touchStates[touchId].y, false);
-                }
+            // Touch released. Keyed off where the press landed, not where the
+            // finger ended up: a drag that wanders onto the nav bar before
+            // lifting still has to reach the screen, or it never learns the
+            // touch ended (a pad would stay stuck down, a drag stuck active).
+            if (m_touchStates[touchId].inContent && m_screens[m_currentIndex]) {
+                m_screens[m_currentIndex]->onTouch(touchId, m_touchStates[touchId].x, m_touchStates[touchId].y, false);
             }
 
             m_touchStates[touchId].isPressed = false;
+            m_touchStates[touchId].inContent = false;
         }
     }
 }

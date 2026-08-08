@@ -32,6 +32,10 @@ public:
     // pressed: true for touch start, false for release
     virtual void onTouch(int touchId, int x, int y, bool pressed) = 0;
 
+    // Called while a touch that started in the content area is dragged.
+    // Screens that only care about taps can ignore it.
+    virtual void onTouchMove(int touchId, int x, int y) { (void)touchId; (void)x; (void)y; }
+
     // Called for center nav button press (screen-specific action)
     virtual void onNavCenter() {}
 
@@ -124,6 +128,9 @@ private:
     // Multi-touch state tracking
     struct TouchState {
         bool isPressed;
+        bool inContent;   // Press landed in the content area, so moves and the
+                          // release belong to the screen even if the finger
+                          // later strays onto the nav bar
         int x;
         int y;
     };
