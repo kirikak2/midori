@@ -284,6 +284,67 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
 
         b.x += b.vx * dt;
         b.y += b.vy * dt;
+    }
+
+    const float bounce = clampFloat(m.bounce, 0.0f, 1.2f);
+
+    // Ball-to-ball collisions. Without these, balls that end up in the same
+    // corner simply overlap and stop influencing each other, and the pattern
+    // goes dead. Equal masses, same restitution as the walls, and no notes --
+    // only the polygon is the instrument.
+    const float contact = 2.0f * ballR;
+    const float contactSq = contact * contact;
+    for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
+        Ball& a = m.balls[i];
+        if (!a.active) continue;
+
+        for (int j = i + 1; j < UI_TOMBOLA_MAX_BALLS; j++) {
+            Ball& b2 = m.balls[j];
+            if (!b2.active) continue;
+
+            float dx = b2.x - a.x;
+            float dy = b2.y - a.y;
+            float d2 = dx * dx + dy * dy;
+            if (d2 >= contactSq) continue;
+
+            float nx, ny, dist;
+            if (d2 > 1e-12f) {
+                dist = sqrtf(d2);
+                nx = dx / dist;
+                ny = dy / dist;
+            } else {
+                // Exactly coincident (two balls spawned on the same spot):
+                // pick an axis rather than dividing by zero.
+                dist = 0.0f;
+                nx = 1.0f;
+                ny = 0.0f;
+            }
+
+            // Separate them first, half each, so the next step does not see
+            // the same overlap again.
+            float overlap = (contact - dist) * 0.5f;
+            a.x -= nx * overlap;
+            a.y -= ny * overlap;
+            b2.x += nx * overlap;
+            b2.y += ny * overlap;
+
+            float rvx = b2.vx - a.vx;
+            float rvy = b2.vy - a.vy;
+            float vn = rvx * nx + rvy * ny;
+            if (vn >= 0.0f) continue;   // Already separating
+
+            // Equal masses: each takes half of the impulse.
+            float impulse = -(1.0f + bounce) * vn * 0.5f;
+            a.vx -= impulse * nx;
+            a.vy -= impulse * ny;
+            b2.vx += impulse * nx;
+            b2.vy += impulse * ny;
+        }
+    }
+
+    for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
+        Ball& b = m.balls[i];
+        if (!b.active) continue;
 
         // A ball closer to the centre than the wall cannot be touching any of
         // them, because p.n <= |p| for a unit normal. Most balls are in flight
@@ -331,7 +392,6 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
         float relTx = relVx - relNx;
         float relTy = relVy - relNy;
 
-        float bounce = clampFloat(m.bounce, 0.0f, 1.2f);
         float friction = clampFloat(m.friction, 0.0f, 1.0f);
         float spin = clampFloat(m.spinTransfer, 0.0f, 1.0f);
 
