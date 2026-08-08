@@ -55,3 +55,15 @@ idf_component_register(
     REQUIRES picoruby-esp32
     PRIV_REQUIRES ${PRIV_REQUIRES_LIST}
 )
+
+# Let GCC emit the FPU's sqrt instruction instead of calling libm's sqrtf,
+# which it otherwise cannot do because the default -fmath-errno requires
+# sqrtf to set errno for negative inputs. Nothing here reads errno after a
+# math call. Measured on ui/screen_tombola.cpp: 4 sqrtf calls become fsqrt.s,
+# and the object shrinks slightly.
+#
+# Deliberately NOT -ffast-math. Measuring the same file showed it buys nothing
+# beyond this flag -- the remaining library calls are cosf/sinf, which it does
+# not inline either -- while it also implies -ffinite-math-only and, at link
+# time, can switch the FPU to flush-to-zero for the whole program.
+target_compile_options(${COMPONENT_LIB} PRIVATE -fno-math-errno)
