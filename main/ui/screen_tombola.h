@@ -22,6 +22,7 @@ public:
     void update() override;
     void draw() override;
     void onTouch(int touchId, int x, int y, bool pressed) override;
+    void onTouchMove(int touchId, int x, int y) override;
     void onNavCenter() override;
     const char* getTitle() override;
     const char* getNavCenterLabel() override;
@@ -48,6 +49,17 @@ private:
     bool m_hasDrawnFrame;
 
     int64_t m_lastDrawUs;
+
+    // Drag-to-spin. Only the first finger to land steers; the rest are
+    // ignored. A touch that lifts without moving past TAP_SLOP is treated as
+    // a tap and spawns a ball instead, which is why the decision waits for
+    // the release.
+    int m_dragTouch;      // Touch id currently steering, -1 when idle
+    int m_dragLastX;      // Previous position, for the per-move delta
+    int m_dragLastY;
+    int m_dragStartX;
+    int m_dragStartY;
+    int m_dragMoved;      // Furthest manhattan distance from the start point
 
     // Everything the frame actually shows. While the sequencer is stopped
     // nothing moves, so an unchanged key means the repaint can be skipped

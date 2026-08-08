@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -55,6 +56,12 @@ static constexpr float MAX_DT = 0.05f;
 
 static constexpr int64_t FLASH_US = 90000;  // Hit highlight duration
 
+// Ceiling on how fast a finger may spin the polygon (rad/s). A flick can still
+// fling the balls -- the wall drives them through spin_transfer, which is the
+// point -- but not at a speed the collision response cannot resolve.
+static constexpr float MAX_DRAG_OMEGA = 12.0f;
+
+
 // Frame pacing. Pushing the play area is the dominant cost of this screen
 // (620x620x16bpp is 768KB a frame on Tab5, and CoreS3 pushes its 65KB over
 // SPI), and it buys little above 30fps for balls this size. Physics keeps its
@@ -75,6 +82,18 @@ static constexpr int BOX_SIZE =
     (UI_SCREEN_WIDTH < UI_CONTENT_HEIGHT) ? UI_SCREEN_WIDTH : UI_CONTENT_HEIGHT;
 static constexpr int BOX_X = (UI_SCREEN_WIDTH - BOX_SIZE) / 2;
 static constexpr int BOX_Y = UI_CONTENT_Y + (UI_CONTENT_HEIGHT - BOX_SIZE) / 2;
+// How far a finger may wander and still count as a tap rather than a drag
+// (pixels). Scaled to the play area so it means the same thing on both panels.
+static constexpr int TAP_SLOP = (BOX_SIZE / 40 > 6) ? BOX_SIZE / 40 : 6;
+
+// Floor on the finger's distance from the centre when converting a drag into
+// rotation, as a fraction of the radius. The conversion divides by that
+// distance squared, so without a floor a finger a few pixels off centre would
+// swing the polygon through hundreds of degrees: at 5px out, a 20px move is
+// 229 degrees. Inside the floor the rotation tapers to nothing at the exact
+// centre instead, which is the only stable thing it can do there.
+static constexpr float DRAG_MIN_RADIUS = 0.2f;
+
 
 // ---------------------------------------------------------------------------
 // Model
@@ -135,6 +154,12 @@ struct Model {
     Ball balls[UI_TOMBOLA_MAX_BALLS];
     int flashSide;
     int64_t flashUntilUs;
+
+    // Touch drag. While a finger is down it drives the rotation outright and
+    // the rotation parameter is ignored; dragRadians is what the finger has
+    // asked for since the last step, consumed by advanceAngle().
+    bool dragActive;
+    float dragRadians;
 };
 
 Model g_model;
@@ -205,6 +230,8 @@ void modelDefaults()
     m.running = false;
     m.angle = 0.0f;
     m.lastStepUs = 0;
+    m.dragActive = false;
+    m.dragRadians = 0.0f;
     m.flashSide = -1;
     m.flashUntilUs = 0;
 }
@@ -231,6 +258,30 @@ int spawnBall(float nx, float ny, int note, int channel, uint16_t color, float v
     return -1;
 }
 
+// Advances m.angle for this step and returns the angular velocity it moved at,
+// which the wall response needs. Caller holds the lock.
+//
+// A finger on the screen takes over completely: the polygon turns by exactly
+// what the drag asked for, so holding still holds the polygon still, and the
+// rotation parameter does not creep underneath. Releasing simply stops
+// overriding, and the parameter takes over again from wherever it was left.
+float advanceAngle(Model& m, float dt)
+{
+    float omega;
+    if (m.dragActive) {
+        omega = (dt > 0.0f) ? (m.dragRadians / dt) : 0.0f;
+        omega = clampFloat(omega, -MAX_DRAG_OMEGA, MAX_DRAG_OMEGA);
+        m.dragRadians = 0.0f;
+    } else {
+        omega = m.rotationRpm * 2.0f * (float)M_PI / 60.0f;
+    }
+
+    m.angle += omega * dt;
+    if (m.angle > 2.0f * (float)M_PI)  m.angle -= 2.0f * (float)M_PI;
+    if (m.angle < -2.0f * (float)M_PI) m.angle += 2.0f * (float)M_PI;
+    return omega;
+}
+
 // One physics step. Caller holds the lock; hits are returned rather than
 // sounded here so the MIDI writes happen outside the critical section.
 void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
@@ -239,10 +290,7 @@ void stepModel(float dt, int64_t nowUs, Hit* hits, int* hitCount)
     *hitCount = 0;
 
     const int sides = clampInt(m.sides, UI_TOMBOLA_MIN_SIDES, UI_TOMBOLA_MAX_SIDES);
-    const float omega = m.rotationRpm * 2.0f * (float)M_PI / 60.0f;  // rad/s
-    m.angle += omega * dt;
-    if (m.angle > 2.0f * (float)M_PI)  m.angle -= 2.0f * (float)M_PI;
-    if (m.angle < -2.0f * (float)M_PI) m.angle += 2.0f * (float)M_PI;
+    const float omega = advanceAngle(m, dt);   // rad/s
 
     const float step = 2.0f * (float)M_PI / (float)sides;
     const float apothem = cosf((float)M_PI / (float)sides);
@@ -498,7 +546,9 @@ extern "C" bool ui_tombola_running(void)
 
 extern "C" void ui_tombola_tick(void)
 {
-    if (!g_model.running) return;
+    // A drag turns the polygon even while the sequencer is stopped, so the
+    // finger is never ignored.
+    if (!g_model.running && !g_model.dragActive) return;
 
     int64_t now = esp_timer_get_time();
     if (g_model.lastStepUs == 0) {
@@ -516,7 +566,12 @@ extern "C" void ui_tombola_tick(void)
     int transport, duration;
 
     modelLock();
-    stepModel(dt, now, hits, &hitCount);
+    if (g_model.running) {
+        stepModel(dt, now, hits, &hitCount);
+    } else {
+        // Stopped: turn the polygon with the finger, leave the balls alone.
+        advanceAngle(g_model, dt);
+    }
     sound = g_model.sound;
     notify = g_model.notify;
     transport = g_model.transport;
@@ -663,6 +718,38 @@ extern "C" void ui_tombola_clear_balls(void)
     modelUnlock();
 }
 
+// Drag control, used by the screen below. Not part of the ui_tombola_* C API:
+// this is a gesture on the Tombola screen, not something a script drives.
+namespace {
+
+void dragBegin(int64_t nowUs)
+{
+    modelLock();
+    g_model.dragActive = true;
+    g_model.dragRadians = 0.0f;
+    // Start the clock here, so the first step of the drag measures the finger's
+    // movement over a real frame instead of however long the screen sat idle.
+    g_model.lastStepUs = nowUs;
+    modelUnlock();
+}
+
+void dragRotate(float radians)
+{
+    modelLock();
+    if (g_model.dragActive) g_model.dragRadians += radians;
+    modelUnlock();
+}
+
+void dragEnd()
+{
+    modelLock();
+    g_model.dragActive = false;
+    g_model.dragRadians = 0.0f;
+    modelUnlock();
+}
+
+}  // namespace
+
 extern "C" int ui_tombola_ball_count(void)
 {
     int count = 0;
@@ -684,6 +771,12 @@ ScreenTombola::ScreenTombola()
     , m_drawnRadius(0.0f)
     , m_hasDrawnFrame(false)
     , m_lastDrawUs(0)
+    , m_dragTouch(-1)
+    , m_dragLastX(0)
+    , m_dragLastY(0)
+    , m_dragStartX(0)
+    , m_dragStartY(0)
+    , m_dragMoved(0)
 {
     memset(&m_lastKey, 0, sizeof(m_lastKey));
     // Runs during static init, before app_main: the model must be usable by
@@ -739,6 +832,11 @@ void ScreenTombola::enter()
 void ScreenTombola::leave()
 {
     m_isActive = false;
+    if (m_dragTouch >= 0) {
+        // The screen is going away mid-drag; the release will never arrive.
+        m_dragTouch = -1;
+        dragEnd();
+    }
     // The sequencer keeps running on purpose: ui_tombola_tick() is driven from
     // ui_update(), so a patch does not fall silent while the user looks at the
     // Log or MIDI Info screen. The sprite is kept too -- re-entering this
@@ -757,22 +855,82 @@ void ScreenTombola::onNavCenter()
 
 void ScreenTombola::onTouch(int touchId, int x, int y, bool pressed)
 {
-    (void)touchId;
-    if (!pressed || !m_isActive) return;
-    if (!g_model.touchAdd) return;
+    if (!m_isActive) return;
+
+    if (pressed) {
+        if (m_dragTouch >= 0) return;   // Already dragging with another finger
+        m_dragTouch = touchId;
+        m_dragLastX = x;
+        m_dragLastY = y;
+        m_dragStartX = x;
+        m_dragStartY = y;
+        m_dragMoved = 0;
+        dragBegin(esp_timer_get_time());
+        return;
+    }
+
+    if (touchId != m_dragTouch) return;
+    m_dragTouch = -1;
+    dragEnd();
+
+    // A touch that never really moved was a tap, not a drag: drop a ball where
+    // it landed. Deciding on release is what lets the same finger do both.
+    if (m_dragMoved > TAP_SLOP || !g_model.touchAdd) return;
 
     int cx, cy;
     float radius;
     geometry(cx, cy, radius);
     if (radius <= 0.0f) return;
 
-    float nx = (float)(x - cx) / radius;
-    float ny = (float)(y - cy) / radius;
+    float nx = (float)(m_dragStartX - cx) / radius;
+    float ny = (float)(m_dragStartY - cy) / radius;
     if (sqrtf(nx * nx + ny * ny) > 0.7f) return;  // Outside: leave it alone
 
     modelLock();
     spawnBall(nx, ny, -1, -1, UI_COLOR_WHITE, 1.0f);
     modelUnlock();
+}
+
+void ScreenTombola::onTouchMove(int touchId, int x, int y)
+{
+    if (!m_isActive || touchId != m_dragTouch) return;
+
+    int dx = x - m_dragLastX;
+    int dy = y - m_dragLastY;
+    m_dragLastX = x;
+    m_dragLastY = y;
+
+    int moved = abs(x - m_dragStartX) + abs(y - m_dragStartY);
+    if (moved > m_dragMoved) m_dragMoved = moved;
+
+    int cx, cy;
+    float radius;
+    geometry(cx, cy, radius);
+    if (radius <= 0.0f) return;
+
+    // The polygon turns by exactly the angle the finger sweeps around the
+    // centre, so whatever is under the fingertip stays under it. This is
+    // d(atan2(py,px)) written out -- the cross product of the finger's offset
+    // with its movement, over its distance squared -- which is why the match is
+    // exact rather than approximate, at any distance and along any path.
+    //
+    // Grabbing further out therefore turns it less for the same travel, which
+    // is the fine-adjustment end of the gesture, and stirring in circles winds
+    // it round and round.
+    //
+    // With screen y growing downward, an increasing angle draws as clockwise
+    // (polygonPoint sweeps +x toward +y), so this reads as a real wheel: up on
+    // the left or down on the right is clockwise, left along the top or right
+    // along the bottom is counter-clockwise.
+    float px = (float)(x - cx);
+    float py = (float)(y - cy);
+
+    float r2 = px * px + py * py;
+    float minR = radius * DRAG_MIN_RADIUS;
+    float minR2 = minR * minR;
+    if (r2 < minR2) r2 = minR2;
+
+    dragRotate((px * (float)dy - py * (float)dx) / r2);
 }
 
 void ScreenTombola::geometry(int& cx, int& cy, float& radius)
