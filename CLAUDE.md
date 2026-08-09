@@ -580,6 +580,29 @@ UI.pad(1, label: "Faster") { t.rotation = t.rotation + 4 }
 
 サンプル: [examples/tombola.rb](examples/tombola.rb)
 
+## Tab5 の描画はキャッシュに残る（2026-08-10）
+
+Tab5 のパネルは**フレームバッファパネル**（`Panel_DSI` → `Panel_FrameBufferBase`）。
+LovyanGFX は CPU で**キャッシュされた write-back の PSRAM** に描き、MIPI-DSI は
+その PSRAM を DMA で走査する（キャッシュをスヌープしない）。
+
+`Panel_FrameBufferBase` は変更範囲を溜めて書き戻すが、**それを行うのは
+`display()` だけで、`endWrite()` は呼ばない**。したがって:
+
+```cpp
+M5.Lcd.display();   // ← 描いたら必ず呼ぶ。これが無いと画面に出ない
+```
+
+呼ばないと、描画はキャッシュラインがたまたま追い出されたときにしか画面へ
+届かない（順序も時刻も不定、小さい領域は永久に出ない）。症状は
+**「新しい絵と古い絵が混ざって画面が大きく乱れる」**。大きな塗りつぶしは
+互いを追い出すので目立たず、細い円弧や数文字の更新で一気に露呈する
+（2026-08-10 に Knobs 画面で発覚）。
+
+`UIManager::update()` の最後で 1 回呼んでいるので、通常の画面実装で個別に
+気にする必要はない。**UI タスクの update() 以外の経路で描く場合は自分で呼ぶこと。**
+CoreS3（SPI パネル）では `Panel_Device::display()` が空実装なので無害。
+
 ## Knobs 画面（2026-08-10）
 
 詳細は [docs/KNOBS.md](docs/KNOBS.md) を参照。

@@ -170,6 +170,26 @@ void UIManager::update()
         M5.Lcd.endWrite();
         m_needsRedraw = false;
     }
+
+    // Push this pass's drawing out of the CPU cache.
+    //
+    // Tab5's panel is a framebuffer panel: LovyanGFX draws with the CPU into
+    // cached write-back PSRAM, and the MIPI-DSI scans that memory out by DMA
+    // without snooping the cache. Panel_FrameBufferBase tracks what was
+    // modified and writes those lines back -- but only in display(), which
+    // endWrite() does not call. Nothing here called it, so drawing reached the
+    // panel only when a cache line happened to be evicted: in whatever order,
+    // whenever, and never at all for a region small enough to sit in cache
+    // undisturbed. The screen showed a mixture of new and stale pixels.
+    //
+    // Large fills hid this by evicting each other, which is why it only became
+    // obvious with the Knobs screen, whose drawing is a scatter of thin arcs
+    // and three-character numbers.
+    //
+    // display() writes back just the modified range, costs nothing when
+    // nothing was drawn, and is an empty no-op on CoreS3's SPI panel, where
+    // the pixels went out over the bus as they were drawn.
+    M5.Lcd.display();
 }
 
 void UIManager::handleTouch()

@@ -217,7 +217,9 @@ bool blit(LGFX_Sprite* sprite, int x, int y)
     //
     // display() flushes exactly the range that was drawn, which leaves nothing
     // dirty for the invalidate to lose. Flushing the whole band instead would
-    // also work but would walk 872KB of cache on every frame.
+    // also work but would walk 872KB of cache on every frame. UIManager::update()
+    // ends with the same call; this one is needed because the blit lands in the
+    // middle of the pass, before that one runs.
     M5.Lcd.display();
 
     op.rotation_angle = angle;
