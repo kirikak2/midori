@@ -90,6 +90,83 @@ void ui_pad_set_color(uint8_t index, pad_color_t color)
     (void)index; (void)color;
 }
 
+// Knob stubs - the knob grid lives in ui/screen_knob.cpp and its model in
+// ui/ui_common.cpp, neither of which is built for a board without a display.
+// Scripts that call UI.knob here get silent no-ops instead of a link error.
+
+void ui_knob_set_config(uint8_t bank, uint8_t index, const char *label,
+                        uint16_t color, float min, float max, float step,
+                        float value, uint8_t origin, float sensitivity,
+                        bool notify)
+{
+    (void)bank; (void)index; (void)label; (void)color; (void)min; (void)max;
+    (void)step; (void)value; (void)origin; (void)sensitivity; (void)notify;
+}
+
+void ui_knob_clear(uint8_t bank, uint8_t index)
+{
+    (void)bank; (void)index;
+}
+
+void ui_knob_clear_all(void)
+{
+}
+
+float ui_knob_get_value(uint8_t bank, uint8_t index)
+{
+    (void)bank; (void)index;
+    return 0.0f;
+}
+
+bool ui_knob_set_value(uint8_t bank, uint8_t index, float value, bool notify)
+{
+    (void)bank; (void)index; (void)value; (void)notify;
+    return false;
+}
+
+bool ui_knob_reset(uint8_t bank, uint8_t index)
+{
+    (void)bank; (void)index;
+    return false;
+}
+
+void ui_knob_notify_all(uint8_t bank)
+{
+    (void)bank;
+}
+
+void ui_knob_set_label(uint8_t bank, uint8_t index, const char *label)
+{
+    (void)bank; (void)index; (void)label;
+}
+
+void ui_knob_set_color(uint8_t bank, uint8_t index, uint16_t color)
+{
+    (void)bank; (void)index; (void)color;
+}
+
+const knob_config_t *ui_knob_get_config(uint8_t bank, uint8_t index)
+{
+    (void)bank; (void)index;
+    return NULL;
+}
+
+bool ui_knob_bank_in_use(uint8_t bank)
+{
+    (void)bank;
+    return false;
+}
+
+uint8_t ui_knob_get_bank(void)
+{
+    return 0;
+}
+
+void ui_knob_set_bank(uint8_t bank)
+{
+    (void)bank;
+}
+
 // Screen switching stubs - only one (nonexistent) screen on Freenove
 
 void ui_set_screen(ui_screen_index_t index)

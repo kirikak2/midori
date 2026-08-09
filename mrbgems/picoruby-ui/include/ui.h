@@ -27,6 +27,10 @@ typedef struct {
     uint8_t hit_side;    /* For tombola hit events */
     uint8_t hit_note;    /* For tombola hit events */
     uint8_t hit_velocity;/* For tombola hit events */
+    uint8_t knob_bank;   /* For knob events (0-based) */
+    uint8_t knob_index;  /* For knob change events (0-based) */
+    bool knob_final;     /* For knob change events */
+    float knob_value;    /* For knob change events */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -37,6 +41,8 @@ typedef struct {
 #define PICORUBY_UI_EVENT_SYNC_MODE     4
 #define PICORUBY_UI_EVENT_SCREEN_CHANGE 5
 #define PICORUBY_UI_EVENT_TOMBOLA_HIT   6
+#define PICORUBY_UI_EVENT_KNOB_CHANGE   7
+#define PICORUBY_UI_EVENT_KNOB_BANK     8
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -54,6 +60,26 @@ void picoruby_ui_pad_clear_all(void);
 bool picoruby_ui_pad_get_state(int index);
 void picoruby_ui_pad_set_label(int index, const char *label);
 void picoruby_ui_pad_set_color(int index, int color);
+
+/* Knobs.
+ * Continuous values the user turns with a finger. Nothing here sends MIDI:
+ * the Ruby block attached to the knob does that, as it does for pads.
+ * bank and index are 0-based. */
+void  picoruby_ui_knob_set(int bank, int index, const char *label, int color,
+                           float min, float max, float step, float value,
+                           int origin, float sensitivity, bool notify);
+void  picoruby_ui_knob_clear(int bank, int index);
+void  picoruby_ui_knob_clear_all(void);
+float picoruby_ui_knob_get_value(int bank, int index);
+bool  picoruby_ui_knob_set_value(int bank, int index, float value);
+bool  picoruby_ui_knob_reset(int bank, int index);
+void  picoruby_ui_knob_set_label(int bank, int index, const char *label);
+void  picoruby_ui_knob_set_color(int bank, int index, int color);
+bool  picoruby_ui_knob_assigned(int bank, int index);
+int   picoruby_ui_knob_count(void);
+int   picoruby_ui_knob_banks(void);
+int   picoruby_ui_knob_get_bank(void);
+void  picoruby_ui_knob_set_bank(int bank);
 
 /* Screen switching (diagnostic + control) */
 void picoruby_ui_set_screen(int index);

@@ -1,9 +1,12 @@
 #include "ui_common.h"
+#include "ui_manager.h"
 #include "screen_log.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
 #include <cstdarg>
+#include <cstdlib>
+#include <cmath>
 #include "esp_log.h"
 
 // Global pad configuration
@@ -308,6 +311,309 @@ int ui_event_available(void)
     int count = (s_event_head - s_event_tail + UI_EVENT_QUEUE_SIZE) % UI_EVENT_QUEUE_SIZE;
     portEXIT_CRITICAL(&s_event_mutex);
     return count;
+}
+
+void ui_knob_event_post(uint8_t bank, uint8_t index, float value, bool final)
+{
+    portENTER_CRITICAL(&s_event_mutex);
+
+    // Coalesce: a change already waiting for this knob is stale the moment a
+    // newer one arrives, so overwrite it in place. The queue therefore holds at
+    // most one entry per knob no matter how hard the knob is being turned, and
+    // a script that polls slowly simply sees fewer, later values.
+    for (int i = s_event_tail; i != s_event_head; i = (i + 1) % UI_EVENT_QUEUE_SIZE) {
+        if (s_event_queue[i].type == UI_EVENT_KNOB_CHANGE
+         && s_event_queue[i].data.knob.bank == bank
+         && s_event_queue[i].data.knob.index == index) {
+            s_event_queue[i].data.knob.value = value;
+            // Never downgrade: the release must still read as final even if a
+            // move event was the one sitting in the queue.
+            if (final) s_event_queue[i].data.knob.final = true;
+            portEXIT_CRITICAL(&s_event_mutex);
+            return;
+        }
+    }
+
+    int next_head = (s_event_head + 1) % UI_EVENT_QUEUE_SIZE;
+    if (next_head != s_event_tail) {
+        s_event_queue[s_event_head].type = UI_EVENT_KNOB_CHANGE;
+        s_event_queue[s_event_head].data.knob.bank = bank;
+        s_event_queue[s_event_head].data.knob.index = index;
+        s_event_queue[s_event_head].data.knob.value = value;
+        s_event_queue[s_event_head].data.knob.final = final;
+        s_event_head = next_head;
+    }
+    portEXIT_CRITICAL(&s_event_mutex);
+}
+
+// --- Knobs ----------------------------------------------------------------
+
+knob_config_t  g_knob_bank0[UI_KNOB_COUNT] = {};
+knob_config_t *g_knob_banks[UI_KNOB_BANKS] = { g_knob_bank0, NULL, NULL, NULL };
+
+static uint8_t  s_knob_bank = 0;
+static uint32_t s_knob_dirty = 0;     // Value moved: repaint the gauge delta
+static uint32_t s_knob_repaint = 0;   // Label/colour/range changed: repaint all
+
+#define UI_KNOB_DIRTY_ALL ((1u << UI_KNOB_COUNT) - 1u)
+
+// Returns the bank's table, allocating it on first write. Must not be called
+// from inside a critical section: calloc() can block, and interrupts are off in
+// there. Only the writers (PicoRuby) ever allocate, so publishing the pointer
+// afterwards is the only part that needs the lock.
+static knob_config_t* knob_bank_ensure(uint8_t bank)
+{
+    if (bank >= UI_KNOB_BANKS) return NULL;
+    if (g_knob_banks[bank]) return g_knob_banks[bank];
+
+    knob_config_t* table = (knob_config_t*)calloc(UI_KNOB_COUNT, sizeof(knob_config_t));
+    if (!table) {
+        ESP_LOGE("UI_KNOB", "Failed to allocate knob bank %d", bank + 1);
+        return NULL;
+    }
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    if (g_knob_banks[bank] == NULL) {
+        g_knob_banks[bank] = table;
+        table = NULL;
+    }
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    free(table);   // Lost a race with another writer; keep the published one
+    return g_knob_banks[bank];
+}
+
+static knob_config_t* knob_at(uint8_t bank, uint8_t index)
+{
+    if (bank >= UI_KNOB_BANKS || index >= UI_KNOB_COUNT) return NULL;
+    knob_config_t* table = g_knob_banks[bank];
+    return table ? &table[index] : NULL;
+}
+
+// Clamp to the knob's range, then snap to its step. Both are applied here and
+// nowhere else, so "the value changed" means the same thing to the display, to
+// the event queue and to the Ruby block.
+static float knob_quantize(const knob_config_t* k, float value)
+{
+    float lo = k->min;
+    float hi = k->max;
+    if (hi < lo) { float t = lo; lo = hi; hi = t; }
+
+    if (k->step > 0.0f) {
+        value = lo + roundf((value - lo) / k->step) * k->step;
+    }
+    if (value < lo) value = lo;
+    if (value > hi) value = hi;
+    return value;
+}
+
+void ui_knob_mark_dirty(uint8_t index)
+{
+    if (index >= UI_KNOB_COUNT) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    s_knob_dirty |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+uint32_t ui_knob_take_dirty(void)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+    uint32_t mask = s_knob_dirty;
+    s_knob_dirty = 0;
+    portEXIT_CRITICAL(&s_ui_mutex);
+    return mask;
+}
+
+void ui_knob_mark_repaint(uint8_t index)
+{
+    if (index >= UI_KNOB_COUNT) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    s_knob_repaint |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+uint32_t ui_knob_take_repaint(void)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+    uint32_t mask = s_knob_repaint;
+    s_knob_repaint = 0;
+    portEXIT_CRITICAL(&s_ui_mutex);
+    return mask;
+}
+
+void ui_knob_set_config(uint8_t bank, uint8_t index, const char* label,
+                        uint16_t color, float min, float max, float step,
+                        float value, uint8_t origin, float sensitivity,
+                        bool notify)
+{
+    if (index >= UI_KNOB_COUNT) return;
+    knob_config_t* table = knob_bank_ensure(bank);
+    if (!table) return;
+
+    // Built outside the lock so no floating point runs with interrupts off.
+    knob_config_t fresh = {};
+    fresh.assigned = true;
+    if (label) {
+        strncpy(fresh.label, label, sizeof(fresh.label) - 1);
+    }
+    fresh.color = color;
+    // Normalized here so nothing downstream has to think about it: the gauge
+    // divides by the span, and the drag clamps against both ends.
+    if (max < min) { float t = min; min = max; max = t; }
+    fresh.min = min;
+    fresh.max = (max == min) ? min + 1.0f : max;   // Keep the sweep divisible
+    fresh.step = (step < 0.0f) ? 0.0f : step;
+    fresh.origin = (origin == KNOB_ORIGIN_CENTER) ? KNOB_ORIGIN_CENTER : KNOB_ORIGIN_MIN;
+    fresh.sensitivity = (sensitivity > 0.0f) ? sensitivity : 1.0f;
+    fresh.notify = notify;
+    fresh.value = knob_quantize(&fresh, value);
+    fresh.initial = fresh.value;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    table[index] = fresh;
+    if (bank == s_knob_bank) s_knob_repaint |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+void ui_knob_clear(uint8_t bank, uint8_t index)
+{
+    knob_config_t* k = knob_at(bank, index);
+    if (!k) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    memset(k, 0, sizeof(*k));
+    if (bank == s_knob_bank) s_knob_repaint |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+void ui_knob_clear_all(void)
+{
+    // Collect the allocated tables under the lock, free them outside it.
+    knob_config_t* freeing[UI_KNOB_BANKS] = {};
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    memset(g_knob_bank0, 0, sizeof(g_knob_bank0));
+    for (int b = 1; b < UI_KNOB_BANKS; b++) {
+        freeing[b] = g_knob_banks[b];
+        g_knob_banks[b] = NULL;
+    }
+    s_knob_bank = 0;
+    s_knob_repaint = UI_KNOB_DIRTY_ALL;
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    for (int b = 1; b < UI_KNOB_BANKS; b++) {
+        free(freeing[b]);
+    }
+}
+
+float ui_knob_get_value(uint8_t bank, uint8_t index)
+{
+    const knob_config_t* k = knob_at(bank, index);
+    return k ? k->value : 0.0f;
+}
+
+bool ui_knob_set_value(uint8_t bank, uint8_t index, float value, bool notify)
+{
+    knob_config_t* k = knob_at(bank, index);
+    if (!k || !k->assigned) return false;
+
+    float quantized = knob_quantize(k, value);
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    bool changed = (quantized != k->value);
+    if (changed) {
+        k->value = quantized;
+        if (bank == s_knob_bank) s_knob_dirty |= (1u << index);
+    }
+    bool wants_event = changed && notify && k->notify;
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    if (wants_event) {
+        ui_knob_event_post(bank, index, quantized, false);
+    }
+    return changed;
+}
+
+bool ui_knob_reset(uint8_t bank, uint8_t index)
+{
+    const knob_config_t* k = knob_at(bank, index);
+    if (!k) return false;
+    return ui_knob_set_value(bank, index, k->initial, true);
+}
+
+void ui_knob_notify_all(uint8_t bank)
+{
+    for (uint8_t i = 0; i < UI_KNOB_COUNT; i++) {
+        const knob_config_t* k = knob_at(bank, i);
+        if (k && k->assigned && k->notify) {
+            ui_knob_event_post(bank, i, k->value, true);
+        }
+    }
+}
+
+void ui_knob_set_label(uint8_t bank, uint8_t index, const char* label)
+{
+    knob_config_t* k = knob_at(bank, index);
+    if (!k || !label) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    strncpy(k->label, label, sizeof(k->label) - 1);
+    k->label[sizeof(k->label) - 1] = '\0';
+    if (bank == s_knob_bank) s_knob_repaint |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+void ui_knob_set_color(uint8_t bank, uint8_t index, uint16_t color)
+{
+    knob_config_t* k = knob_at(bank, index);
+    if (!k) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    k->color = color;
+    if (bank == s_knob_bank) s_knob_repaint |= (1u << index);
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+const knob_config_t* ui_knob_get_config(uint8_t bank, uint8_t index)
+{
+    return knob_at(bank, index);
+}
+
+bool ui_knob_bank_in_use(uint8_t bank)
+{
+    if (bank >= UI_KNOB_BANKS || !g_knob_banks[bank]) return false;
+    for (int i = 0; i < UI_KNOB_COUNT; i++) {
+        if (g_knob_banks[bank][i].assigned) return true;
+    }
+    return false;
+}
+
+uint8_t ui_knob_get_bank(void)
+{
+    return s_knob_bank;
+}
+
+void ui_knob_set_bank(uint8_t bank)
+{
+    if (bank >= UI_KNOB_BANKS || bank == s_knob_bank) return;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    s_knob_bank = bank;
+    s_knob_repaint = UI_KNOB_DIRTY_ALL;
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    ui_event_t event;
+    event.type = UI_EVENT_KNOB_BANK;
+    event.data.knob_bank = bank;
+    ui_event_push(&event);
+
+    // The bank name is part of the title and the nav label, so the frame around
+    // the content has to be repainted too -- but only if it is on screen.
+    if (ui_get_current_screen() == UI_SCREEN_KNOBS) {
+        ui_request_redraw();
+    }
 }
 
 // ESP-IDF Log hook for Screen Log

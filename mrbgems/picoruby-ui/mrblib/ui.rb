@@ -8,6 +8,9 @@ $ui_handlers = {}
 # Pad callback storage (index => block)
 $ui_pad_callbacks = {}
 
+# Knob callback storage (bank * UI::KNOB_KEY_STRIDE + index => block)
+$ui_knob_callbacks = {}
+
 # Tombola hit callback (single sequencer instance)
 $ui_tombola_handler = nil
 
@@ -59,6 +62,7 @@ module UI
   SCREEN_SCRIPTS   = 4
   SCREEN_SETTINGS  = 5
   SCREEN_TOMBOLA   = 6
+  SCREEN_KNOBS     = 7
 
   # Switch the active screen (0-based; see SCREEN_* constants)
   def self.set_screen(index)
@@ -118,6 +122,11 @@ module UI
       dispatch_pad_event(event)
     end
 
+    # Handle knob turns with callbacks
+    if type == :knob_change
+      dispatch_knob_event(event)
+    end
+
     # Handle tombola hits registered through Tombola#on_hit
     if type == :tombola_hit
       dispatch_tombola_event(event)
@@ -171,6 +180,15 @@ module UI
     end
   rescue => e
     log("Error in pad callback: " + e.message)
+  end
+
+  # Internal: dispatch knob change to the registered callback
+  def self.dispatch_knob_event(event)
+    block = $ui_knob_callbacks[knob_key(event[:bank] - 1, event[:index] - 1)]
+    return unless block
+    block.call(event[:value])
+  rescue => e
+    log("Error in knob callback: " + e.message)
   end
 
   # Internal: dispatch tombola hit to the registered callback
@@ -276,6 +294,225 @@ module UI
   def self.pad_clear_all
     _pad_clear_all
     $ui_pad_callbacks = {}
+  end
+
+  # === Knobs ===
+  #
+  # Continuous values turned by sweeping a finger around the ring. Nothing here
+  # sends MIDI: like a pad, a knob calls the block it was given and the block
+  # decides what that means.
+  #
+  #   UI.knob(1, label: "Cutoff", color: :cyan) do |v|
+  #     device.control_change(74, v.to_i)
+  #   end
+  #
+  # The block runs from UI.process, so a script has to keep calling it. Only
+  # one change per knob is ever queued -- a new value replaces the one waiting
+  # -- so polling slowly costs resolution, never a backlog.
+
+  KNOB_ORIGIN_MIN    = 0
+  KNOB_ORIGIN_CENTER = 1
+
+  # Callback keys are bank * stride + index. A flat integer key beats an array
+  # one in mruby/c, and the stride only has to exceed the largest board's knob
+  # count (12 on Tab5).
+  KNOB_KEY_STRIDE = 16
+
+  # Knobs per bank on this board (6 on CoreS3, 12 on Tab5)
+  def self.knob_count
+    _knob_count
+  end
+
+  # Number of banks (4: A-D)
+  def self.knob_banks
+    _knob_banks
+  end
+
+  # Bank currently on screen (1-based)
+  def self.knob_bank
+    _knob_get_bank + 1
+  end
+
+  # Switch the visible bank
+  def self.knob_bank=(bank)
+    _knob_set_bank(bank.to_i - 1)
+    bank
+  end
+
+  def self.knob_key(bank_index, index)
+    bank_index * KNOB_KEY_STRIDE + index
+  end
+
+  # Internal: resolve a bank: argument to a 0-based index, defaulting to the
+  # visible bank so an encoder loop naturally follows what is on screen.
+  def self.knob_bank_index(bank)
+    return _knob_get_bank if bank.nil?
+    b = bank.to_i - 1
+    return nil if b < 0 || b >= _knob_banks
+    b
+  end
+
+  # Configure a knob
+  # @param index [Integer] Knob index (1-based)
+  # @param label [String] Display label
+  # @param color [Symbol] Gauge color
+  # @param value [Numeric] Initial value (default: min, or the middle when
+  #   origin is :center). Setting it does not call the block.
+  # @param min [Numeric] Range low end
+  # @param max [Numeric] Range high end
+  # @param step [Numeric] Quantum; 0 for continuous
+  # @param origin [Symbol] :min or :center (which end the gauge grows from)
+  # @param sensitivity [Float] 1.0 makes the gauge track the fingertip exactly
+  # @param bank [Integer] Bank to define in (default: the visible one)
+  # @param block [Proc] Called with the new value whenever the knob moves
+  def self.knob(index, label: nil, color: :gray, value: nil, min: 0, max: 127,
+                step: 1, origin: :min, sensitivity: 1.0, bank: nil, &block)
+    idx = index - 1
+    return unless idx >= 0 && idx < _knob_count
+    b = knob_bank_index(bank)
+    return unless b
+
+    origin_code = (origin == :center) ? KNOB_ORIGIN_CENTER : KNOB_ORIGIN_MIN
+    min_f = min.to_f
+    max_f = max.to_f
+    if value.nil?
+      initial = (origin_code == KNOB_ORIGIN_CENTER) ? (min_f + max_f) / 2.0 : min_f
+    else
+      initial = value.to_f
+    end
+
+    _knob_set(b, idx, label || ("Knob " + index.to_s), color_to_rgb565(color),
+              min_f, max_f, step.to_f, initial, origin_code, sensitivity.to_f,
+              block ? true : false)
+
+    key = knob_key(b, idx)
+    if block
+      $ui_knob_callbacks[key] = block
+    else
+      $ui_knob_callbacks.delete(key)
+    end
+  end
+
+  # Current value
+  # @return [Float]
+  def self.knob_value(index, bank: nil)
+    idx = index - 1
+    b = knob_bank_index(bank)
+    return 0.0 unless b && idx >= 0 && idx < _knob_count
+    _knob_value(b, idx)
+  end
+
+  # Set a knob's value, as an encoder or another script would.
+  #
+  # Calls the block, because a knob moved from anywhere still has to reach
+  # whatever it drives. That does not loop: the block only runs when the
+  # quantized value actually changed, so writing the value back from inside it
+  # stops immediately. Pass notify: false to update the display alone.
+  #
+  # @return [Boolean] whether the value moved
+  def self.knob_set(index, value, bank: nil, notify: true)
+    idx = index - 1
+    b = knob_bank_index(bank)
+    return false unless b && idx >= 0 && idx < _knob_count
+
+    changed = _knob_set_value(b, idx, value.to_f)
+    if changed && notify
+      block = $ui_knob_callbacks[knob_key(b, idx)]
+      if block
+        begin
+          block.call(_knob_value(b, idx))
+        rescue => e
+          log("Error in knob callback: " + e.message)
+        end
+      end
+    end
+    changed
+  end
+
+  # Put a knob back to the value it was defined with (block runs)
+  def self.knob_reset(index, bank: nil)
+    idx = index - 1
+    b = knob_bank_index(bank)
+    return false unless b && idx >= 0 && idx < _knob_count
+    changed = _knob_reset(b, idx)
+    if changed
+      block = $ui_knob_callbacks[knob_key(b, idx)]
+      block.call(_knob_value(b, idx)) if block
+    end
+    changed
+  end
+
+  def self.knob_reset_all(bank: nil)
+    b = knob_bank_index(bank)
+    return unless b
+    i = 0
+    while i < _knob_count
+      knob_reset(i + 1, bank: b + 1)
+      i += 1
+    end
+  end
+
+  # Call every knob's block with its current value. Use it after defining the
+  # knobs to push the initial values out, or to re-sync a synth that was
+  # plugged in later. bank: :all covers every bank, not just the visible one.
+  def self.knob_send_all(bank: nil)
+    if bank == :all
+      b = 0
+      while b < _knob_banks
+        knob_send_bank(b)
+        b += 1
+      end
+    else
+      idx = knob_bank_index(bank)
+      knob_send_bank(idx) if idx
+    end
+  end
+
+  def self.knob_send_bank(bank_index)
+    i = 0
+    while i < _knob_count
+      block = $ui_knob_callbacks[knob_key(bank_index, i)]
+      if block && _knob_assigned(bank_index, i)
+        begin
+          block.call(_knob_value(bank_index, i))
+        rescue => e
+          log("Error in knob callback: " + e.message)
+        end
+      end
+      i += 1
+    end
+  end
+
+  def self.knob_label(index, label, bank: nil)
+    idx = index - 1
+    b = knob_bank_index(bank)
+    return unless b && idx >= 0 && idx < _knob_count
+    _knob_set_label(b, idx, label)
+  end
+
+  def self.knob_color(index, color, bank: nil)
+    idx = index - 1
+    b = knob_bank_index(bank)
+    return unless b && idx >= 0 && idx < _knob_count
+    _knob_set_color(b, idx, color_to_rgb565(color))
+  end
+
+  def self.knob_clear(index, bank: nil)
+    idx = index - 1
+    b = knob_bank_index(bank)
+    return unless b && idx >= 0 && idx < _knob_count
+    _knob_clear(b, idx)
+    $ui_knob_callbacks.delete(knob_key(b, idx))
+  end
+
+  def self.knob_clear_all
+    _knob_clear_all
+    $ui_knob_callbacks = {}
+  end
+
+  # Bring the Knobs screen to the front
+  def self.knobs
+    set_screen(SCREEN_KNOBS)
   end
 
   # Tombola - physics driven sequencer

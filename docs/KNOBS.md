@@ -1,16 +1,15 @@
-# Knobs 画面（設計案）
+# Knobs 画面
 
 CC などの連続値を指で回して操作する、ノブのグリッド画面。Pads がワンショット
 （叩く）担当なのに対し、Knobs は**持続的なパラメータ**（カットオフ、リバーブ量、
 テンポ、Tombola の `rotation` …）を担当する。
 
 - 対応ボード: M5Stack CoreS3（6 個 x 4 バンク）/ M5Stack Tab5（12 個 x 4 バンク）。Freenove は no-op
-  スタブ（[main/platform/platform_freenove.c](../main/platform/platform_freenove.c) に合わせる）
-- 実装予定: `main/ui/screen_knob.cpp` / `main/ui/screen_knob.h`
+  スタブ（[main/platform/platform_freenove.c](../main/platform/platform_freenove.c)）
+- 画面: [main/ui/screen_knob.cpp](../main/ui/screen_knob.cpp)（描画とタッチ）
+- 値の保持: [main/ui/ui_common.cpp](../main/ui/ui_common.cpp) の `ui_knob_*`
 - Ruby API: `UI.knob`（[mrbgems/picoruby-ui/mrblib/ui.rb](../mrbgems/picoruby-ui/mrblib/ui.rb)）
-
-**このドキュメントは実装前の設計案。** 未実装。最後の「決めたいこと」を先に読むと
-早い。
+- サンプル: [examples/knobs.rb](../examples/knobs.rb)
 
 ## 位置づけ
 
@@ -391,7 +390,8 @@ UI.knob(5, label: "Filter", color: :yellow) do |v|
   usb.control_change(74, (v * v / 127).to_i)
 end
 
-UI.set_screen(UI::SCREEN_KNOBS)
+UI.knob_send_all   # 定義しただけでは何も送られない。初期値をここで送る
+UI.knobs           # Knobs 画面へ
 
 loop do
   UI.process
@@ -399,8 +399,9 @@ loop do
 end
 ```
 
-ブロックは `|value|` を受ける。index も欲しい場合は `|value, index|`（2 個目は
-省略可。`UI.pad` の `|pressed|` と同じ扱い）。
+ブロックは `|value|` を 1 個だけ受ける（`UI.pad` の `|pressed|` と同じ）。
+どのノブが動いたかも要るなら、生イベント `UI.on(:knob_change)` を使う（後述）。
+そちらには `bank` と `index` が入っている。
 
 ### メソッド
 
@@ -417,6 +418,9 @@ end
 | `UI.knob_clear(index)` / `UI.knob_clear_all` | 割り当て解除 |
 | `UI.knob_bank` | 選択中のバンク（1〜4） |
 | `UI.knob_bank = n` | バンクを切り替える（画面も変わる） |
+| `UI.knob_count` | このボードの 1 バンクあたりのノブ数（6 or 12） |
+| `UI.knob_banks` | バンク数（4） |
+| `UI.knobs` | Knobs 画面へ切り替え（`UI.set_screen(UI::SCREEN_KNOBS)`） |
 
 `knob_value` / `knob_set` / `knob_label` / `knob_color` / `knob_reset` /
 `knob_clear` / `knob_send_all` は `bank:` を取る。**既定は選択中のバンク**
@@ -436,7 +440,7 @@ UI.knob_bank = 1               # 表示は A から
 
 | 引数 | 既定 | 内容 |
 |---|---|---|
-| `label:` | `"Knob N"` | 表示ラベル（16 文字まで） |
+| `label:` | `"Knob N"` | 表示ラベル（15 文字を超える分は表示時に切り詰め） |
 | `color:` | `:gray` | ゲージ色。`UI.color_to_rgb565` の色名を共用 |
 | `value:` | `min`（`origin: :center` なら中央） | 初期値。設定時にブロックは呼ばない |
 | `min:` / `max:` | 0 / 127 | 値域 |
@@ -573,33 +577,44 @@ MIDI に関する項目（CC 番号・チャンネル・トランスポート）
 バンクは全 API の第 1 引数（0 始まり。Ruby 側で 1 始まりへ直す）。
 
 ```c
-void  ui_knob_set_config(uint8_t bank, uint8_t index, const char *label,
-                         uint16_t color, float min, float max, float step,
-                         float value, uint8_t origin, float sensitivity,
-                         bool notify);
-void  ui_knob_clear(uint8_t bank, uint8_t index);
-void  ui_knob_clear_all(void);                 // 全バンク。確保した分は解放する
+void ui_knob_set_config(uint8_t bank, uint8_t index, const char* label,
+                        uint16_t color, float min, float max, float step,
+                        float value, uint8_t origin, float sensitivity,
+                        bool notify);
+void ui_knob_clear(uint8_t bank, uint8_t index);
+void ui_knob_clear_all(void);            // 全バンク。確保した分は解放する
 
 float ui_knob_get_value(uint8_t bank, uint8_t index);
-// 量子化 + クランプ + dirty。notify が立っていればイベントも積む
-void  ui_knob_set_value(uint8_t bank, uint8_t index, float value, bool notify);
-void  ui_knob_reset(uint8_t bank, uint8_t index);
-void  ui_knob_notify_all(uint8_t bank);        // [Send] / UI.knob_send_all の実体
+// クランプ + 量子化。**実際に値が動いたときだけ** true を返し、そのときだけ
+// dirty を立て、イベントを積む
+bool  ui_knob_set_value(uint8_t bank, uint8_t index, float value, bool notify);
+bool  ui_knob_reset(uint8_t bank, uint8_t index);
+void  ui_knob_notify_all(uint8_t bank);  // [Send] の実体
 
-void  ui_knob_set_label(uint8_t bank, uint8_t index, const char *label);
-void  ui_knob_set_color(uint8_t bank, uint8_t index, uint16_t color);
+void ui_knob_set_label(uint8_t bank, uint8_t index, const char* label);
+void ui_knob_set_color(uint8_t bank, uint8_t index, uint16_t color);
 // 未確保バンク / 範囲外は NULL（＝未割り当てとして描く）
-const knob_config_t *ui_knob_get_config(uint8_t bank, uint8_t index);
-bool  ui_knob_bank_in_use(uint8_t bank);       // ストリップのグレー表示判定
+const knob_config_t* ui_knob_get_config(uint8_t bank, uint8_t index);
+bool ui_knob_bank_in_use(uint8_t bank);  // ストリップのグレー表示判定
 
 uint8_t ui_knob_get_bank(void);
-void    ui_knob_set_bank(uint8_t bank);        // イベントも積む。全面再描画を要求
-
-// Pads と同じ理由の dirty ビットマスク（セッターは LCD に触れない）。
-// 選択中のバンクのノブが変わったときだけ立てる
-void     ui_knob_mark_dirty(uint8_t index);
-uint32_t ui_knob_take_dirty(void);
+void    ui_knob_set_bank(uint8_t bank);  // イベントも積む。全面再描画を要求
 ```
+
+再描画のマスクは **2 本**ある。値が動いただけなら扇形 1 枚で済むのに対し、
+ラベルや色が変わるとセルごと描き直しになるので、混ぜると常に高いほうの
+コストがかかってしまう:
+
+```c
+void     ui_knob_mark_dirty(uint8_t index);    // 値が動いた
+uint32_t ui_knob_take_dirty(void);
+void     ui_knob_mark_repaint(uint8_t index);  // 見た目が変わった
+uint32_t ui_knob_take_repaint(void);
+```
+
+`min > max` で定義された場合は `ui_knob_set_config` が**入れ替えて**保持する。
+ゲージは span で割り、ドラッグは両端でクランプするので、下流に符号の分岐を
+持ち込まないため。
 
 イベント側:
 
@@ -615,17 +630,18 @@ struct {
 } knob;                               // ui_event_t の union に追加
 ```
 
-Ruby 側のブロック保管はバンクを含めた**平坦なキー**にする
-（`$ui_knob_callbacks[bank * UI_KNOB_COUNT + index]`）。mrubyc の Hash に
-配列キーを持たせるより素直で、`UI.knob_clear_all` での掃除も 1 行で済む。
-
 `picoruby_ui_event_t`（[mrbgems/picoruby-ui/include/ui.h](../mrbgems/picoruby-ui/include/ui.h)）は
-フラットな struct なので `uint8_t knob_index; float knob_value; bool knob_final;`
-を足す。
+フラットな struct なので `knob_bank` / `knob_index` / `knob_final` / `knob_value`
+を足してある。
 
-「ノブごとに 1 通へまとめる」ために、`ui_event_push()` に手を入れるのではなく
-**キュー内の既存イベントを探して差し替える**専用の `ui_knob_event_post()` を
-置く。キューは既に mutex で保護されている前提（Pads / Tombola と同じ経路）。
+「ノブごとに 1 通へまとめる」のは `ui_event_push()` ではなく専用の
+`ui_knob_event_post()`。キュー内に同じノブの未処理イベントがあれば値を差し替え、
+無ければ積む（`final` は一度立ったら下げない）。
+
+Ruby 側のブロック保管はバンクを含めた**平坦なキー**
+（`$ui_knob_callbacks[bank * UI::KNOB_KEY_STRIDE + index]`、stride = 16）。
+mrubyc の Hash に配列キーを持たせるより素直で、`UI.knob_clear_all` での掃除も
+1 行で済む。
 
 ### 画面インデックス
 
@@ -649,19 +665,19 @@ Supervisor がスクリプトを止めるときに `reset_ui_state()` がパッ�
 ここに `ui_knob_clear_all()` を足す。ノブは音を出しっぱなしにしないので
 All Sound Off のような後始末は不要だが、**前のスクリプトのラベルが残る**のは困る。
 
-## 実装フェーズ
+## 検証
 
-1. **描画とレイアウト** — バンク 1 のみ、`ScreenKnobs`、全面描画。値は固定
-2. **タッチ** — 外積ドラッグ、マルチタッチ、差分描画、dirty マスク
-3. **Ruby バインディング** — `UI.knob` 一式、`$ui_knob_callbacks`、
-   `UI.process` でのディスパッチ、ノブごとのイベント合流、`[Send]`
-4. **バンク** — ストリップの描画とタップ、遅延確保、`bank:` 引数、
-   `:knob_bank` イベント。ここまで来ると 1〜3 は「バンク 1 だけの特別扱い」を
-   剥がす作業になる
-5. **サンプル** — `examples/knobs.rb`（バンク 2 面 + エンコーダ 1 台）
+実装後に確かめたのは以下。**実機での操作感はまだ試していない。**
 
-バンクを 4 に回すのは、1〜3 を実機で触ってからのほうがよい。ストリップに削られる
-8px（CoreS3）が効くかどうかは、実際にノブを回してみないと分からないため。
+- Tab5 / CoreS3 / Freenove の 3 ボードでビルド（Freenove は no-op スタブ経路）
+- レイアウト不変条件をホスト側で総当たり検証（`ui_common.h` を直接 include）:
+  セルが重ならない・コンテンツ領域とストリップの内側に収まる・リングと
+  ハイライト枠とラベルがセルからはみ出さない・値テキストの消去矩形が内円に
+  収まる（Tab5 で対角 46.6 < 52、CoreS3 で 15.5 < 23）・バンクボタン 4 個が
+  コンテンツ高にちょうど収まる
+- ドラッグの厳密性: 指の軌跡を 4000 分割して外積を積分し、`atan2` の端から端まで
+  の差と比較。リム上・半径 2 倍・らせん・逆回しのいずれも一致（誤差 1e-7 rad
+  台、らせんだけ離散化由来の 6.6e-4）。270° 掃くとちょうどフルレンジ動く
 
 ## 初版に入れないもの
 
@@ -673,20 +689,20 @@ All Sound Off のような後始末は不要だが、**前のスクリプトの�
 - 指針（ポインタ線）とスムージング。ゲージの先端で足りるはず
 - Freenove 用の代替 UI（no-op のまま）
 
-## 決めたいこと
+## 実機で確かめたいこと
 
-1. **`sensitivity` の既定** — 1.0（指の位置 = ゲージ先端）は直感的だが、
-   CoreS3 の R=30px だと 270° が短く、1 ステップ 2.1° ≒ 1.1px になる。
-   既定を 0.5（540° でフルレンジ）にして精度を取るか
-2. **未割り当てノブ** — グレーで並べる（Pads と同じ）か、隠して割り当て済みだけを
-   大きく並べるか。後者は Tab5 で 1〜2 個しか使わないときに嬉しい
-3. **セル内どこでも掴めるか** — 隣のノブの縁と密着するので、リング外周
-   ±10px に限る案もある。マルチタッチ時の誤爆と、掴みやすさのトレードオフ
-4. **バンク数** — 4（A〜D）でよいか。CoreS3 のストリップは 4 ボタンで
-   コンテンツ高 180px をちょうど使い切るので、増やすならボタンを小さくするか
-   スクロールが要る。Tab5 だけ 6 面にする手もあるが、ボード間でスクリプトが
-   移らなくなる
-5. **バンクの位置** — 右のストリップでよいか。左のほうが押しやすい説と、
-   右利きの指でグリッドを隠さない説がある
-6. **中央ナビ `[Send]`** — 再同期の需要がどれくらいあるか。`[Reset]`（全ノブを
-   `initial` へ）のほうが使うなら入れ替える
+実装では素直な既定値を選んである。触ってみて違ったら変えるべきもの:
+
+1. **`sensitivity` の既定 1.0**（指の位置 = ゲージ先端）。CoreS3 は R=30px で
+   270° が短く、1 ステップ 2.1° ≒ 1.1px になる。細かすぎるようなら 0.5
+   （540° でフルレンジ）へ
+2. **セル内どこでも掴める**ようにしてある。隣のノブと密着するので、誤爆が
+   多いようならリング外周 ±10px に絞る
+3. **未割り当てノブをグレーで並べている**（Pads と同じ）。Tab5 で 1〜2 個しか
+   使わないパッチだと寂しいので、割り当て済みだけを大きく並べる案もある
+4. **バンクは 4 面**。CoreS3 のストリップは 4 ボタンでコンテンツ高 180px を
+   ちょうど使い切るため、増やすならボタンを小さくするかスクロールが要る
+5. **ストリップは右**。左のほうが押しやすい説と、右利きの指でグリッドを
+   隠さない説がある
+6. **中央ナビは `[Send]`**（現在値の再送信）。`[Reset]`（`initial` へ戻す）の
+   ほうを使うなら入れ替える

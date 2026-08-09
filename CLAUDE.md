@@ -580,6 +580,36 @@ UI.pad(1, label: "Faster") { t.rotation = t.rotation + 4 }
 
 サンプル: [examples/tombola.rb](examples/tombola.rb)
 
+## Knobs 画面（2026-08-10）
+
+詳細は [docs/KNOBS.md](docs/KNOBS.md) を参照。
+
+CC などの連続値を指で回して操作するノブのグリッド。Pads がワンショット担当なのに
+対し、Knobs は持続的なパラメータ担当。CoreS3 は 6 個、Tab5 は 12 個 × 各 4 バンク
+（右端の A/B/C/D ストリップで切り替え）。M5Stack 専用で Freenove では no-op スタブ。
+
+**MIDI を送るのは Ruby のブロック**（`UI.pad` と同じ役割分担）。Tombola が C++ 側で
+発音するのとは逆だが、要求が違う: Tombola はリズムのジッタが直接効くのに対し、CC は
+数 ms 遅れても分からない。代わりに宛先・CC 番号・カーブがスクリプト側に残る。
+
+値の変化は**ノブごとに 1 通だけ**キューに載る（新しい値が古いものを上書きする）ので、
+`UI.process` を回すのが遅いスクリプトは解像度が粗くなるだけで詰まらない。
+
+タッチはノブ中心まわりの**外積**（Tombola のドラッグ回転と同じ
+`dθ = (px·dy − py·dx)/r²`）。既定の `sensitivity 1.0` では指の位置とゲージ先端が
+厳密に一致する。
+
+```ruby
+UI.knob(1, label: "Cutoff", color: :cyan, value: 64) do |v|
+  device.control_change(74, v.to_i)
+end
+UI.knob(4, bank: 2, label: "Pan", origin: :center, value: 64) { |v| ... }
+UI.knob_send_all(bank: :all)   # 定義だけでは送られない。初期送信は明示的に
+UI.knobs                       # Knobs 画面へ
+```
+
+サンプル: [examples/knobs.rb](examples/knobs.rb)
+
 ## 既知の課題
 
 ### USB MIDIデバイスの電源ON順序問題（2026-03-18）

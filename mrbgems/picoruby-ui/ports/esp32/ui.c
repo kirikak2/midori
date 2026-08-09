@@ -26,6 +26,10 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->hit_side = 0;
     event->hit_note = 0;
     event->hit_velocity = 0;
+    event->knob_bank = 0;
+    event->knob_index = 0;
+    event->knob_final = false;
+    event->knob_value = 0.0f;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -57,6 +61,17 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->hit_side = ui_evt.data.tombola.side;
             event->hit_note = ui_evt.data.tombola.note;
             event->hit_velocity = ui_evt.data.tombola.velocity;
+            break;
+        case UI_EVENT_KNOB_CHANGE:
+            event->type = PICORUBY_UI_EVENT_KNOB_CHANGE;
+            event->knob_bank = ui_evt.data.knob.bank;
+            event->knob_index = ui_evt.data.knob.index;
+            event->knob_final = ui_evt.data.knob.final;
+            event->knob_value = ui_evt.data.knob.value;
+            break;
+        case UI_EVENT_KNOB_BANK:
+            event->type = PICORUBY_UI_EVENT_KNOB_BANK;
+            event->knob_bank = ui_evt.data.knob_bank;
             break;
         default:
             break;
@@ -120,6 +135,97 @@ void picoruby_ui_pad_set_color(int index, int color)
 {
     if (index < 0 || index >= UI_PAD_COUNT) return;
     ui_pad_set_color((uint8_t)index, (pad_color_t)color);
+}
+
+/* Knobs */
+
+void picoruby_ui_knob_set(int bank, int index, const char *label, int color,
+                          float min, float max, float step, float value,
+                          int origin, float sensitivity, bool notify)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return;
+    if (index < 0 || index >= UI_KNOB_COUNT) return;
+    ui_knob_set_config((uint8_t)bank, (uint8_t)index, label, (uint16_t)color,
+                       min, max, step, value, (uint8_t)origin, sensitivity,
+                       notify);
+}
+
+void picoruby_ui_knob_clear(int bank, int index)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return;
+    if (index < 0 || index >= UI_KNOB_COUNT) return;
+    ui_knob_clear((uint8_t)bank, (uint8_t)index);
+}
+
+void picoruby_ui_knob_clear_all(void)
+{
+    ui_knob_clear_all();
+}
+
+float picoruby_ui_knob_get_value(int bank, int index)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return 0.0f;
+    if (index < 0 || index >= UI_KNOB_COUNT) return 0.0f;
+    return ui_knob_get_value((uint8_t)bank, (uint8_t)index);
+}
+
+bool picoruby_ui_knob_set_value(int bank, int index, float value)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return false;
+    if (index < 0 || index >= UI_KNOB_COUNT) return false;
+    /* notify=false: this call came from Ruby, which invokes the block itself
+     * rather than going the long way round through the event queue. */
+    return ui_knob_set_value((uint8_t)bank, (uint8_t)index, value, false);
+}
+
+bool picoruby_ui_knob_reset(int bank, int index)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return false;
+    if (index < 0 || index >= UI_KNOB_COUNT) return false;
+    return ui_knob_reset((uint8_t)bank, (uint8_t)index);
+}
+
+void picoruby_ui_knob_set_label(int bank, int index, const char *label)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return;
+    if (index < 0 || index >= UI_KNOB_COUNT) return;
+    ui_knob_set_label((uint8_t)bank, (uint8_t)index, label);
+}
+
+void picoruby_ui_knob_set_color(int bank, int index, int color)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return;
+    if (index < 0 || index >= UI_KNOB_COUNT) return;
+    ui_knob_set_color((uint8_t)bank, (uint8_t)index, (uint16_t)color);
+}
+
+bool picoruby_ui_knob_assigned(int bank, int index)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return false;
+    if (index < 0 || index >= UI_KNOB_COUNT) return false;
+    const knob_config_t *k = ui_knob_get_config((uint8_t)bank, (uint8_t)index);
+    return k != NULL && k->assigned;
+}
+
+int picoruby_ui_knob_count(void)
+{
+    return UI_KNOB_COUNT;
+}
+
+int picoruby_ui_knob_banks(void)
+{
+    return UI_KNOB_BANKS;
+}
+
+int picoruby_ui_knob_get_bank(void)
+{
+    return ui_knob_get_bank();
+}
+
+void picoruby_ui_knob_set_bank(int bank)
+{
+    if (bank < 0 || bank >= UI_KNOB_BANKS) return;
+    ui_knob_set_bank((uint8_t)bank);
 }
 
 /* Screen switching (declared in ui_manager.h; use externs to avoid pulling a
