@@ -191,6 +191,35 @@ bool blit(LGFX_Sprite* sprite, int x, int y)
     op.out.block_offset_y = oy;
     op.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
+    // Flush the destination scanlines before handing them to the accelerator.
+    //
+    // The driver invalidates the output window after the DMA, and that window
+    // is every panel scanline the block touches, at full panel width -- not
+    // just the block's own columns (ppa_srm.c: "note that the window content is
+    // not continuous in the buffer"). For the tombola's play area that is
+    // 720x620x2 = 872KB, 48% of the framebuffer, and in landscape coordinates
+    // it is a 620px-wide band running the full height of the screen: the status
+    // bar and the nav bar pass straight through it.
+    //
+    // Invalidating (M2C) discards dirty cache lines rather than writing them
+    // back, and the DPI framebuffer is cached write-back PSRAM that LovyanGFX
+    // draws into with the CPU. So anything drawn there and not yet written back
+    // was being thrown away, leaving the panel showing whatever PSRAM held
+    // before it.
+    //
+    // What makes this bite is that LovyanGFX defers its own writeback:
+    // Panel_FrameBufferBase accumulates a modified range and flushes it in
+    // display(), which UIManager::update() reaches only at the end of
+    //     startWrite(); drawStatusBar(); screen->draw(); drawNavBar(); endWrite();
+    // The blit happens in the middle of that, so the status bar it just drew is
+    // still sitting dirty in cache when the accelerator's invalidate throws it
+    // away.
+    //
+    // display() flushes exactly the range that was drawn, which leaves nothing
+    // dirty for the invalidate to lose. Flushing the whole band instead would
+    // also work but would walk 872KB of cache on every frame.
+    M5.Lcd.display();
+
     op.rotation_angle = angle;
     op.scale_x = 1.0f;
     op.scale_y = 1.0f;

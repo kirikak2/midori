@@ -281,10 +281,11 @@ wl / hl は論理側の幅・高さ。`offset_rotation != 0` の場合は
 **バイト順にも注意**: スプライトは `setColorDepth(16)` = `rgb565_2Byte`
 （バイトスワップ有り）、Tab5 のパネルは `rgb565_nonswapped`。PPA は生の画素を
 運ぶだけなので、両者の depth が違うときは `op.byte_swap` を立てる。
-- キャッシュの同期は **PPA ドライバがやってくれる**（入力を writeback、出力を
-  invalidate）。アプリ側で `esp_cache_msync()` を呼ぶ必要はない。ただし
-  **出力バッファのアドレスとサイズ**はキャッシュライン境界に揃っている必要が
-  ある（1280x720x2 = 1,843,200 バイトなので条件は満たす）
+- **ブリットの直前に `M5.Lcd.display()` を呼ぶ必要がある**（2026-08-10 に画面が
+  大きく乱れる原因として判明。下記）
+- キャッシュの同期自体は PPA ドライバが行う（入力を writeback、出力を
+  invalidate）。ただし**出力バッファのアドレスとサイズ**はキャッシュライン境界に
+  揃っている必要がある（1280x720x2 = 1,843,200 バイトなので条件は満たす）
 - 使えない場合（P4 以外、パネルが Panel_DSI でない、クライアント確保に失敗）は
   `false` を返して `pushSprite()` にフォールバックする
 - **トランザクションプールは 4 個**。1 個では足りない。`UIManager::update()` は
@@ -297,6 +298,41 @@ wl / hl は論理側の幅・高さ。`offset_rotation != 0` の場合は
   何度やっても通らないので恒久フォールバック。それ以外（プール枯渇など）は
   **そのフレームだけ** `pushSprite()` に落ちて、次のフレームでまた PPA を試す。
   一時的な失敗で加速を永久に手放さないため
+
+### 出力側の invalidate が画面を壊す（2026-08-10）
+
+**症状**: Tombola 画面で再描画が起きると画面が大きく乱れる。ステータスバーや
+ナビバーが描かれなかったり、前の内容が残ったりする。
+
+**原因**: PPA ドライバは DMA のあとに出力ウィンドウを invalidate するが、その
+ウィンドウは**ブロックが跨ぐパネル走査線の全幅**であって、ブロックの列だけでは
+ない（ESP-IDF の `components/esp_driver_ppa/src/ppa_srm.c`
+の「note that the window content is not continuous in the buffer」）。
+
+プレイエリアのブリットだと `720 x 620 x 2 = 892,800 byte`
+（フレームバッファの **48%**）。横向きの論理座標に直すと **x=330〜950 の帯が
+画面の高さいっぱい**、つまりステータスバーとナビバーを縦に貫く。
+
+そして `ESP_CACHE_MSYNC_FLAG_DIR_M2C` は **invalidate であって writeback では
+ない** — dirty なキャッシュラインは書き戻されずに捨てられる。DPI の
+フレームバッファは**キャッシュされた write-back の PSRAM** で、LovyanGFX は
+そこへ CPU で描くので、まだ書き戻されていない描画がここで消える。
+
+効いてくるのは LovyanGFX が writeback を遅らせるため。
+`Panel_FrameBufferBase` は変更範囲 (`_range_mod`) を溜めて `display()` で
+まとめて書き戻すが、`UIManager::update()` の
+
+```
+startWrite(); drawStatusBar(); screen->draw(); drawNavBar(); endWrite();
+```
+
+ではブリットが**その途中**で走る。直前に描いたステータスバーはまだ dirty の
+まま、というのが毎フレーム起きていた。
+
+**対処**: `ui_ppa::blit()` がブリットの直前に `M5.Lcd.display()` を呼ぶ。
+描いた範囲だけを書き戻すので、invalidate が捨てるものが無くなる。帯全体を
+`esp_cache_msync(C2M)` しても直るが、毎フレーム 872KB ぶんキャッシュを
+walk することになる。
 
 **注意**: `esp_driver_ppa` を `PRIV_REQUIRES` に足す条件は
 `CONFIG_IDF_TARGET_ESP32P4` ではなく **`IDF_TARGET`** で書くこと。コンポーネントの
