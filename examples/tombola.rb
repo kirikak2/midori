@@ -5,9 +5,13 @@
 # sounds every hit the moment it happens, so the timing does not depend on how
 # often this script polls.
 #
-# The pads let you play with the parameters while it runs. If DFRobot Visual
-# Rotary Encoders (SEN0502) are wired to Port A, up to four of them are picked
-# up automatically and take over the main parameters:
+# Output always goes to the USB-MIDI device port (USB-C, TinyUSB), regardless
+# of whether any encoders are attached -- Port A is free for I2C either way.
+#
+# The variable parameters (rotation, sides, gravity, bounce) are Knobs, so they
+# can be touched on the Knobs screen or turned from a physical encoder. If
+# DFRobot Visual Rotary Encoders (SEN0502) are wired to Port A, up to four of
+# them are picked up automatically and take over those same knobs:
 #
 #   | #   | 回すと     | クリックすると |
 #   |-----|------------|----------------|
@@ -19,9 +23,8 @@
 # 検出は DIP スイッチのアドレス順 (0x54, 0x55, 0x56, 0x57)。繋がっていない
 # 分は黙って飛ばされるので、0 台でもこのスクリプトはそのまま動く。
 #
-# ※ Tab5 の Port A (53/54) は SAM2695 の UART と同じピンなので、エンコーダと
-#   SAM2695 は同時に使えない。エンコーダが 1 台でも見つかったら、出力を
-#   USB-MIDI デバイス (USB-C) → USB-MIDI ホストの順で選び直す。
+# パッドは Ball+ / Clear / Octave- / Octave+ の4つ。エンコーダのクリックと
+# 同じアクションを呼ぶ。
 
 require 'midi'
 require 'ui'
@@ -46,24 +49,23 @@ BUTTON_LOCKOUT_MS = 300
 # エンコーダのポーリング周期 (ms)。UI イベントより粗くてよい。
 ENCODER_POLL_MS = 20
 
-# ---- エンコーダ 1 台 = Tombola のパラメータ 1 つ ----------------------
-class EncoderKnob
-  attr_reader :label
+# ---- ノブの割り当て ----------------------------------------------------
+KNOB_ROTATION = 1
+KNOB_SIDES    = 2
+KNOB_GRAVITY  = 3
+KNOB_BOUNCE   = 4
 
-  # @param enc [DFRobotRotaryEncoder]
-  # @param label [String] ログ表示用
-  # @param min, max [Numeric] パラメータの下限・上限
-  # @param integer [Boolean] 整数パラメータなら true
-  # @param getter [Proc] 現在値を返す
-  # @param setter [Proc] 値を受け取って設定する
-  def initialize(enc:, label:, min:, max:, integer:, getter:, setter:)
+# ---- エンコーダ 1 台 = ノブ 1 個 ---------------------------------------
+# 値はノブ (UI.knob_set / UI.knob_value) 経由で読み書きする。ブロックの中で
+# Tombola のパラメータを変えるのはノブ側の仕事で、ここはノブとエンコーダの
+# カウンタを橋渡しするだけ。
+class EncoderKnob
+  def initialize(enc:, knob_index:, min:, max:, integer:)
     @enc = enc
-    @label = label
+    @knob_index = knob_index
     @min = min
     @max = max
     @integer = integer
-    @getter = getter
-    @setter = setter
     @last = nil
     @on_click = nil
     @armed = true       # 次の押下を受け付けてよいか
@@ -74,13 +76,13 @@ class EncoderKnob
     @on_click = block
   end
 
-  # 現在のパラメータ値をエンコーダのカウンタへ書き戻す。ノブの物理位置と
-  # LED リングが、いま鳴っている設定を指すようになる。
+  # ノブの現在値をエンコーダのカウンタへ書き戻す。ノブの物理位置と LED リング
+  # が、いま鳴っている設定を指すようになる。
   def sync
     span = (@max - @min).to_f
     v = 0
     if span > 0.0
-      ratio = (@getter.call - @min).to_f / span
+      ratio = (UI.knob_value(@knob_index) - @min).to_f / span
       ratio = 0.0 if ratio < 0.0
       ratio = 1.0 if ratio > 1.0
       v = (ratio * V_MAX.to_f).to_i
@@ -89,7 +91,7 @@ class EncoderKnob
     @last = v
   end
 
-  # 毎ループ呼ぶ。クリック -> on_click、回転 -> setter。
+  # 毎ループ呼ぶ。クリック -> on_click、回転 -> UI.knob_set。
   def poll
     # フラグはロック中でも読んでクリアしておく必要があるので、button_down? は
     # 必ず呼ぶ。armed によるエッジ検出と lockout の 2 段で 1 クリック = 1 回に
@@ -116,7 +118,7 @@ class EncoderKnob
       # mruby/c の Float には round/floor が無いので +0.5 して切り捨てる
       value = (value + 0.5).to_i
     end
-    @setter.call(value)
+    UI.knob_set(@knob_index, value)
   end
 end
 
@@ -142,7 +144,6 @@ def shift_octave(t, direction)
 end
 
 # ---- エンコーダ検出 (Port A) -----------------------------------------
-# 直前まで SAM2695(UART) が同じピンを使っていた場合のルーティング残りを剥がす。
 # ピンがそのボードに無ければ I2C ごと諦めて 0 台で続行する。
 encoders = []
 begin
@@ -172,19 +173,11 @@ else
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# エンコーダが Port A を占有している間は SAM2695 が使えないので、USB 側へ回す。
-transport = nil
-if encoders.size > 0
-  transport = MIDIDevices.usb_midi_device
-  transport = MIDIDevices.usb_midi_host unless transport
-  UI.log("Port A is used by the encoders -> SAM2695 unavailable") unless transport
-else
-  transport = MIDIDevices.sam2695
-end
-transport = MIDIDevices.sam2695 unless transport
+# エンコーダの有無に関係なく USB-MIDI デバイス (USB-C) を使う。
+transport = MIDIDevices.usb_midi_device
 
 unless transport
-  puts "No MIDI output available on this board"
+  puts "No MIDI output available (USB-MIDI device not enabled on this board)"
   exit
 end
 
@@ -221,20 +214,47 @@ end
 t.start
 t.show
 
+# ---- ノブ: rotation / sides / gravity / bounce ------------------------
+# クランプ範囲は Tombola 側より狭い、演奏に使いやすい幅にしてある。
+UI.knob(KNOB_ROTATION, label: "Rotation", color: :cyan,
+        min: -60, max: 60, step: 0, value: t.rotation) do |v|
+  t.rotation = v
+end
+
+UI.knob(KNOB_SIDES, label: "Sides", color: :green,
+        min: 3, max: 16, step: 1, value: t.sides) do |v|
+  t.sides = v.to_i
+end
+
+UI.knob(KNOB_GRAVITY, label: "Gravity", color: :magenta,
+        min: 0, max: 2, step: 0, value: t.gravity) do |v|
+  t.gravity = v
+end
+
+UI.knob(KNOB_BOUNCE, label: "Bounce", color: :yellow,
+        min: 0, max: 1.2, step: 0, value: t.bounce) do |v|
+  t.bounce = v
+end
+
+# ---- パッド ----------------------------------------------------------
+UI.pad(1, label: "Ball+", color: :orange) { t.add_ball }
+UI.pad(2, label: "Clear", color: :red) { t.clear_balls }
+UI.pad(3, label: "Oct -", color: :blue) { shift_octave(t, -1) }
+UI.pad(4, label: "Oct +", color: :blue) { shift_octave(t, 1) }
+
 # ---- エンコーダ割り当て ----------------------------------------------
 # 1台目 rotation / 2台目 sides / 3台目 gravity / 4台目 bounce。
-# それぞれ Tombola 側のクランプ範囲より狭い、演奏に使いやすい幅にしてある。
-# クリックは add_ball / clear_balls / オクターブ -1 / オクターブ +1。
+# クリックは add_ball / clear_balls / オクターブ -1 / オクターブ +1
+# (パッドと同じアクション)。
 knobs = []
 knob_rotation = nil
 knob_sides = nil
+knob_gravity = nil
+knob_bounce = nil
 
 if encoders[0]
   knob_rotation = EncoderKnob.new(
-    enc: encoders[0], label: "rotation",
-    min: -60.0, max: 60.0, integer: false,
-    getter: Proc.new { t.rotation },
-    setter: Proc.new { |v| t.rotation = v }
+    enc: encoders[0], knob_index: KNOB_ROTATION, min: -60.0, max: 60.0, integer: false
   )
   knob_rotation.on_click { t.add_ball }
   knobs << knob_rotation
@@ -242,10 +262,7 @@ end
 
 if encoders[1]
   knob_sides = EncoderKnob.new(
-    enc: encoders[1], label: "sides",
-    min: 3, max: 16, integer: true,
-    getter: Proc.new { t.sides },
-    setter: Proc.new { |v| t.sides = v }
+    enc: encoders[1], knob_index: KNOB_SIDES, min: 3, max: 16, integer: true
   )
   knob_sides.on_click { t.clear_balls }
   knobs << knob_sides
@@ -253,10 +270,7 @@ end
 
 if encoders[2]
   knob_gravity = EncoderKnob.new(
-    enc: encoders[2], label: "gravity",
-    min: 0.0, max: 2.0, integer: false,
-    getter: Proc.new { t.gravity },
-    setter: Proc.new { |v| t.gravity = v }
+    enc: encoders[2], knob_index: KNOB_GRAVITY, min: 0.0, max: 2.0, integer: false
   )
   knob_gravity.on_click { shift_octave(t, -1) }
   knobs << knob_gravity
@@ -264,10 +278,7 @@ end
 
 if encoders[3]
   knob_bounce = EncoderKnob.new(
-    enc: encoders[3], label: "bounce",
-    min: 0.0, max: 1.2, integer: false,
-    getter: Proc.new { t.bounce },
-    setter: Proc.new { |v| t.bounce = v }
+    enc: encoders[3], knob_index: KNOB_BOUNCE, min: 0.0, max: 1.2, integer: false
   )
   knob_bounce.on_click { shift_octave(t, 1) }
   knobs << knob_bounce
@@ -280,32 +291,26 @@ while i < knobs.size
   i += 1
 end
 
-# ---- パッド ----------------------------------------------------------
-# パッドで動かしたぶんはエンコーダのカウンタに書き戻す。そうしないと LED
-# リングとノブの位置がパラメータからずれ、次にノブを回した瞬間に値が飛ぶ。
-UI.pad(1, label: "Slower", color: :blue) do
-  t.rotation = t.rotation - 4
-  knob_rotation.sync if knob_rotation
+# 画面 (タッチ) でノブを動かした分もエンコーダのカウンタへ書き戻す。そうしな
+# いと LED リングとノブの位置がパラメータからずれ、次にノブを回した瞬間に
+# 値が飛ぶ。
+encoder_by_knob = {
+  KNOB_ROTATION => knob_rotation,
+  KNOB_SIDES    => knob_sides,
+  KNOB_GRAVITY  => knob_gravity,
+  KNOB_BOUNCE   => knob_bounce
+}
+
+UI.on(:knob_change) do |e|
+  next unless e[:final]
+  enc_knob = encoder_by_knob[e[:index]]
+  enc_knob.sync if enc_knob
 end
-UI.pad(2, label: "Faster", color: :blue) do
-  t.rotation = t.rotation + 4
-  knob_rotation.sync if knob_rotation
-end
-UI.pad(3, label: "Sides-", color: :green) do
-  t.sides = t.sides - 1
-  knob_sides.sync if knob_sides
-end
-UI.pad(4, label: "Sides+", color: :green) do
-  t.sides = t.sides + 1
-  knob_sides.sync if knob_sides
-end
-UI.pad(5, label: "Ball+", color: :orange) { t.add_ball }
-UI.pad(6, label: "Clear", color: :red) { t.clear_balls }
 
 # ---- メインループ ----------------------------------------------------
 # The tombola keeps stepping on its own; this loop only delivers UI events
-# (pad presses and, because on_hit is registered, the hits) and reads the
-# encoders.
+# (pad presses, knob touches and, because on_hit is registered, the hits) and
+# reads the encoders.
 sm = ScriptManager.new
 last_poll = 0
 loop do
