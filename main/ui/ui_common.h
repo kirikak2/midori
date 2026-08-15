@@ -106,7 +106,7 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         8
+#define UI_SCREEN_COUNT         9
 
 // Screen indices
 // New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
@@ -120,6 +120,7 @@ typedef enum {
     UI_SCREEN_SETTINGS,
     UI_SCREEN_TOMBOLA,
     UI_SCREEN_KNOBS,
+    UI_SCREEN_XYPAD,
 } ui_screen_index_t;
 
 // BPM configuration
@@ -291,7 +292,14 @@ typedef enum {
     UI_EVENT_TOMBOLA_HIT,     // A tombola ball hit a wall
     UI_EVENT_KNOB_CHANGE,     // A knob was turned
     UI_EVENT_KNOB_BANK,       // The visible knob bank was switched
+    UI_EVENT_XYPAD_TOUCH,     // An XYPad slot's touch moved through a phase
 } ui_event_type_t;
+
+typedef enum {
+    XYPAD_PHASE_DOWN = 0,
+    XYPAD_PHASE_MOVE,
+    XYPAD_PHASE_UP,
+} xypad_phase_t;
 
 // UI Event structure
 typedef struct {
@@ -317,6 +325,15 @@ typedef struct {
             float   value;
         } knob;
         uint8_t knob_bank;   // For UI_EVENT_KNOB_BANK
+        struct {
+            uint8_t slot;    // For UI_EVENT_XYPAD_TOUCH (0-based)
+            uint8_t phase;   // xypad_phase_t
+            uint8_t channel;
+            uint8_t note;
+            float   bend_semitones;  // Meaningful when the slot's x_mode is :note
+            float   x;               // Meaningful when the slot's x_mode is :cc
+            float   y;
+        } xypad;
     } data;
 } ui_event_t;
 
@@ -382,6 +399,88 @@ bool ui_tombola_remove_ball(int index);
 void ui_tombola_clear_balls(void);
 int  ui_tombola_ball_count(void);
 
+// --- XYPad ------------------------------------------------------------------
+// Up to five simultaneous touches, each an independent "slot": its own X
+// meaning (scale + glide, or a raw CC), its own Y range, channel and hold
+// flag. A touch claims the lowest-numbered free slot on touchdown and uses
+// that slot's own settings until it is released. Nothing here knows about
+// MIDI destinations, CC numbers or velocity -- those live in the Ruby class
+// alongside the block that actually sends (mrbgems/picoruby-ui/mrblib/ui.rb),
+// exactly as it is for knobs.
+//
+// Must match MAX_TOUCH_POINTS in ui_manager.h. Kept as a separate constant
+// because that one is a C++ constexpr and this header has to stay C-compatible
+// (platform_freenove.c and the mrubyc bindings include it as plain C).
+#define UI_XYPAD_MAX_TOUCHES  5
+#define UI_XYPAD_MAX_SCALE   16    // Same cap as Tombola's scale
+
+typedef enum {
+    XYPAD_XMODE_NOTE = 0,      // X: snap to the scale, then glide via pitch bend
+    XYPAD_XMODE_CC,            // X: absolute value -> CC, same treatment as Y
+} xypad_xmode_t;
+
+typedef struct {
+    // --- Configuration (set via ui_xypad_set_f/set_i/set_scale) ---
+    uint8_t  x_mode;             // xypad_xmode_t
+    uint8_t  scale[UI_XYPAD_MAX_SCALE];
+    uint8_t  scale_len;
+    float    glide_range;        // Semitones of bend across the full width
+    float    x_min, x_max;       // Value range when x_mode is XYPAD_XMODE_CC
+    float    y_min, y_max;
+    bool     y_invert;
+    uint8_t  gate_note;          // Fixed note used to gate when x_mode is CC
+    uint8_t  channel;
+    bool     hold;
+
+    // --- Runtime state (changes over a touch's lifecycle) ---
+    bool     active;             // A finger is currently down on this slot
+    bool     latched;            // Held past release because hold was true
+    int      touch_id;           // Hardware touch id occupying this slot, -1 if free
+    uint8_t  note;                // Sounding note (landed note, or gate_note copy)
+    float    bend_semitones;     // -glide_range .. +glide_range (:note only)
+    float    x;                   // x_min .. x_max (:cc only)
+    float    y;                   // y_min .. y_max
+    int16_t  touchdown_x;         // Pixel X at touchdown, for the relative bend
+    // Snapshot of the mode/range in effect for this touch, taken at touchdown
+    // so a mid-drag config change (pad.slot(n, ...) from the script) cannot
+    // flip what an in-progress touch means.
+    uint8_t  touch_x_mode;
+    float    touch_glide_range;
+} xypad_slot_t;
+
+void ui_xypad_reset(void);                     // Every slot back to defaults, drops all touches
+void ui_xypad_set_max_touches(uint8_t n);      // Clamped to UI_XYPAD_MAX_TOUCHES
+uint8_t ui_xypad_get_max_touches(void);
+
+// Named-parameter access per slot (index 0-based), the same shape as Tombola's
+// ui_tombola_set_f/set_i: keeps the mrubyc binding two functions wide no
+// matter how many slot parameters exist. Only the configuration fields are
+// touched -- an in-progress touch's runtime state is left alone, except for
+// the hold-release transition documented on the definition.
+// Float keys : glide_range x_min x_max y_min y_max
+//              touch_glide_range (read-only; the glide_range snapshotted for
+//              whichever touch currently occupies the slot, see xypad_slot_t)
+// Int keys   : x_mode y_invert gate_note channel hold
+bool  ui_xypad_set_f(uint8_t index, const char* name, float value);
+bool  ui_xypad_set_i(uint8_t index, const char* name, int value);
+float ui_xypad_get_f(uint8_t index, const char* name);
+int   ui_xypad_get_i(uint8_t index, const char* name);
+
+void    ui_xypad_set_scale(uint8_t index, const uint8_t* notes, uint8_t len);
+uint8_t ui_xypad_get_scale(uint8_t index, uint8_t* out, uint8_t max_len);  // Returns the count
+
+// NULL for an out-of-range index; the screen draws it as an empty slot.
+const xypad_slot_t* ui_xypad_get_slot(uint8_t index);
+
+// Driven by ScreenXYPad's touch handlers. content_x/y/w/h describe the content
+// area in screen pixels, which is what X/Y get mapped against. Finds/frees the
+// slot itself and returns which one it used (-1 when down finds no free slot,
+// or move/up are called for a touch that never claimed one), so the screen
+// knows what to (re)draw without keeping its own touch-to-slot map.
+int ui_xypad_touch_down(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
+int ui_xypad_touch_move(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
+int ui_xypad_touch_up(int touch_id);
+
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);
 void ui_event_push(const ui_event_t* event);
@@ -390,6 +489,11 @@ void ui_event_push(const ui_event_t* event);
 // only the newest value is worth anything; this keeps the pending count at one
 // per knob so a slow poller gets coarser updates rather than a backlog.
 void ui_knob_event_post(uint8_t bank, uint8_t index, float value, bool final);
+// Queues an XYPad touch phase. MOVE replaces a pending MOVE for the same slot
+// the same way knob changes coalesce; DOWN and UP are never coalesced away
+// since they are what tells Ruby to gate a note on or off.
+void ui_xypad_event_post(uint8_t slot, xypad_phase_t phase, uint8_t channel,
+                         uint8_t note, float bend_semitones, float x, float y);
 bool ui_event_pop(ui_event_t* event);
 int ui_event_available(void);
 

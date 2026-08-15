@@ -253,3 +253,84 @@ int ui_tombola_ball_count(void)
 {
     return 0;
 }
+
+// XYPad stubs - the touch surface lives in ui/screen_xypad.cpp and its model
+// in ui/ui_common.cpp, neither of which is built for a board without a
+// display. Scripts that touch UI::XYPad here get silent no-ops.
+
+void ui_xypad_reset(void)
+{
+}
+
+void ui_xypad_set_max_touches(uint8_t n)
+{
+    (void)n;
+}
+
+uint8_t ui_xypad_get_max_touches(void)
+{
+    return 0;
+}
+
+bool ui_xypad_set_f(uint8_t index, const char *name, float value)
+{
+    (void)index; (void)name; (void)value;
+    return false;
+}
+
+bool ui_xypad_set_i(uint8_t index, const char *name, int value)
+{
+    (void)index; (void)name; (void)value;
+    return false;
+}
+
+float ui_xypad_get_f(uint8_t index, const char *name)
+{
+    (void)index; (void)name;
+    return 0.0f;
+}
+
+int ui_xypad_get_i(uint8_t index, const char *name)
+{
+    (void)index; (void)name;
+    return 0;
+}
+
+void ui_xypad_set_scale(uint8_t index, const uint8_t *notes, uint8_t len)
+{
+    (void)index; (void)notes; (void)len;
+}
+
+uint8_t ui_xypad_get_scale(uint8_t index, uint8_t *out, uint8_t max_len)
+{
+    (void)index; (void)out; (void)max_len;
+    return 0;
+}
+
+const xypad_slot_t *ui_xypad_get_slot(uint8_t index)
+{
+    (void)index;
+    return NULL;
+}
+
+int ui_xypad_touch_down(int touch_id, int x, int y,
+                        int content_x, int content_y, int content_w, int content_h)
+{
+    (void)touch_id; (void)x; (void)y;
+    (void)content_x; (void)content_y; (void)content_w; (void)content_h;
+    return -1;
+}
+
+int ui_xypad_touch_move(int touch_id, int x, int y,
+                        int content_x, int content_y, int content_w, int content_h)
+{
+    (void)touch_id; (void)x; (void)y;
+    (void)content_x; (void)content_y; (void)content_w; (void)content_h;
+    return -1;
+}
+
+int ui_xypad_touch_up(int touch_id)
+{
+    (void)touch_id;
+    return -1;
+}

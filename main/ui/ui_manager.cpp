@@ -7,6 +7,7 @@
 #include "screen_settings.h"
 #include "screen_tombola.h"
 #include "screen_knob.h"
+#include "screen_xypad.h"
 #include <M5Unified.h>
 #include "esp_log.h"
 
@@ -104,6 +105,7 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_SETTINGS] = &getScreenSettings();
     m_screens[UI_SCREEN_TOMBOLA] = &getScreenTombola();
     m_screens[UI_SCREEN_KNOBS] = &getScreenKnobs();
+    m_screens[UI_SCREEN_XYPAD] = &getScreenXYPad();
 }
 
 void UIManager::update()

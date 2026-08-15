@@ -14,6 +14,12 @@ $ui_knob_callbacks = {}
 # Tombola hit callback (single sequencer instance)
 $ui_tombola_handler = nil
 
+# The live UI::XYPad instance (single instance, like Tombola -- the C-side
+# model is a global singleton). Holds the Ruby-only per-slot state (CC
+# numbers, velocity, device, auto_midi) that ui_xypad_* on the C side does not
+# know about.
+$ui_xypad_instance = nil
+
 module UI
   # MIDI Clock constant: 24 Pulses Per Quarter Note
   PPQ = 24
@@ -63,6 +69,7 @@ module UI
   SCREEN_SETTINGS  = 5
   SCREEN_TOMBOLA   = 6
   SCREEN_KNOBS     = 7
+  SCREEN_XYPAD     = 8
 
   # Switch the active screen (0-based; see SCREEN_* constants)
   def self.set_screen(index)
@@ -132,6 +139,11 @@ module UI
       dispatch_tombola_event(event)
     end
 
+    # Handle XYPad touch phases (built-in MIDI handler + on_touch)
+    if type == :xypad_touch
+      dispatch_xypad_event(event)
+    end
+
     handlers = $ui_handlers[type]
     if handlers
       handlers.each do |h|
@@ -198,6 +210,13 @@ module UI
     handler.call(event)
   rescue => e
     log("Error in tombola callback: " + e.message)
+  end
+
+  # Internal: dispatch an XYPad touch phase to the live instance
+  def self.dispatch_xypad_event(event)
+    pad = $ui_xypad_instance
+    return unless pad
+    pad.dispatch_touch(event)
   end
 
   # Convert color symbol to RGB565 value
@@ -855,6 +874,261 @@ module UI
     # Bring the Tombola screen to the front
     def show
       UI.set_screen(UI::SCREEN_TOMBOLA)
+    end
+  end
+
+  # XYPad - up to five independently configured touch slots
+  #
+  # Each of up to five simultaneous fingers is its own "slot": X can snap to
+  # a scale and glide via pitch bend, or behave exactly like Y (a plain CC).
+  # Each slot keeps its own scale/CC numbers, channel, Hold flag and even its
+  # own MIDI destination -- one finger can play a synth while another drives
+  # a completely different effects box. See docs/XYPAD.md for the design.
+  #
+  #   pad = UI::XYPad.new(scale: [36, 38, 40, 41, 43, 45, 47, 48],
+  #                       y_cc: 74, device: dev)
+  #   pad.slot(3, x_mode: :cc, x_cc: 70, y_cc: 71, note: 60, device: fx)
+  #   pad.show
+  #
+  # C++ side (the ui_xypad_* API in ui_common.h) owns touch tracking, scale
+  # snapping and the glide math, exactly like Knobs -- nothing there sends
+  # MIDI. The built-in handler here does that from #dispatch_touch, unless a
+  # slot's auto_midi is false.
+  class XYPad
+    MAX_TOUCHES = 5
+    XMODE_NOTE = 0
+    XMODE_CC   = 1
+
+    def initialize(x_mode: nil, scale: nil, glide_range: nil,
+                   x_cc: nil, x_range: nil,
+                   y_cc: nil, y_range: nil, y_invert: nil,
+                   note: nil, velocity: nil,
+                   channel: nil, channel_base: nil, hold: nil,
+                   auto_midi: nil, device: nil, max_touches: nil)
+      # UI._xypad_reset does not itself send MIDI (nothing in C does, see
+      # docs/XYPAD.md), so a previous instance's slots latched via Hold would
+      # otherwise go silently stuck the moment the model resets under them.
+      # Releasing them here, through the *old* instance while it is still
+      # $ui_xypad_instance, sends a proper note-off on whatever device/channel
+      # that instance was actually using.
+      prev = $ui_xypad_instance
+      if prev
+        prev.hold = false
+        UI.process
+      end
+
+      UI._xypad_reset
+      $ui_xypad_instance = self
+      @on_touch = nil
+      @channel_base = 0
+      @slots = []
+      @touch_x_mode = []
+      i = 0
+      while i < MAX_TOUCHES
+        @slots << { x_cc: 70, y_cc: 74, velocity: 100, device: nil, auto_midi: true }
+        @touch_x_mode << :note
+        i += 1
+      end
+
+      self.max_touches = max_touches unless max_touches.nil?
+      self.channel_base = channel_base unless channel_base.nil?
+
+      # Every slot starts out identical. channel is the one field that must
+      # not collapse to the same value on every slot by default, so it gets
+      # resolved per index here rather than left to configure_slot's plain
+      # "only touch what was given" rule.
+      i = 0
+      while i < MAX_TOUCHES
+        ch = channel.nil? ? (@channel_base + i) : channel
+        configure_slot(i, x_mode: x_mode, scale: scale, glide_range: glide_range,
+                       x_cc: x_cc, x_range: x_range,
+                       y_cc: y_cc, y_range: y_range, y_invert: y_invert,
+                       note: note, velocity: velocity,
+                       channel: ch, hold: hold,
+                       auto_midi: auto_midi, device: device)
+        i += 1
+      end
+    end
+
+    def max_touches
+      @max_touches
+    end
+
+    def max_touches=(n)
+      @max_touches = n.to_i
+      UI._xypad_set_max_touches(@max_touches)
+      n
+    end
+
+    def channel_base
+      @channel_base
+    end
+
+    def channel_base=(n)
+      @channel_base = n.to_i
+    end
+
+    # Configure slot +index+ (1-based, like UI.knob). Only the keywords
+    # actually given are changed -- everything else keeps its current value.
+    # Called with no keywords at all, returns the slot's current config as a
+    # Hash instead of changing anything.
+    def slot(index, x_mode: nil, scale: nil, glide_range: nil,
+             x_cc: nil, x_range: nil,
+             y_cc: nil, y_range: nil, y_invert: nil,
+             note: nil, velocity: nil,
+             channel: nil, hold: nil,
+             auto_midi: nil, device: nil)
+      idx = index - 1
+      return nil unless idx >= 0 && idx < MAX_TOUCHES
+
+      if x_mode.nil? && scale.nil? && glide_range.nil? && x_cc.nil? && x_range.nil? &&
+         y_cc.nil? && y_range.nil? && y_invert.nil? && note.nil? && velocity.nil? &&
+         channel.nil? && hold.nil? && auto_midi.nil? && device.nil?
+        return slot_info(idx)
+      end
+
+      configure_slot(idx, x_mode: x_mode, scale: scale, glide_range: glide_range,
+                     x_cc: x_cc, x_range: x_range,
+                     y_cc: y_cc, y_range: y_range, y_invert: y_invert,
+                     note: note, velocity: velocity,
+                     channel: channel, hold: hold,
+                     auto_midi: auto_midi, device: device)
+      nil
+    end
+
+    # Broadcast Hold to every slot at once, so a script can keep the simple
+    # "one Hold button for the whole pad" feel from before slots existed.
+    # pad.slot(n, hold: on) still overrides one slot only.
+    def hold=(value)
+      i = 0
+      while i < MAX_TOUCHES
+        UI._xypad_set_i(i, :hold, value ? 1 : 0)
+        i += 1
+      end
+      value
+    end
+
+    # Called with the raw event hash for every touch phase, on every slot.
+    def on_touch(&block)
+      @on_touch = block
+    end
+
+    # Bring the XYPad screen to the front
+    def show
+      UI.set_screen(UI::SCREEN_XYPAD)
+    end
+
+    # Internal: applies the built-in MIDI handler for one slot's touch event,
+    # then forwards to #on_touch if one is registered. Called from
+    # UI.dispatch_xypad_event, itself called from UI.process.
+    def dispatch_touch(event)
+      idx = event[:slot] - 1
+      return unless idx >= 0 && idx < MAX_TOUCHES
+      s = @slots[idx]
+
+      # The mode that governs this touch is frozen at its touchdown (the C
+      # side does the same with touch_x_mode/touch_glide_range), so a script
+      # changing x_mode mid-drag cannot flip how bend_semitones/x are read
+      # for a touch already in progress.
+      if event[:phase] == :down
+        @touch_x_mode[idx] = (UI._xypad_get_i(idx, :x_mode) == XMODE_CC) ? :cc : :note
+      end
+
+      send_midi(s, @touch_x_mode[idx], idx, event) if s[:auto_midi] && s[:device]
+
+      @on_touch.call(event) if @on_touch
+    rescue => e
+      UI.log("Error in xypad callback: " + e.message)
+    end
+
+    private
+
+    def slot_info(idx)
+      s = @slots[idx]
+      x_mode = (UI._xypad_get_i(idx, :x_mode) == XMODE_CC) ? :cc : :note
+      {
+        x_mode: x_mode,
+        scale: UI._xypad_get_scale(idx),
+        glide_range: UI._xypad_get_f(idx, :glide_range),
+        x_cc: s[:x_cc],
+        x_range: UI._xypad_get_f(idx, :x_min)..UI._xypad_get_f(idx, :x_max),
+        y_cc: s[:y_cc],
+        y_range: UI._xypad_get_f(idx, :y_min)..UI._xypad_get_f(idx, :y_max),
+        y_invert: UI._xypad_get_i(idx, :y_invert) != 0,
+        note: UI._xypad_get_i(idx, :gate_note),
+        velocity: s[:velocity],
+        channel: UI._xypad_get_i(idx, :channel),
+        hold: UI._xypad_get_i(idx, :hold) != 0,
+        auto_midi: s[:auto_midi],
+        device: s[:device]
+      }
+    end
+
+    def configure_slot(idx, x_mode: nil, scale: nil, glide_range: nil,
+                        x_cc: nil, x_range: nil,
+                        y_cc: nil, y_range: nil, y_invert: nil,
+                        note: nil, velocity: nil,
+                        channel: nil, hold: nil,
+                        auto_midi: nil, device: nil)
+      s = @slots[idx]
+      s[:x_cc] = x_cc unless x_cc.nil?
+      s[:y_cc] = y_cc unless y_cc.nil?
+      s[:velocity] = velocity unless velocity.nil?
+      s[:device] = device unless device.nil?
+      s[:auto_midi] = auto_midi unless auto_midi.nil?
+
+      UI._xypad_set_i(idx, :x_mode, x_mode == :cc ? XMODE_CC : XMODE_NOTE) unless x_mode.nil?
+      UI._xypad_set_scale(idx, scale) unless scale.nil?
+      UI._xypad_set_f(idx, :glide_range, glide_range.to_f) unless glide_range.nil?
+      unless x_range.nil?
+        UI._xypad_set_f(idx, :x_min, x_range.first.to_f)
+        UI._xypad_set_f(idx, :x_max, x_range.last.to_f)
+      end
+      unless y_range.nil?
+        UI._xypad_set_f(idx, :y_min, y_range.first.to_f)
+        UI._xypad_set_f(idx, :y_max, y_range.last.to_f)
+      end
+      UI._xypad_set_i(idx, :y_invert, y_invert ? 1 : 0) unless y_invert.nil?
+      UI._xypad_set_i(idx, :gate_note, note) unless note.nil?
+      UI._xypad_set_i(idx, :channel, channel) unless channel.nil?
+      UI._xypad_set_i(idx, :hold, hold ? 1 : 0) unless hold.nil?
+    end
+
+    # Sends the actual MIDI for one touch phase. mode is this touch's frozen
+    # x_mode (see #dispatch_touch), not necessarily the slot's live one.
+    def send_midi(s, mode, idx, event)
+      dev = s[:device]
+      ch = event[:channel]
+
+      case event[:phase]
+      when :down
+        dev.note_on(event[:note], s[:velocity], channel: ch)
+        dev.control_change(s[:x_cc], event[:x].to_i, channel: ch) if mode == :cc
+        dev.control_change(s[:y_cc], event[:y].to_i, channel: ch)
+      when :move
+        if mode == :note
+          dev.pitch_bend(bend_raw(idx, event[:bend_semitones]), channel: ch)
+        else
+          dev.control_change(s[:x_cc], event[:x].to_i, channel: ch)
+        end
+        dev.control_change(s[:y_cc], event[:y].to_i, channel: ch)
+      when :up
+        dev.note_off(event[:note], 0, channel: ch)
+        dev.pitch_bend(0, channel: ch) if mode == :note
+      end
+    end
+
+    # bend_semitones -> the raw +-8192 unit MIDI::Device#pitch_bend takes,
+    # scaled by the glide_range that was actually in effect when this touch
+    # landed (not the slot's current one, which a script may have since
+    # changed).
+    def bend_raw(idx, bend_semitones)
+      range = UI._xypad_get_f(idx, :touch_glide_range)
+      return 0 if range <= 0.0
+      raw = (bend_semitones / range * 8192).to_i
+      raw = 8191 if raw > 8191
+      raw = -8192 if raw < -8192
+      raw
     end
   end
 end

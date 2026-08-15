@@ -633,6 +633,30 @@ UI.knobs                       # Knobs 画面へ
 
 サンプル: [examples/knobs.rb](examples/knobs.rb)
 
+## XYPad 画面（2026-08-15）
+
+詳細は [docs/XYPAD.md](docs/XYPAD.md) を参照。
+
+タッチ位置から音程（X）と CC（Y）を連続的に送る演奏面。Pads がワンショット、
+Knobs が持続パラメータ、Tombola が自動発音だとすると、XYPad は**指でその場で
+弾く**担当。M5Stack 専用（Freenove は no-op スタブ）。
+
+最大 5 本の同時タッチはそれぞれ独立した**スロット**を持つ。X の意味づけ
+（スケールへスナップ + グライドか、Y と同じ生の CC か）・CC 番号・チャンネル・
+Hold・送信先まで、**指ごとに丸ごと別の設定**にできる。C++ 側（`ui_common.cpp`
+の `ui_xypad_*`）はタッチ追跡とスケールへのスナップ・グライド計算だけを持ち、
+MIDI を送るのは Ruby（`UI::XYPad` 内蔵ハンドラ、または `on_touch` で自前実装）。
+
+```ruby
+pad = UI::XYPad.new(scale: [36, 38, 40, 41, 43, 45, 47, 48],
+                    glide_range: 2, y_cc: 74, device: dev)
+pad.slot(5, x_mode: :cc, x_cc: 70, y_cc: 71, note: 60, device: fx)  # 5本目だけ別挙動
+pad.hold = true   # 全スロット一括ラッチ（pad.slot(n, hold:) で個別も可）
+pad.show
+```
+
+サンプル: [examples/xypad.rb](examples/xypad.rb)
+
 ## 既知の課題
 
 ### USB MIDIデバイスの電源ON順序問題（2026-03-18）

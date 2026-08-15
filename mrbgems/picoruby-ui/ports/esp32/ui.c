@@ -30,6 +30,13 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->knob_index = 0;
     event->knob_final = false;
     event->knob_value = 0.0f;
+    event->xypad_slot = 0;
+    event->xypad_phase = 0;
+    event->xypad_channel = 0;
+    event->xypad_note = 0;
+    event->xypad_bend = 0.0f;
+    event->xypad_x = 0.0f;
+    event->xypad_y = 0.0f;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -72,6 +79,16 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
         case UI_EVENT_KNOB_BANK:
             event->type = PICORUBY_UI_EVENT_KNOB_BANK;
             event->knob_bank = ui_evt.data.knob_bank;
+            break;
+        case UI_EVENT_XYPAD_TOUCH:
+            event->type = PICORUBY_UI_EVENT_XYPAD_TOUCH;
+            event->xypad_slot = ui_evt.data.xypad.slot;
+            event->xypad_phase = ui_evt.data.xypad.phase;
+            event->xypad_channel = ui_evt.data.xypad.channel;
+            event->xypad_note = ui_evt.data.xypad.note;
+            event->xypad_bend = ui_evt.data.xypad.bend_semitones;
+            event->xypad_x = ui_evt.data.xypad.x;
+            event->xypad_y = ui_evt.data.xypad.y;
             break;
         default:
             break;
@@ -308,4 +325,62 @@ void picoruby_ui_tombola_clear_balls(void)
 int picoruby_ui_tombola_ball_count(void)
 {
     return ui_tombola_ball_count();
+}
+
+/* XYPad */
+
+void picoruby_ui_xypad_reset(void)
+{
+    ui_xypad_reset();
+}
+
+void picoruby_ui_xypad_set_max_touches(int n)
+{
+    if (n < 0) return;
+    ui_xypad_set_max_touches((uint8_t)n);
+}
+
+int picoruby_ui_xypad_get_max_touches(void)
+{
+    return ui_xypad_get_max_touches();
+}
+
+bool picoruby_ui_xypad_set_f(int index, const char *name, float value)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return false;
+    return ui_xypad_set_f((uint8_t)index, name, value);
+}
+
+bool picoruby_ui_xypad_set_i(int index, const char *name, int value)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return false;
+    return ui_xypad_set_i((uint8_t)index, name, value);
+}
+
+float picoruby_ui_xypad_get_f(int index, const char *name)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return 0.0f;
+    return ui_xypad_get_f((uint8_t)index, name);
+}
+
+int picoruby_ui_xypad_get_i(int index, const char *name)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return 0;
+    return ui_xypad_get_i((uint8_t)index, name);
+}
+
+void picoruby_ui_xypad_set_scale(int index, const uint8_t *notes, int len)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return;
+    if (len < 0) len = 0;
+    if (len > UI_XYPAD_MAX_SCALE) len = UI_XYPAD_MAX_SCALE;
+    ui_xypad_set_scale((uint8_t)index, notes, (uint8_t)len);
+}
+
+int picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return 0;
+    if (max_len < 0) max_len = 0;
+    if (max_len > UI_XYPAD_MAX_SCALE) max_len = UI_XYPAD_MAX_SCALE;
+    return ui_xypad_get_scale((uint8_t)index, out, (uint8_t)max_len);
 }

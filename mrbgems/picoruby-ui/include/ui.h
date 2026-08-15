@@ -31,6 +31,13 @@ typedef struct {
     uint8_t knob_index;  /* For knob change events (0-based) */
     bool knob_final;     /* For knob change events */
     float knob_value;    /* For knob change events */
+    uint8_t xypad_slot;    /* For XYPad touch events (0-based) */
+    uint8_t xypad_phase;   /* 0=down 1=move 2=up */
+    uint8_t xypad_channel;
+    uint8_t xypad_note;
+    float xypad_bend;      /* Meaningful when the slot's x_mode is :note */
+    float xypad_x;         /* Meaningful when the slot's x_mode is :cc */
+    float xypad_y;
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -43,6 +50,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_TOMBOLA_HIT   6
 #define PICORUBY_UI_EVENT_KNOB_CHANGE   7
 #define PICORUBY_UI_EVENT_KNOB_BANK     8
+#define PICORUBY_UI_EVENT_XYPAD_TOUCH   9
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -101,6 +109,22 @@ int   picoruby_ui_tombola_add_ball(int note, int channel, int color, float veloc
 bool  picoruby_ui_tombola_remove_ball(int index);
 void  picoruby_ui_tombola_clear_balls(void);
 int   picoruby_ui_tombola_ball_count(void);
+
+/* XYPad.
+ * Up to five simultaneous touches, each an independent "slot" with its own
+ * X meaning (scale + glide, or a raw CC), Y range, channel and hold flag.
+ * Parameters are string-keyed like Tombola's so this bridge stays fixed in
+ * size; see ui_common.h for the accepted names. index is 0-based. */
+void    picoruby_ui_xypad_reset(void);
+void    picoruby_ui_xypad_set_max_touches(int n);
+int     picoruby_ui_xypad_get_max_touches(void);
+bool    picoruby_ui_xypad_set_f(int index, const char *name, float value);
+bool    picoruby_ui_xypad_set_i(int index, const char *name, int value);
+float   picoruby_ui_xypad_get_f(int index, const char *name);
+int     picoruby_ui_xypad_get_i(int index, const char *name);
+void    picoruby_ui_xypad_set_scale(int index, const uint8_t *notes, int len);
+/* Writes up to max_len notes into out, returns how many. */
+int     picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len);
 
 #ifdef __cplusplus
 }

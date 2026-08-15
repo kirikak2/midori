@@ -30,6 +30,7 @@ elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB
         "ui/screen_settings.cpp"
         "ui/screen_tombola.cpp"
         "ui/screen_knob.cpp"
+        "ui/screen_xypad.cpp"
     )
 endif()
 

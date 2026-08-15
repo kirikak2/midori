@@ -29,6 +29,7 @@ c_ui_pop_event(mrbc_vm *vm, mrbc_value v[], int argc)
         case PICORUBY_UI_EVENT_TOMBOLA_HIT:  type_str = "tombola_hit"; break;
         case PICORUBY_UI_EVENT_KNOB_CHANGE:  type_str = "knob_change"; break;
         case PICORUBY_UI_EVENT_KNOB_BANK:    type_str = "knob_bank"; break;
+        case PICORUBY_UI_EVENT_XYPAD_TOUCH:  type_str = "xypad_touch"; break;
         default:                             type_str = "unknown"; break;
     }
 
@@ -118,6 +119,44 @@ c_ui_pop_event(mrbc_vm *vm, mrbc_value v[], int argc)
             mrbc_value key_bank = mrbc_symbol_value(mrbc_str_to_symid("bank"));
             mrbc_value val_bank = mrbc_integer_value(event.knob_bank + 1);
             mrbc_hash_set(&hash, &key_bank, &val_bank);
+            break;
+        }
+        case PICORUBY_UI_EVENT_XYPAD_TOUCH:
+        {
+            /* 1-based, to match the index pad.slot() was called with. */
+            mrbc_value key_slot = mrbc_symbol_value(mrbc_str_to_symid("slot"));
+            mrbc_value val_slot = mrbc_integer_value(event.xypad_slot + 1);
+            mrbc_hash_set(&hash, &key_slot, &val_slot);
+
+            const char *phase_str;
+            switch (event.xypad_phase) {
+                case 0:  phase_str = "down"; break;
+                case 1:  phase_str = "move"; break;
+                default: phase_str = "up";   break;
+            }
+            mrbc_value key_phase = mrbc_symbol_value(mrbc_str_to_symid("phase"));
+            mrbc_value val_phase = mrbc_symbol_value(mrbc_str_to_symid(phase_str));
+            mrbc_hash_set(&hash, &key_phase, &val_phase);
+
+            mrbc_value key_channel = mrbc_symbol_value(mrbc_str_to_symid("channel"));
+            mrbc_value val_channel = mrbc_integer_value(event.xypad_channel);
+            mrbc_hash_set(&hash, &key_channel, &val_channel);
+
+            mrbc_value key_note = mrbc_symbol_value(mrbc_str_to_symid("note"));
+            mrbc_value val_note = mrbc_integer_value(event.xypad_note);
+            mrbc_hash_set(&hash, &key_note, &val_note);
+
+            mrbc_value key_bend = mrbc_symbol_value(mrbc_str_to_symid("bend_semitones"));
+            mrbc_value val_bend = mrbc_float_value(vm, event.xypad_bend);
+            mrbc_hash_set(&hash, &key_bend, &val_bend);
+
+            mrbc_value key_x = mrbc_symbol_value(mrbc_str_to_symid("x"));
+            mrbc_value val_x = mrbc_float_value(vm, event.xypad_x);
+            mrbc_hash_set(&hash, &key_x, &val_x);
+
+            mrbc_value key_y = mrbc_symbol_value(mrbc_str_to_symid("y"));
+            mrbc_value val_y = mrbc_float_value(vm, event.xypad_y);
+            mrbc_hash_set(&hash, &key_y, &val_y);
             break;
         }
         default:
@@ -707,6 +746,191 @@ c_ui_knob_set_bank(mrbc_vm *vm, mrbc_value v[], int argc)
     SET_NIL_RETURN();
 }
 
+/* ------------------------------------------------------------------------
+ * XYPad
+ *
+ * The Ruby-visible object is UI::XYPad (mrblib/ui.rb); these are the raw
+ * module functions it drives. Slot parameters go through _xypad_set_f /
+ * _xypad_set_i keyed by name, the same shape as Tombola, so adding a slot
+ * parameter never touches this file. index is 0-based here (Ruby's slot
+ * numbers are 1-based and converted in mrblib).
+ * ------------------------------------------------------------------------ */
+
+/* Accept either a Symbol or a String for parameter names. */
+static const char *
+xypad_param_name(mrbc_value *v)
+{
+    if (mrbc_type(*v) == MRBC_TT_SYMBOL) {
+        return mrbc_symbol_cstr(v);
+    }
+    if (mrbc_type(*v) == MRBC_TT_STRING) {
+        return (const char *)mrbc_string_cstr(v);
+    }
+    return NULL;
+}
+
+static float
+xypad_to_f(mrbc_value *v)
+{
+    if (mrbc_type(*v) == MRBC_TT_FLOAT)   return (float)v->d;
+    if (mrbc_type(*v) == MRBC_TT_INTEGER) return (float)v->i;
+    return 0.0f;
+}
+
+static void
+c_ui_xypad_reset(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    picoruby_ui_xypad_reset();
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_xypad_set_max_touches(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 1 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        SET_NIL_RETURN();
+        return;
+    }
+    picoruby_ui_xypad_set_max_touches((int)v[1].i);
+    SET_NIL_RETURN();
+}
+
+static void
+c_ui_xypad_get_max_touches(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)v; (void)argc;
+    SET_INT_RETURN(picoruby_ui_xypad_get_max_touches());
+}
+
+/*
+ * UI._xypad_set_f(index, name, value) / UI._xypad_set_i(index, name, value)
+ */
+static void
+c_ui_xypad_set_f(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 3 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    const char *name = xypad_param_name(&v[2]);
+    if (name == NULL) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    SET_BOOL_RETURN(picoruby_ui_xypad_set_f((int)v[1].i, name, xypad_to_f(&v[3])));
+}
+
+static void
+c_ui_xypad_set_i(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 3 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        SET_FALSE_RETURN();
+        return;
+    }
+    const char *name = xypad_param_name(&v[2]);
+    if (name == NULL) {
+        SET_FALSE_RETURN();
+        return;
+    }
+
+    int value;
+    switch (mrbc_type(v[3])) {
+        case MRBC_TT_INTEGER: value = (int)v[3].i; break;
+        case MRBC_TT_FLOAT:   value = (int)v[3].d; break;
+        case MRBC_TT_TRUE:    value = 1; break;
+        case MRBC_TT_FALSE:
+        case MRBC_TT_NIL:     value = 0; break;
+        default:
+            SET_FALSE_RETURN();
+            return;
+    }
+    SET_BOOL_RETURN(picoruby_ui_xypad_set_i((int)v[1].i, name, value));
+}
+
+/*
+ * UI._xypad_get_f(index, name) / UI._xypad_get_i(index, name)
+ */
+static void
+c_ui_xypad_get_f(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    if (argc < 2 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        SET_FLOAT_RETURN(0.0);
+        return;
+    }
+    const char *name = xypad_param_name(&v[2]);
+    SET_FLOAT_RETURN(name ? picoruby_ui_xypad_get_f((int)v[1].i, name) : 0.0f);
+}
+
+static void
+c_ui_xypad_get_i(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 2 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        SET_INT_RETURN(0);
+        return;
+    }
+    const char *name = xypad_param_name(&v[2]);
+    SET_INT_RETURN(name ? picoruby_ui_xypad_get_i((int)v[1].i, name) : 0);
+}
+
+/*
+ * UI._xypad_set_scale(index, array_of_note_numbers)
+ */
+static void
+c_ui_xypad_set_scale(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc < 2 || mrbc_type(v[1]) != MRBC_TT_INTEGER
+     || mrbc_type(v[2]) != MRBC_TT_ARRAY) {
+        SET_NIL_RETURN();
+        return;
+    }
+
+    uint8_t notes[16];
+    int len = mrbc_array_size(&v[2]);
+    if (len > (int)sizeof(notes)) len = (int)sizeof(notes);
+
+    int count = 0;
+    for (int i = 0; i < len; i++) {
+        mrbc_value item = mrbc_array_get(&v[2], i);
+        if (mrbc_type(item) != MRBC_TT_INTEGER) continue;
+        int note = (int)item.i;
+        if (note < 0)   note = 0;
+        if (note > 127) note = 127;
+        notes[count++] = (uint8_t)note;
+    }
+
+    picoruby_ui_xypad_set_scale((int)v[1].i, notes, count);
+    SET_NIL_RETURN();
+}
+
+/*
+ * UI._xypad_get_scale(index) -> Array
+ */
+static void
+c_ui_xypad_get_scale(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    if (argc < 1 || mrbc_type(v[1]) != MRBC_TT_INTEGER) {
+        mrbc_value ary = mrbc_array_new(vm, 0);
+        SET_RETURN(ary);
+        return;
+    }
+
+    uint8_t notes[16];
+    int count = picoruby_ui_xypad_get_scale((int)v[1].i, notes, (int)sizeof(notes));
+
+    mrbc_value ary = mrbc_array_new(vm, count);
+    for (int i = 0; i < count; i++) {
+        mrbc_value note = mrbc_integer_value(notes[i]);
+        mrbc_array_set(&ary, i, &note);
+    }
+    SET_RETURN(ary);
+}
+
 /*
  * Gem initialization
  */
@@ -762,4 +986,15 @@ mrbc_ui_init(mrbc_vm *vm)
     mrbc_define_method(vm, module_UI, "_tombola_stop", c_ui_tombola_stop);
     mrbc_define_method(vm, module_UI, "_tombola_reset", c_ui_tombola_reset);
     mrbc_define_method(vm, module_UI, "_tombola_running", c_ui_tombola_running);
+
+    /* XYPad methods */
+    mrbc_define_method(vm, module_UI, "_xypad_reset", c_ui_xypad_reset);
+    mrbc_define_method(vm, module_UI, "_xypad_set_max_touches", c_ui_xypad_set_max_touches);
+    mrbc_define_method(vm, module_UI, "_xypad_get_max_touches", c_ui_xypad_get_max_touches);
+    mrbc_define_method(vm, module_UI, "_xypad_set_f", c_ui_xypad_set_f);
+    mrbc_define_method(vm, module_UI, "_xypad_set_i", c_ui_xypad_set_i);
+    mrbc_define_method(vm, module_UI, "_xypad_get_f", c_ui_xypad_get_f);
+    mrbc_define_method(vm, module_UI, "_xypad_get_i", c_ui_xypad_get_i);
+    mrbc_define_method(vm, module_UI, "_xypad_set_scale", c_ui_xypad_set_scale);
+    mrbc_define_method(vm, module_UI, "_xypad_get_scale", c_ui_xypad_get_scale);
 }

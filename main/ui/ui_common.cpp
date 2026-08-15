@@ -616,6 +616,393 @@ void ui_knob_set_bank(uint8_t bank)
     }
 }
 
+// --- XYPad ------------------------------------------------------------------
+// Model lives here (not in a screen_xypad.cpp state block) for the same reason
+// knobs do: nothing here draws or sends MIDI, so it does not need M5Unified or
+// the Ruby VM, and can be exercised on its own. ScreenXYPad only turns touches
+// into calls here and paints whatever the slots report back.
+
+static const uint8_t XYPAD_DEFAULT_SCALE[] = { 36, 38, 40, 41, 43, 45, 47, 48 };
+
+static xypad_slot_t s_xypad_slots[UI_XYPAD_MAX_TOUCHES];
+static uint8_t      s_xypad_max_touches = UI_XYPAD_MAX_TOUCHES;
+
+static void xypad_slot_defaults(xypad_slot_t* s, uint8_t index)
+{
+    memset(s, 0, sizeof(*s));
+    s->x_mode = XYPAD_XMODE_NOTE;
+    memcpy(s->scale, XYPAD_DEFAULT_SCALE, sizeof(XYPAD_DEFAULT_SCALE));
+    s->scale_len = (uint8_t)sizeof(XYPAD_DEFAULT_SCALE);
+    s->glide_range = 2.0f;
+    s->x_min = 0.0f; s->x_max = 127.0f;
+    s->y_min = 0.0f; s->y_max = 127.0f;
+    s->y_invert = false;
+    s->gate_note = 60;
+    s->channel = index;   // channel_base + index is Ruby's job; C only needs a default
+    s->hold = false;
+    s->touch_id = -1;
+}
+
+void ui_xypad_reset(void)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+    for (uint8_t i = 0; i < UI_XYPAD_MAX_TOUCHES; i++) {
+        xypad_slot_defaults(&s_xypad_slots[i], i);
+    }
+    s_xypad_max_touches = UI_XYPAD_MAX_TOUCHES;
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+void ui_xypad_set_max_touches(uint8_t n)
+{
+    if (n < 1) n = 1;
+    if (n > UI_XYPAD_MAX_TOUCHES) n = UI_XYPAD_MAX_TOUCHES;
+    portENTER_CRITICAL(&s_ui_mutex);
+    s_xypad_max_touches = n;
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+uint8_t ui_xypad_get_max_touches(void)
+{
+    return s_xypad_max_touches;
+}
+
+static xypad_slot_t* xypad_slot_at(uint8_t index)
+{
+    if (index >= UI_XYPAD_MAX_TOUCHES) return NULL;
+    return &s_xypad_slots[index];
+}
+
+bool ui_xypad_set_f(uint8_t index, const char* name, float value)
+{
+    xypad_slot_t* s = xypad_slot_at(index);
+    if (!s || !name) return false;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    bool ok = true;
+    if (!strcmp(name, "glide_range")) {
+        s->glide_range = (value > 0.0f) ? value : 0.01f;
+    } else if (!strcmp(name, "x_min")) {
+        s->x_min = value;
+        if (s->x_max <= s->x_min) s->x_max = s->x_min + 1.0f;
+    } else if (!strcmp(name, "x_max")) {
+        s->x_max = value;
+        if (s->x_max <= s->x_min) s->x_max = s->x_min + 1.0f;
+    } else if (!strcmp(name, "y_min")) {
+        s->y_min = value;
+        if (s->y_max <= s->y_min) s->y_max = s->y_min + 1.0f;
+    } else if (!strcmp(name, "y_max")) {
+        s->y_max = value;
+        if (s->y_max <= s->y_min) s->y_max = s->y_min + 1.0f;
+    } else {
+        ok = false;
+    }
+    portEXIT_CRITICAL(&s_ui_mutex);
+    return ok;
+}
+
+bool ui_xypad_set_i(uint8_t index, const char* name, int value)
+{
+    xypad_slot_t* s = xypad_slot_at(index);
+    if (!s || !name) return false;
+
+    // Hold needs special handling: a slot latched by Hold has nobody left to
+    // release it once the script turns hold off, so that transition has to
+    // force the release right here. Ruby broadcasts (pad.hold = false) call
+    // this once per slot, which is what makes "release every latched slot at
+    // once" fall out of a per-slot rule rather than needing a separate
+    // all-slots API.
+    if (!strcmp(name, "hold")) {
+        bool hold = (value != 0);
+        portENTER_CRITICAL(&s_ui_mutex);
+        bool was_hold = s->hold;
+        s->hold = hold;
+        bool release = (!hold && was_hold && s->latched && !s->active);
+        if (release) s->latched = false;
+        uint8_t channel = s->channel;
+        uint8_t note = s->note;
+        float   bend = s->bend_semitones;
+        float   xv = s->x;
+        float   yv = s->y;
+        portEXIT_CRITICAL(&s_ui_mutex);
+        if (release) {
+            ui_xypad_event_post(index, XYPAD_PHASE_UP, channel, note, bend, xv, yv);
+        }
+        return true;
+    }
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    bool ok = true;
+    if (!strcmp(name, "x_mode")) {
+        s->x_mode = (value == XYPAD_XMODE_CC) ? XYPAD_XMODE_CC : XYPAD_XMODE_NOTE;
+    } else if (!strcmp(name, "y_invert")) {
+        s->y_invert = (value != 0);
+    } else if (!strcmp(name, "gate_note")) {
+        s->gate_note = (uint8_t)value;
+    } else if (!strcmp(name, "channel")) {
+        s->channel = (uint8_t)(value & 0x0F);
+    } else {
+        ok = false;
+    }
+    portEXIT_CRITICAL(&s_ui_mutex);
+    return ok;
+}
+
+float ui_xypad_get_f(uint8_t index, const char* name)
+{
+    const xypad_slot_t* s = xypad_slot_at(index);
+    if (!s || !name) return 0.0f;
+    if (!strcmp(name, "glide_range")) return s->glide_range;
+    if (!strcmp(name, "x_min"))       return s->x_min;
+    if (!strcmp(name, "x_max"))       return s->x_max;
+    if (!strcmp(name, "y_min"))       return s->y_min;
+    if (!strcmp(name, "y_max"))       return s->y_max;
+    // Read-only: the glide_range that was actually in effect for the touch
+    // currently occupying this slot (frozen at touchdown), which is what a
+    // bend_semitones value from an in-progress touch has to be divided by to
+    // recover the raw +-8192 pitch bend unit. Using the live glide_range
+    // instead would be wrong the moment a script changes it mid-drag.
+    if (!strcmp(name, "touch_glide_range")) return s->touch_glide_range;
+    return 0.0f;
+}
+
+int ui_xypad_get_i(uint8_t index, const char* name)
+{
+    const xypad_slot_t* s = xypad_slot_at(index);
+    if (!s || !name) return 0;
+    if (!strcmp(name, "x_mode"))    return s->x_mode;
+    if (!strcmp(name, "y_invert")) return s->y_invert ? 1 : 0;
+    if (!strcmp(name, "gate_note")) return s->gate_note;
+    if (!strcmp(name, "channel"))  return s->channel;
+    if (!strcmp(name, "hold"))     return s->hold ? 1 : 0;
+    return 0;
+}
+
+void ui_xypad_set_scale(uint8_t index, const uint8_t* notes, uint8_t len)
+{
+    xypad_slot_t* s = xypad_slot_at(index);
+    if (!s) return;
+    if (len > UI_XYPAD_MAX_SCALE) len = UI_XYPAD_MAX_SCALE;
+
+    portENTER_CRITICAL(&s_ui_mutex);
+    if (notes && len > 0) {
+        memcpy(s->scale, notes, len);
+    }
+    s->scale_len = len;
+    portEXIT_CRITICAL(&s_ui_mutex);
+}
+
+uint8_t ui_xypad_get_scale(uint8_t index, uint8_t* out, uint8_t max_len)
+{
+    const xypad_slot_t* s = xypad_slot_at(index);
+    if (!s || !out) return 0;
+    uint8_t n = s->scale_len;
+    if (n > max_len) n = max_len;
+    memcpy(out, s->scale, n);
+    return n;
+}
+
+const xypad_slot_t* ui_xypad_get_slot(uint8_t index)
+{
+    return xypad_slot_at(index);
+}
+
+static int xypad_find_free_slot(void)
+{
+    for (uint8_t i = 0; i < s_xypad_max_touches; i++) {
+        if (!s_xypad_slots[i].active && !s_xypad_slots[i].latched) return (int)i;
+    }
+    return -1;
+}
+
+static int xypad_find_slot_by_touch(int touch_id)
+{
+    for (uint8_t i = 0; i < UI_XYPAD_MAX_TOUCHES; i++) {
+        if (s_xypad_slots[i].active && s_xypad_slots[i].touch_id == touch_id) return (int)i;
+    }
+    return -1;
+}
+
+static uint8_t xypad_snap_note(const xypad_slot_t* s, int x, int content_x, int content_w)
+{
+    if (s->scale_len == 0 || content_w <= 0) return s->gate_note;
+    int rel = x - content_x;
+    if (rel < 0) rel = 0;
+    if (rel >= content_w) rel = content_w - 1;
+    int cell = (rel * s->scale_len) / content_w;
+    if (cell >= s->scale_len) cell = s->scale_len - 1;
+    return s->scale[cell];
+}
+
+static float xypad_clampf(float v, float lo, float hi)
+{
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+static float xypad_map_x(const xypad_slot_t* s, int x, int content_x, int content_w)
+{
+    if (content_w <= 0) return s->x_min;
+    float t = (float)(x - content_x) / (float)content_w;
+    t = xypad_clampf(t, 0.0f, 1.0f);
+    return s->x_min + (s->x_max - s->x_min) * t;
+}
+
+// Screen y grows downward; the top reads as the larger value by default
+// (matches how effects hardware usually lays these pads out), y_invert flips it.
+static float xypad_map_y(const xypad_slot_t* s, int y, int content_y, int content_h)
+{
+    if (content_h <= 0) return s->y_min;
+    float t = (float)(y - content_y) / (float)content_h;
+    t = xypad_clampf(t, 0.0f, 1.0f);
+    float t2 = s->y_invert ? t : (1.0f - t);
+    return s->y_min + (s->y_max - s->y_min) * t2;
+}
+
+int ui_xypad_touch_down(int touch_id, int x, int y,
+                        int content_x, int content_y, int content_w, int content_h)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+
+    int idx = xypad_find_free_slot();
+    if (idx < 0) {
+        portEXIT_CRITICAL(&s_ui_mutex);
+        return -1;
+    }
+
+    xypad_slot_t* s = &s_xypad_slots[idx];
+    s->active = true;
+    s->latched = false;
+    s->touch_id = touch_id;
+    s->touch_x_mode = s->x_mode;
+    s->touch_glide_range = s->glide_range;
+    s->touchdown_x = (int16_t)x;
+
+    if (s->touch_x_mode == XYPAD_XMODE_NOTE) {
+        s->note = xypad_snap_note(s, x, content_x, content_w);
+        s->bend_semitones = 0.0f;
+        s->x = 0.0f;
+    } else {
+        s->note = s->gate_note;
+        s->x = xypad_map_x(s, x, content_x, content_w);
+        s->bend_semitones = 0.0f;
+    }
+    s->y = xypad_map_y(s, y, content_y, content_h);
+
+    uint8_t channel = s->channel;
+    uint8_t note = s->note;
+    float   bend = s->bend_semitones;
+    float   xv = s->x;
+    float   yv = s->y;
+
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    ui_xypad_event_post((uint8_t)idx, XYPAD_PHASE_DOWN, channel, note, bend, xv, yv);
+    return idx;
+}
+
+int ui_xypad_touch_move(int touch_id, int x, int y,
+                        int content_x, int content_y, int content_w, int content_h)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+
+    int idx = xypad_find_slot_by_touch(touch_id);
+    if (idx < 0) {
+        portEXIT_CRITICAL(&s_ui_mutex);
+        return -1;
+    }
+    xypad_slot_t* s = &s_xypad_slots[idx];
+
+    if (s->touch_x_mode == XYPAD_XMODE_NOTE) {
+        float range = s->touch_glide_range;
+        float dx = (float)(x - s->touchdown_x);
+        float bend = (content_w > 0) ? (dx / (float)content_w) * range : 0.0f;
+        s->bend_semitones = xypad_clampf(bend, -range, range);
+    } else {
+        s->x = xypad_map_x(s, x, content_x, content_w);
+    }
+    s->y = xypad_map_y(s, y, content_y, content_h);
+
+    uint8_t channel = s->channel;
+    uint8_t note = s->note;
+    float   bend = s->bend_semitones;
+    float   xv = s->x;
+    float   yv = s->y;
+
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    ui_xypad_event_post((uint8_t)idx, XYPAD_PHASE_MOVE, channel, note, bend, xv, yv);
+    return idx;
+}
+
+int ui_xypad_touch_up(int touch_id)
+{
+    portENTER_CRITICAL(&s_ui_mutex);
+
+    int idx = xypad_find_slot_by_touch(touch_id);
+    if (idx < 0) {
+        portEXIT_CRITICAL(&s_ui_mutex);
+        return -1;
+    }
+    xypad_slot_t* s = &s_xypad_slots[idx];
+
+    bool hold = s->hold;
+    s->active = false;
+    s->touch_id = -1;
+    if (hold) s->latched = true;
+
+    uint8_t channel = s->channel;
+    uint8_t note = s->note;
+    float   bend = s->bend_semitones;
+    float   xv = s->x;
+    float   yv = s->y;
+
+    portEXIT_CRITICAL(&s_ui_mutex);
+
+    ui_xypad_event_post((uint8_t)idx, XYPAD_PHASE_UP, channel, note, bend, xv, yv);
+    return idx;
+}
+
+void ui_xypad_event_post(uint8_t slot, xypad_phase_t phase, uint8_t channel,
+                         uint8_t note, float bend_semitones, float x, float y)
+{
+    portENTER_CRITICAL(&s_event_mutex);
+
+    // Only a pending MOVE for this slot is worth overwriting -- DOWN and UP
+    // are gate transitions and must each reach Ruby on their own (see the
+    // comment on ui_xypad_event_post in ui_common.h).
+    if (phase == XYPAD_PHASE_MOVE) {
+        for (int i = s_event_tail; i != s_event_head; i = (i + 1) % UI_EVENT_QUEUE_SIZE) {
+            if (s_event_queue[i].type == UI_EVENT_XYPAD_TOUCH
+             && s_event_queue[i].data.xypad.slot == slot
+             && s_event_queue[i].data.xypad.phase == XYPAD_PHASE_MOVE) {
+                s_event_queue[i].data.xypad.channel = channel;
+                s_event_queue[i].data.xypad.note = note;
+                s_event_queue[i].data.xypad.bend_semitones = bend_semitones;
+                s_event_queue[i].data.xypad.x = x;
+                s_event_queue[i].data.xypad.y = y;
+                portEXIT_CRITICAL(&s_event_mutex);
+                return;
+            }
+        }
+    }
+
+    int next_head = (s_event_head + 1) % UI_EVENT_QUEUE_SIZE;
+    if (next_head != s_event_tail) {
+        s_event_queue[s_event_head].type = UI_EVENT_XYPAD_TOUCH;
+        s_event_queue[s_event_head].data.xypad.slot = slot;
+        s_event_queue[s_event_head].data.xypad.phase = (uint8_t)phase;
+        s_event_queue[s_event_head].data.xypad.channel = channel;
+        s_event_queue[s_event_head].data.xypad.note = note;
+        s_event_queue[s_event_head].data.xypad.bend_semitones = bend_semitones;
+        s_event_queue[s_event_head].data.xypad.x = x;
+        s_event_queue[s_event_head].data.xypad.y = y;
+        s_event_head = next_head;
+    }
+    portEXIT_CRITICAL(&s_event_mutex);
+}
+
 // ESP-IDF Log hook for Screen Log
 static vprintf_like_t s_serial_vprintf = nullptr;  // Real serial output function
 static volatile int s_log_hook_active = 0;
