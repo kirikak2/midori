@@ -14,9 +14,10 @@
 # Tap the A/B/C/D strip on the right to switch. The nav bar's [Send] pushes
 # the visible bank's values out again, for a synth plugged in afterwards.
 #
-# If a DFRobot Visual Rotary Encoder (SEN0502) is wired to the primary I2C bus
-# (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN) it takes over knob 1
-# of whichever bank is on screen. Nothing breaks without one.
+# If DFRobot Visual Rotary Encoders (SEN0502) are wired to the primary I2C bus
+# (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN), up to four of them
+# (DIP addresses 0x54..0x57) are picked up and take over knobs 1..4 of whichever
+# bank is on screen. Nothing breaks without any.
 #
 # ※ プライマリ I2C は SAM2695 の UART と同じピンなので、エンコーダと SAM2695 は
 #   同時に使えない。エンコーダが見つかったら出力を USB-MIDI へ回す。
@@ -30,17 +31,24 @@ require 'dfrobot_rotary_encoder'
 GAIN = 51                 # 1 ディテント = LED 1 個
 ENCODER_POLL_MS = 20
 
-# ---- エンコーダ (任意) ------------------------------------------------
-encoder = nil
+# ---- エンコーダ (任意・最大4台) --------------------------------------
+# encoders[i] が画面のノブ (i + 1) を担当する。DIP スイッチのアドレス順
+# (0x54, 0x55, 0x56, 0x57) に検出し、繋がっていない分は黙って飛ばす。
+encoders = []
 begin
   if BoardConfig::HAS_PRIMARY_I2C
     i2c = I2C.new(unit: BoardConfig::PRIMARY_I2C_UNIT, sda_pin: BoardConfig::PRIMARY_I2C_SDA_PIN,
                   scl_pin: BoardConfig::PRIMARY_I2C_SCL_PIN, frequency: 100_000)
-    enc = DFRobotRotaryEncoder.new(i2c: i2c)
-    if enc.connected?
-      enc.gain = GAIN
-      encoder = enc
-      puts "Encoder found at 0x54"
+    addrs = DFRobotRotaryEncoder::ADDRESSES   # [0x54, 0x55, 0x56, 0x57]
+    a = 0
+    while a < addrs.size
+      enc = DFRobotRotaryEncoder.new(i2c: i2c, address: addrs[a])
+      if enc.connected?
+        enc.gain = GAIN
+        encoders << enc
+        puts sprintf("Encoder %d found at 0x%02x -> knob %d", encoders.size, addrs[a], encoders.size)
+      end
+      a += 1
     end
   end
 rescue => e
@@ -49,10 +57,10 @@ end
 
 # ---- 出力先 ----------------------------------------------------------
 # エンコーダを使う場合、プライマリ I2C が SAM2695 と競合するので USB を優先する。
-transport = if encoder
-              MIDIDevices.usb_midi_device || MIDIDevices.usb_midi_host || MIDIDevices.sam2695
-            else
+transport = if encoders.empty?
               MIDIDevices.sam2695 || MIDIDevices.usb_midi_host
+            else
+              MIDIDevices.usb_midi_device || MIDIDevices.usb_midi_host || MIDIDevices.sam2695
             end
 
 unless transport
@@ -103,26 +111,45 @@ UI.knob_bank = 1
 UI.knob_send_all(bank: :all)   # 定義しただけでは何も送られないので初期送信
 UI.knobs                       # Knobs 画面へ
 
-# ---- エンコーダを画面のノブ 1 に括りつける ---------------------------
+# ---- エンコーダを画面のノブ 1..N に括りつける -----------------------
 # bank: を渡さないメソッドは「見えているバンク」を指すので、バンクを切り替え
-# ればエンコーダの担当も一緒に移る。
-def sync_encoder(encoder)
-  return unless encoder
-  encoder.value = (UI.knob_value(1) * 1023 / 127).to_i
+# ればエンコーダの担当も一緒に移る。encoders[i] <-> knob (i + 1)。
+#
+# 0-127 のノブ値を SEN0502 のカウンタ (0-1023) へ。書き込みはモジュール内部の
+# レジスタ (REG_COUNT) を更新するので、LED リングも次に指で回したときの起点も
+# その場で新しい値になる。
+def encoder_write(enc, knob_value)
+  return unless enc
+  enc.value = (knob_value * 1023 / 127).to_i
+end
+
+def sync_encoder(encoders, knob_index)
+  encoder_write(encoders[knob_index - 1], UI.knob_value(knob_index))
+end
+
+def sync_all_encoders(encoders)
+  i = 1
+  while i <= encoders.size
+    sync_encoder(encoders, i)
+    i += 1
+  end
 end
 
 UI.on(:knob_bank) do |e|
   puts "Bank #{e[:bank]}"
-  sync_encoder(encoder)
+  sync_all_encoders(encoders)
 end
 
-# 指で回した結果を LED リングへ戻す。knob_set は値が実際に動いたときしか
-# ブロックを呼ばないので、これがループになることはない。
+# 画面 (タッチ) でノブが動いた分をエンコーダのカウンタへ書き戻す。ドラッグ中の
+# 途中経過も含めて追従させたいので e[:final] は待たない。:knob_change はタッチ
+# 由来 (と knob_send_all / knob_reset) でしか飛ばず、エンコーダ入力の
+# UI.knob_set は notify:false なので発火しない。ループにはならない。
 UI.on(:knob_change) do |e|
-  sync_encoder(encoder) if e[:index] == 1 && e[:final]
+  next unless e[:bank] == UI.knob_bank        # 見えているバンクだけ
+  encoder_write(encoders[e[:index] - 1], e[:value])
 end
 
-sync_encoder(encoder)
+sync_all_encoders(encoders)
 
 sm = ScriptManager.new
 last_encoder_poll = 0
@@ -134,12 +161,16 @@ loop do
 
   UI.process
 
-  if encoder
+  unless encoders.empty?
     now = Machine.uptime_us / 1000
     if now - last_encoder_poll >= ENCODER_POLL_MS
       last_encoder_poll = now
-      raw = encoder.value
-      UI.knob_set(1, raw * 127 / 1023) if raw
+      i = 0
+      while i < encoders.size
+        raw = encoders[i].value
+        UI.knob_set(i + 1, raw * 127 / 1023) if raw
+        i += 1
+      end
     end
   end
 
