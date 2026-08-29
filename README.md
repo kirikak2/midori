@@ -1,18 +1,18 @@
 # Midori
 
-**MIDI on Ruby Interpreter** — Orchestrate connected MIDI devices using PicoRuby scripts. Runs on ESP32-S3 / ESP32-P4 with USB MIDI host (and, on Tab5, USB MIDI device) capabilities.
+**MIDI on Ruby Interpreter** — Orchestrate connected MIDI devices using PicoRuby scripts. Runs on ESP32-S3 / ESP32-P4 with USB MIDI host and USB MIDI device capabilities.
 
 ## Features
 
 - **USB MIDI Host** — Connect USB MIDI devices (synthesizers, keyboards, etc.) directly
-- **USB MIDI Device** — On M5Stack Tab5, the board itself acts as a USB MIDI device to a host PC over USB-C (TinyUSB CDC + MIDI composite; appears as `Midori MIDI`)
+- **USB MIDI Device** — In `midi_device` mode the board itself acts as a USB MIDI device to a host PC (TinyUSB CDC + MIDI composite; appears as `Midori <board>`)
 - **Hot-plug Support** — Automatic detection and recovery on device connection/disconnection
 - **PicoRuby Scripting** — Program MIDI sequences with Ruby scripts
 - **BPM Loop** — `MIDI.bpm_loop` for BPM-synced loops with automatic MIDI Clock output
 - **External Clock Sync** — Automatically follow external MIDI Clock BPM
 - **MML Support** — Describe melodies and rhythms using Music Macro Language
 - **Script Hot-swap** — Dynamically switch Ruby scripts without rebooting ESP32 (FreeRTOS Supervisor architecture)
-- **M5Stack CoreS3 UI** — Touch screen 6-screen UI (BPM display, pad, MIDI info, log, script selector, settings)
+- **Touch Screen UI** — 9-screen UI on CoreS3 / Tab5 / CrowPanel (BPM display, pads, MIDI info, log, script selector, settings, Tombola, knobs, XY pad)
 - **SAM2695 Synthesizer** — Integration with onboard MIDI sound module
 
 ## Supported Hardware
@@ -21,6 +21,7 @@
 |-------|-------|
 | M5Stack CoreS3 | Touch screen UI available |
 | M5Stack Tab5 (ESP32-P4) | Touch screen UI; USB-A = MIDI host, USB-C = MIDI device |
+| Elecrow CrowPanel Advanced 7inch (ESP32-P4) | Touch screen UI (1024x600); flashing and console over its own UART bridge — see [docs/CROWPANEL.md](docs/CROWPANEL.md) |
 | Freenove ESP32-S3 | Script operation via serial console |
 
 See [docs/MIDI_DEVICES.md](docs/MIDI_DEVICES.md) for per-board MIDI device availability and the `MIDIDevices` API (`sam2695` / `usb_midi_host` / `usb_midi_device`).
@@ -55,6 +56,8 @@ port mode:
 ./switch_board.sh m5stack midi_device      # ... USB-MIDI device (TinyUSB CDC + MIDI)
 ./switch_board.sh m5stack_tab5             # M5Stack Tab5 (ESP32-P4), USB-C as USB-MIDI device (default)
 ./switch_board.sh m5stack_tab5 serial      # ... USB-C as USB-Serial/JTAG console
+./switch_board.sh crowpanel                # Elecrow CrowPanel Advanced 7inch (ESP32-P4), USB-MIDI host (default)
+./switch_board.sh crowpanel midi_device    # ... "USB 2.0" port as a USB-MIDI device
 ./switch_board.sh freenove                 # Freenove ESP32-S3 (for develop)
 ./switch_board.sh freenove midi_device     # ... as a USB-MIDI device
 ```
@@ -69,12 +72,16 @@ USB port modes:
 
 Freenove and CoreS3 have a single USB connector wired to one USB PHY, so the
 host and device roles are mutually exclusive there. On the Tab5 the mode only
-selects what the USB-C port does — USB-A is always a USB-MIDI host.
+selects what the USB-C port does — USB-A is always a USB-MIDI host. The
+CrowPanel has a second USB-C carrying a CH343 UART bridge, which is always what
+`idf.py flash` talks to, so `serial` is not offered there (its USB-Serial/JTAG
+reaches no connector).
 
 > **Note**: in `midi_device` mode USB-Serial/JTAG is disconnected from the
 > connector, so `idf.py flash` requires download mode (hold BOOT, tap RESET)
 > and hardware JTAG debugging is unavailable. `idf.py monitor` still works:
-> the console is redirected to the TinyUSB CDC interface.
+> the console is redirected to the TinyUSB CDC interface. On the CrowPanel
+> flashing is unaffected — it never used USB-Serial/JTAG to begin with.
 
 ### Instructions
 
