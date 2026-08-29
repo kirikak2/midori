@@ -6,12 +6,14 @@
 # often this script polls.
 #
 # Output always goes to the USB-MIDI device port (USB-C, TinyUSB), regardless
-# of whether any encoders are attached -- Port A is free for I2C either way.
+# of whether any encoders are attached -- the primary I2C bus is free either
+# way.
 #
 # The variable parameters (rotation, sides, gravity, bounce) are Knobs, so they
 # can be touched on the Knobs screen or turned from a physical encoder. If
-# DFRobot Visual Rotary Encoders (SEN0502) are wired to Port A, up to four of
-# them are picked up automatically and take over those same knobs:
+# DFRobot Visual Rotary Encoders (SEN0502) are wired to the primary I2C bus
+# (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN), up to four of them
+# are picked up automatically and take over those same knobs:
 #
 #   | #   | 回すと     | クリックすると |
 #   |-----|------------|----------------|
@@ -34,8 +36,6 @@ require 'machine'
 require 'dfrobot_rotary_encoder'
 
 # ---- 設定 ------------------------------------------------------------
-SDA  = 53                 # Port A (Tab5)。他のボードでは配線に合わせて変更
-SCL  = 54
 GAIN = 51                 # 1 ディテント = 51 カウント -> 1 回転でフルレンジ
 
 # ディテントで到達できる最大カウンタ値。カウンタは GAIN 刻みでしか動かないので
@@ -143,27 +143,31 @@ def shift_octave(t, direction)
   UI.log("octave #{direction > 0 ? '+' : '-'}1 -> #{shifted[0]}")
 end
 
-# ---- エンコーダ検出 (Port A) -----------------------------------------
-# ピンがそのボードに無ければ I2C ごと諦めて 0 台で続行する。
+# ---- エンコーダ検出 (プライマリ I2C) -------------------------------------
+# ボードにプライマリ I2C が無ければ 0 台で続行する。
 encoders = []
-begin
-  GPIO.new(SDA, GPIO::IN)
-  GPIO.new(SCL, GPIO::IN)
-  i2c = I2C.new(unit: "ESP32_I2C0", sda_pin: SDA, scl_pin: SCL, frequency: 100_000)
+if BoardConfig::HAS_PRIMARY_I2C
+  begin
+    sda = BoardConfig::PRIMARY_I2C_SDA_PIN
+    scl = BoardConfig::PRIMARY_I2C_SCL_PIN
+    GPIO.new(sda, GPIO::IN)
+    GPIO.new(scl, GPIO::IN)
+    i2c = I2C.new(unit: BoardConfig::PRIMARY_I2C_UNIT, sda_pin: sda, scl_pin: scl, frequency: 100_000)
 
-  addrs = DFRobotRotaryEncoder::ADDRESSES   # [0x54, 0x55, 0x56, 0x57]
-  a = 0
-  while a < addrs.size
-    e = DFRobotRotaryEncoder.new(i2c: i2c, address: addrs[a])
-    if e.connected?
-      e.gain = GAIN
-      encoders << e
-      UI.log(sprintf("enc%d -> 0x%02x", encoders.size, addrs[a]))
+    addrs = DFRobotRotaryEncoder::ADDRESSES   # [0x54, 0x55, 0x56, 0x57]
+    a = 0
+    while a < addrs.size
+      e = DFRobotRotaryEncoder.new(i2c: i2c, address: addrs[a])
+      if e.connected?
+        e.gain = GAIN
+        encoders << e
+        UI.log(sprintf("enc%d -> 0x%02x", encoders.size, addrs[a]))
+      end
+      a += 1
     end
-    a += 1
+  rescue => ex
+    UI.log("encoder init failed: #{ex.message}")
   end
-rescue => ex
-  UI.log("encoder init failed: #{ex.message}")
 end
 
 if encoders.size == 0

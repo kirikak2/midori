@@ -10,7 +10,7 @@
 #   - UI パッド 5-12 はノート (momentary)。青/緑はパラメータ表示用に予約している
 #     ので、ノートパッドの色には使わない
 #
-# ※ Port A を I2C に占有するため SAM2695 (UART 53/54) とは同時使用不可。
+# ※ プライマリ I2C を占有するため SAM2695 (UART, 同じピン) とは同時使用不可。
 #
 # ---- LED について ----------------------------------------------------
 # SEN0502 の LED リングは色を制御できない (レジスタは PID/VID/VERSION/ADDR/
@@ -34,8 +34,6 @@ require 'dfrobot_rotary_encoder'
 
 # ---- 設定 ------------------------------------------------------------
 CH   = 0                  # MIDI チャンネル (0-15)
-SDA  = 53
-SCL  = 54
 GAIN = 51                 # 1 ディテント = 51 カウント -> 1 回転でフルレンジ
 NOTE_VELOCITY = 100
 ADDRS = DFRobotRotaryEncoder::ADDRESSES   # [0x54, 0x55, 0x56, 0x57]
@@ -189,12 +187,20 @@ unless usb
 end
 device = MIDI::Device.new(usb)
 
-# ---- エンコーダ検出 (Port A: SDA=53, SCL=54) -------------------------
-# 直前まで SAM2695(UART) が 53/54 を使っていた場合のルーティング残りを剥がす
+unless BoardConfig::HAS_PRIMARY_I2C
+  UI.log("primary I2C not available on this board")
+  exit
+end
+
+# ---- エンコーダ検出 (プライマリ I2C) ---------------------------------------------
+SDA = BoardConfig::PRIMARY_I2C_SDA_PIN
+SCL = BoardConfig::PRIMARY_I2C_SCL_PIN
+
+# 直前まで SAM2695(UART) がこのピンを使っていた場合のルーティング残りを剥がす
 GPIO.new(SDA, GPIO::IN)
 GPIO.new(SCL, GPIO::IN)
 
-i2c = I2C.new(unit: "ESP32_I2C0", sda_pin: SDA, scl_pin: SCL, frequency: 100_000)
+i2c = I2C.new(unit: BoardConfig::PRIMARY_I2C_UNIT, sda_pin: SDA, scl_pin: SCL, frequency: 100_000)
 
 chans = []
 a = 0

@@ -2,8 +2,9 @@
 # DFRobot Visual Rotary Encoder (SEN0502) を MIDI Control Change コントローラにする。
 # encoder8_cc.rb の DFRobot 版。
 #
-# Tab5 の Port A (SDA=53 / SCL=54) にモジュールを接続し、ノブの絶対値 (0-1023) を
-# CC 値 (0-127) にして USB-MIDI Device (USB-C) からホストへ送る。
+# プライマリ I2C (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN) にモジュールを接続し、
+# ノブの絶対値 (0-1023) を CC 値 (0-127) にして USB-MIDI Device (USB-C) から
+# ホストへ送る。
 #
 #   - ノブを回すと CC #(BASE_CC + i) が増減 (LED リングが現在値を表示)
 #   - ノブのボタンを押すと その CC を中央 (64) にリセット
@@ -16,7 +17,7 @@
 #   - カウンタは「差分」ではなく 0-1023 の絶対値。回し切ると端で止まる
 #   - LED はモジュールが値から自動で点灯させるので、こちらから色を書く必要はない
 #
-# ※ Port A を I2C に占有するため SAM2695 (UART 53/54) とは同時使用不可。
+# ※ プライマリ I2C を占有するため SAM2695 (UART, 同じピン) とは同時使用不可。
 #
 # ---- Ableton Live で使うときの注意 -----------------------------------
 # SEN0502 は 20 PPR (1 回転 = 20 ディテント = LED 20 個) で、1 ディテントあたり
@@ -57,8 +58,6 @@ require 'dfrobot_rotary_encoder'
 # ---- 設定 ------------------------------------------------------------
 CH          = 0           # MIDI チャンネル (0-15)
 BASE_CC     = 16          # 1台目 -> CC16, 2台目 -> CC17, ...
-SDA         = 53
-SCL         = 54
 NOTE_VELOCITY = 100       # パッドの note_on ベロシティ
 ADDRS       = DFRobotRotaryEncoder::ADDRESSES   # [0x54, 0x55, 0x56, 0x57]
 
@@ -118,12 +117,20 @@ def to_relative(d)
   d < 0 ? (128 + d) : d
 end
 
-# ---- エンコーダ検出 (Port A: SDA=53, SCL=54) -------------------------
-# 直前まで SAM2695(UART) が 53/54 を使っていた場合のルーティング残りを剥がす
+unless BoardConfig::HAS_PRIMARY_I2C
+  UI.log("primary I2C not available on this board")
+  exit
+end
+
+# ---- エンコーダ検出 (プライマリ I2C) ---------------------------------------------
+SDA = BoardConfig::PRIMARY_I2C_SDA_PIN
+SCL = BoardConfig::PRIMARY_I2C_SCL_PIN
+
+# 直前まで SAM2695(UART) がこのピンを使っていた場合のルーティング残りを剥がす
 GPIO.new(SDA, GPIO::IN)
 GPIO.new(SCL, GPIO::IN)
 
-i2c = I2C.new(unit: "ESP32_I2C0", sda_pin: SDA, scl_pin: SCL, frequency: 100_000)
+i2c = I2C.new(unit: BoardConfig::PRIMARY_I2C_UNIT, sda_pin: SDA, scl_pin: SCL, frequency: 100_000)
 
 encs = []
 a = 0

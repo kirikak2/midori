@@ -14,11 +14,12 @@
 # Tap the A/B/C/D strip on the right to switch. The nav bar's [Send] pushes
 # the visible bank's values out again, for a synth plugged in afterwards.
 #
-# If a DFRobot Visual Rotary Encoder (SEN0502) is wired to Port A it takes over
-# knob 1 of whichever bank is on screen. Nothing breaks without one.
+# If a DFRobot Visual Rotary Encoder (SEN0502) is wired to the primary I2C bus
+# (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN) it takes over knob 1
+# of whichever bank is on screen. Nothing breaks without one.
 #
-# ※ Tab5 の Port A (53/54) は SAM2695 の UART と同じピンなので、エンコーダと
-#   SAM2695 は同時に使えない。エンコーダが見つかったら出力を USB-MIDI へ回す。
+# ※ プライマリ I2C は SAM2695 の UART と同じピンなので、エンコーダと SAM2695 は
+#   同時に使えない。エンコーダが見つかったら出力を USB-MIDI へ回す。
 
 require 'midi'
 require 'ui'
@@ -26,27 +27,28 @@ require 'i2c'
 require 'machine'
 require 'dfrobot_rotary_encoder'
 
-SDA = 53                  # Port A (Tab5). 他のボードでは配線に合わせて変更
-SCL = 54
 GAIN = 51                 # 1 ディテント = LED 1 個
 ENCODER_POLL_MS = 20
 
 # ---- エンコーダ (任意) ------------------------------------------------
 encoder = nil
 begin
-  i2c = I2C.new(unit: "ESP32_I2C0", sda_pin: SDA, scl_pin: SCL, frequency: 100_000)
-  enc = DFRobotRotaryEncoder.new(i2c: i2c)
-  if enc.connected?
-    enc.gain = GAIN
-    encoder = enc
-    puts "Encoder found at 0x54"
+  if BoardConfig::HAS_PRIMARY_I2C
+    i2c = I2C.new(unit: BoardConfig::PRIMARY_I2C_UNIT, sda_pin: BoardConfig::PRIMARY_I2C_SDA_PIN,
+                  scl_pin: BoardConfig::PRIMARY_I2C_SCL_PIN, frequency: 100_000)
+    enc = DFRobotRotaryEncoder.new(i2c: i2c)
+    if enc.connected?
+      enc.gain = GAIN
+      encoder = enc
+      puts "Encoder found at 0x54"
+    end
   end
 rescue => e
   puts "No encoder: #{e.message}"
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# エンコーダを使う場合、Port A が SAM2695 と競合するので USB を優先する。
+# エンコーダを使う場合、プライマリ I2C が SAM2695 と競合するので USB を優先する。
 transport = if encoder
               MIDIDevices.usb_midi_device || MIDIDevices.usb_midi_host || MIDIDevices.sam2695
             else
