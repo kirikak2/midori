@@ -18,7 +18,7 @@ ScreenMain& getScreenMain()
 
 // Layout constants - Board-specific
 // Top row layout (centered):  [-10][-1]  [ BPM ]  [+1][+10]
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 // Tab5: Larger fonts and spacious layout for 1280x720
 static constexpr int BPM_TEXT_SIZE = 5;          // Reduced from 6 to fit between buttons
 static constexpr int BPM_LABEL_TEXT_SIZE = 2;

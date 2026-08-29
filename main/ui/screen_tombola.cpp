@@ -66,7 +66,7 @@ static constexpr float MAX_DRAG_OMEGA = 12.0f;
 // (620x620x16bpp is 768KB a frame on Tab5, and CoreS3 pushes its 65KB over
 // SPI), and it buys little above 30fps for balls this size. Physics keeps its
 // own 10ms step either way, so the note timing does not change with this.
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int64_t DRAW_INTERVAL_US = 33000;  // ~30fps
 static constexpr int HUD_TEXT_SIZE = 2;
 #else

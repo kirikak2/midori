@@ -21,7 +21,7 @@ static constexpr int LOG_AREA_Y = STATUS_BAR_HEIGHT;
 static constexpr int LOG_AREA_HEIGHT = SCREEN_HEIGHT - STATUS_BAR_HEIGHT;
 
 // Maximum line length to fit on screen (adjusted for screen width and font size)
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int MAX_LINE_CHARS = 160;  // Tab5: wider screen
 #else
 static constexpr int MAX_LINE_CHARS = 52;   // CoreS3: 320px width

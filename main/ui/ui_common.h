@@ -10,6 +10,15 @@
 extern "C" {
 #endif
 
+// Boards roomy enough for the spacious layout: bigger fonts, a 4x3 grid,
+// centred pad/knob grids. Screens branch on this rather than on a board
+// symbol, so a new large-screen board only has to add its geometry below.
+// Everything in the large branches is expressed relative to UI_SCREEN_WIDTH /
+// UI_CONTENT_* where the position matters.
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#define UI_LAYOUT_LARGE 1
+#endif
+
 // Screen dimensions - board specific
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
 // M5Stack Tab5: 5-inch 1280x720 display

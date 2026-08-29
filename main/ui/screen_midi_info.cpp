@@ -17,7 +17,7 @@ ScreenMidiInfo& getScreenMidiInfo()
 }
 
 // Layout constants - Board-specific
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int CARD_TEXT_SIZE = 2;
 static constexpr int CARD_START_Y = UI_CONTENT_Y + 20;
 static constexpr int CARD_HEIGHT = 110;

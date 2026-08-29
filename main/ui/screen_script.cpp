@@ -21,7 +21,7 @@ ScreenScripts& getScreenScripts()
 }
 
 // Layout constants - Board-specific
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int LIST_START_Y = UI_CONTENT_Y + 10;
 static constexpr int LIST_MARGIN = 15;
 static constexpr int ITEM_TEXT_SIZE = 2;

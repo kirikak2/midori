@@ -16,7 +16,7 @@ ScreenPads& getScreenPads()
 }
 
 // Layout constants - dynamically calculated for different screen sizes
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 // Tab5: larger spacing and text for bigger screen
 static constexpr int PAD_TEXT_SIZE = 3;
 static constexpr int PAD_SPACING_X = 20;
