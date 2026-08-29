@@ -5,6 +5,9 @@
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "driver/ppa.h"
 #include "lgfx/v1/platforms/esp32p4/Panel_DSI.hpp"
+#if defined(CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL)
+#include "crowpanel_display.hpp"
+#endif
 #endif
 
 static const char* TAG = "UI_PPA";
@@ -45,12 +48,17 @@ bool setup()
 {
     g_tried = true;
 
+    // Only a Panel_DSI has the framebuffer this reaches into, and there is no
+    // way to ask an IPanel what it is -- so each board says so for itself.
+#if defined(CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL)
+    auto panel = crowpanel::dsi_panel();
+#else
     if (M5.Lcd.getBoard() != lgfx::board_t::board_M5Tab5) {
-        ESP_LOGI(TAG, "Not a Tab5 panel, using pushSprite");
+        ESP_LOGI(TAG, "Not a DSI panel, using pushSprite");
         return false;
     }
-
     auto panel = static_cast<lgfx::Panel_DSI*>(M5.Lcd.getPanel());
+#endif
     if (!panel) {
         ESP_LOGW(TAG, "No panel");
         return false;

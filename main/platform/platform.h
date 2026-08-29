@@ -12,7 +12,7 @@ extern "C" {
  * @brief Initialize the platform-specific hardware and logging
  *
  * On Freenove: No-op (serial logging works by default)
- * On M5Stack: Initialize LCD and redirect logs to display
+ * On M5Stack / CrowPanel: Initialize LCD and redirect logs to display
  *
  * @return ESP_OK on success
  */
@@ -30,7 +30,7 @@ void platform_deinit(void);
  */
 void platform_update(void);
 
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3) || defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(CONFIG_USB_MIDI_UI_ENABLED)
 /**
  * @brief Show a status message on LCD (non-log display area)
  * @param status Status message to display

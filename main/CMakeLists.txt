@@ -13,11 +13,21 @@ set(INCLUDE_DIRS
 )
 
 # Platform-specific sources
-if(CONFIG_USB_MIDI_BOARD_FREENOVE)
-    list(APPEND SRCS "platform/platform_freenove.c")
-elseif(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+if(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+    list(APPEND SRCS "platform/platform_m5stack.cpp")
+elseif(CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL)
     list(APPEND SRCS
-        "platform/platform_m5stack.cpp"
+        "platform/platform_crowpanel.cpp"
+        "platform/crowpanel_display.cpp"
+    )
+else()
+    list(APPEND SRCS "platform/platform_freenove.c")
+endif()
+
+# The on-device UI and the LCD boot console, on every board that has a display
+# (CONFIG_USB_MIDI_UI_ENABLED is derived from the board choice in Kconfig).
+if(CONFIG_USB_MIDI_UI_ENABLED)
+    list(APPEND SRCS
         "lcd_console/lcd_console.cpp"
         "ui/ui_common.cpp"
         "ui/ui_manager.cpp"

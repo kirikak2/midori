@@ -656,6 +656,56 @@ pad.show
 ```
 
 サンプル: [examples/xypad.rb](examples/xypad.rb)
+## Elecrow CrowPanel Advanced 7inch 対応（2026-08-28）
+
+詳細は [docs/CROWPANEL.md](docs/CROWPANEL.md) を参照。
+
+ESP32-P4 + 1024x600 MIPI-DSI (EK79007) + GT911。SoC は Tab5 と同じ
+ESP32-P4NRW32 なので PSRAM / Flash / チップリビジョンの設定は Tab5 と同じ。
+`./switch_board.sh crowpanel`（既定 `host`）。
+
+**M5GFX はこのボードを自動判別できない**ので、
+[main/platform/crowpanel_display.cpp](main/platform/crowpanel_display.cpp) が
+LovyanGFX のパーツ（`Bus_DSI` + 自前の `Panel_EK79007` + `Touch_GT911` +
+`Light_PWM`）を組み立て、`M5GFX::init(Panel_Device*)` で `M5.Lcd` に差し込む。
+このメソッドは自動判別を丸ごと飛ばすので、**main/ui 以下は無改造で動く**。
+`M5.begin()` は呼ばない（このボードに無い PMIC / IMU / IO エキスパンダを
+探しに行くだけ）。M5Unified から使うのはタッチだけなので
+`M5.Touch.begin(&M5.Display)` を手で呼び、`platform_update()` では
+`M5.update()` ではなく `M5.Touch.update()` を叩く。
+
+画面レイアウトの分岐は `CONFIG_USB_MIDI_BOARD_M5STACK_TAB5` ではなく
+[ui_common.h](main/ui/ui_common.h) の `UI_LAYOUT_LARGE` を見るように変えた
+（Tab5 と CrowPanel が共有する「広い画面向けレイアウト」）。ジオメトリ定数
+（UI_SCREEN_*, UI_PAD_*, UI_KNOB_*）だけがボードごとに分かれる。
+
+UI をビルドするかどうかも派生シンボル `CONFIG_USB_MIDI_UI_ENABLED`
+（CoreS3 / Tab5 / CrowPanel で y）に集約した。
+
+**SD カードは SDMMC スロット 0**（2026-08-28）:
+CLK 43 / CMD 44 / D0 39 は ESP32-P4 の**スロット 0 専用 IOMUX ピン**そのもので、
+P4 のスロット 0 は GPIO マトリクスを通せない。つまりピンを正しく設定しても
+スロット 1 のままではカードは見つからない。`picoruby-filesystem-fat` の ESP32
+ポートは `SDMMC_HOST_SLOT_1` 決め打ちだったので、`BoardConfig::SD_SLOT` /
+`SD_FREQ_KHZ` → `SDMMC.new(slot:, freq_khz:)` → `FAT.init_sdmmc` と渡せるように
+した。他ボードは `-1`（自動判定 → 従来どおりスロット 1）。
+
+**"USB 2.0" コネクタは HS ポート**（2026-08-29）:
+ESP32-P4 のデバイス側ポートは 2 つ（FS = OTG1.1 / HS = OTG2.0）あり、
+CrowPanel の "USB 2.0" は **HS** 側。`picoruby-usb_midi_device` は
+`TINYUSB_PORT_FULL_SPEED_0` 決め打ちだったので、繋がっていないパッドを
+叩いていた（install は成功しログも出るが、ホストからは何も見えない）。
+gem に `USB_MIDI_DEVICE_HIGH_SPEED`（既定 0）を追加し、CrowPanel だけ 1 を注入する。
+HS では **HS 用コンフィグディスクリプタ**（バルク EP が 64→512 byte）と
+**Device Qualifier** が必須なので gem 側に追加した。P4 の FSLS PHY mux 切り替え
+（`USB_MIDI_DEVICE_P4_PHY_SWAP`、Tab5 用）は HS では無関係なので既定 0 になる。
+
+**Tab5 のビルドを焼くと「起動しない」ように見える**（2026-08-28）:
+ログが `TinyUSB Driver installed on port 0` で止まって無音になる。ハングではなく、
+その直後の `tinyusb_console_init()` が stdout を誰も見ていない USB-C へ
+張り替えるだけ（`CONFIG_USB_MIDI_CONSOLE_ON_CDC`）。CrowPanel の `midi_device`
+モードでもコンソールは "USB 2.0" 側の CDC に移る。書き込みは常に CH343 UART
+ブリッジなので、UART でログを見たいときは `host` モードでビルドする。
 
 ## 既知の課題
 
@@ -748,6 +798,13 @@ Scripts 画面の `[Stop]` ボタン、またはシリアルコンソールの `
 | freenove | midi_device | ○ (17,18) | - | ○ (USB-C / TinyUSB) |
 | m5stack_tab5 | midi_device (既定) | ○ (53,54 / Port A) | ○ (USB-A) | ○ (USB-C / TinyUSB) |
 | m5stack_tab5 | serial | ○ (53,54 / Port A) | ○ (USB-A) | - |
+| crowpanel | host (既定) | ○ (47,48 / UART1) | ○ (USB-C 2.0) | - |
+| crowpanel | midi_device | ○ (47,48 / UART1) | - | ○ (USB-C 2.0 / TinyUSB) |
+
+CrowPanel の USB-C は 2 つ。`UART`（CH343 ブリッジ）は**常に**書き込み用で、
+`USB 2.0` は ESP32-P4 の**高速 (HS) ポート**に繋がっている。`serial` モードは
+USB-Serial/JTAG がコネクタに出ていないため選べない。
+詳細は [docs/CROWPANEL.md](docs/CROWPANEL.md)。
 
 ESP32-S3ボード（m5stack / freenove）はUSBコネクタが1つ・USB PHYも1つなので、
 Host（USB-OTG）とDevice（USB-Serial/JTAG または TinyUSB）は**排他**。
@@ -837,6 +894,16 @@ device = MIDI::Device.new(sam)
 `HAS_USB_MIDI_HOST` / `HAS_USB_MIDI_DEVICE` はボード分岐では設定しない。
 USBポートモード（後述）から自動導出される。
 
+画面付きの新ボードを足すときは、これに加えて：
+
+4. `main/Kconfig.projbuild` にボードを追加し、派生シンボル
+   `USB_MIDI_UI_ENABLED`（UI をビルドするか）と
+   `USB_MIDI_CONSOLE_ON_CDC`（コンソールが CDC に乗るか）の既定に足す
+5. `main/ui/ui_common.h` にジオメトリブロックを追加。広い画面なら
+   `UI_LAYOUT_LARGE` の条件にも足す（各 screen_*.cpp はこれだけを見る）
+6. `main/CMakeLists.txt` にプラットフォーム実装を追加
+7. `sdkconfig.defaults.<board>` と `switch_board.sh` のボード一覧
+
 **例**: M5Stack Tab5の設定
 ```cmake
 if(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
@@ -865,6 +932,14 @@ USBコネクタ（device 側になり得るポート）の役割を、ボード�
 
 ESP32-S3（m5stack / freenove）は USB コネクタ 1 つ・USB PHY 1 つを USB-OTG と
 USB-Serial/JTAG で共有するため、Host と Device は排他。Tab5 は USB-A が常に Host。
+
+**コンソールがどこに出るかは別の派生シンボルが決める**：
+`CONFIG_USB_MIDI_CONSOLE_ON_CDC`（`midi_device` モードで y）。`console_input.c` と
+`USB_MIDI_DEVICE_WITH_CDC` の注入はこのシンボルを見る。
+
+**TinyUSB がどちらのポートに載るかも板ごとに違う**：ESP32-P4 は FS (OTG1.1) と
+HS (OTG2.0) を持ち、コネクタはどちらか一方にしか繋がっていない。
+`USB_MIDI_DEVICE_HIGH_SPEED` を CMakeLists から注入する（Tab5 = FS / CrowPanel = HS）。
 
 ### 切り替え方法
 
@@ -921,9 +996,10 @@ gem は製品名を持たない汎用 USB-MIDI デバイス（既定は MIDI 単
 | 定義 | 値 |
 |------|-----|
 | `USB_MIDI_DEVICE_ENABLED` | 1（`CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE` のとき） |
-| `USB_MIDI_DEVICE_WITH_CDC` | 1（コンソール / `idf.py monitor` を同じ USB-C に載せるため） |
+| `USB_MIDI_DEVICE_WITH_CDC` | `CONFIG_USB_MIDI_CONSOLE_ON_CDC`（コンソール / `idf.py monitor` を同じコネクタに載せるため） |
+| `USB_MIDI_DEVICE_HIGH_SPEED` | CrowPanel のみ 1（P4 の HS ポートに配線されているため） |
 | `USB_MIDI_DEVICE_MANUFACTURER` | `"Midori"` |
-| `USB_MIDI_DEVICE_PRODUCT` | `"Midori Tab5"` / `"Midori CoreS3"` / `"Midori Freenove"` |
+| `USB_MIDI_DEVICE_PRODUCT` | `"Midori Tab5"` / `"Midori CoreS3"` / `"Midori Freenove"` / `"Midori CrowPanel"` |
 | `USB_MIDI_DEVICE_SERIAL` | `"MIDORI-<BOARD>-001"` |
 
 CDC を有効にすると IAD 複合デバイスになり PID とエンドポイント番号が

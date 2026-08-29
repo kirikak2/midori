@@ -1,6 +1,6 @@
 #!/bin/bash
 # Board / USB mode switching script for the Midori project
-# Usage: ./switch_board.sh [freenove|m5stack|m5stack_tab5] [host|serial|midi_device]
+# Usage: ./switch_board.sh [freenove|m5stack|m5stack_tab5|crowpanel] [host|serial|midi_device]
 
 set -e
 
@@ -15,9 +15,10 @@ Boards:
   freenove      - Freenove ESP32-S3 (Octal PSRAM)
   m5stack       - M5Stack CoreS3 SE (Quad PSRAM)
   m5stack_tab5  - M5Stack Tab5 (ESP32-P4, 1280x720, USB-A host)
+  crowpanel     - Elecrow CrowPanel Advanced 7" (ESP32-P4, 1024x600)
 
 USB modes (what the USB device-capable port is used for):
-  host          - USB-MIDI host; console on UART            [default: freenove, m5stack]
+  host          - USB-MIDI host; console on UART            [default: freenove, m5stack, crowpanel]
   serial        - USB-Serial/JTAG console (flash + JTAG)
   midi_device   - USB-MIDI device via TinyUSB (CDC + MIDI)  [default: m5stack_tab5]
 
@@ -28,6 +29,9 @@ Notes:
     the USB-C port does.
   * In 'midi_device' mode USB-Serial/JTAG is disconnected: flashing needs
     download mode (hold BOOT, tap RESET) and JTAG debugging is unavailable.
+  * CrowPanel flashes and logs over its CH343 UART bridge ("UART" USB-C) in
+    every mode, so the console never moves to USB there. 'serial' is not
+    available: the P4's USB-Serial/JTAG is not brought out to a connector.
 
 Examples:
   ./switch_board.sh m5stack                 # CoreS3 as USB-MIDI host
@@ -35,6 +39,8 @@ Examples:
   ./switch_board.sh m5stack midi_device     # CoreS3 as a USB-MIDI instrument
   ./switch_board.sh freenove midi_device    # Freenove as a USB-MIDI instrument
   ./switch_board.sh m5stack_tab5 serial     # Tab5 with USB-C serial console
+  ./switch_board.sh crowpanel               # CrowPanel as USB-MIDI host
+  ./switch_board.sh crowpanel midi_device   # CrowPanel as a USB-MIDI instrument
 EOF
 }
 
@@ -66,6 +72,11 @@ case "$BOARD" in
     m5stack_tab5)
         BOARD_LABEL="M5Stack Tab5 (ESP32-P4)"
         DEFAULT_MODE="midi_device"
+        TARGET="esp32p4"
+        ;;
+    crowpanel)
+        BOARD_LABEL="Elecrow CrowPanel Advanced 7in (ESP32-P4)"
+        DEFAULT_MODE="host"
         TARGET="esp32p4"
         ;;
     *)
@@ -102,6 +113,17 @@ done
 
 if [ "$BOARD" = "m5stack_tab5" ] && [ "$MODE" = "host" ]; then
     echo "Note: Tab5 always has the USB-A host; 'host' mode just leaves USB-C unused."
+fi
+
+# The CrowPanel's USB-Serial/JTAG never reaches a connector, so a 'serial'
+# build would come up with its console wired to nothing: no boot log, no
+# prompt, no way to tell it apart from a board that failed to start.
+if [ "$BOARD" = "crowpanel" ] && [ "$MODE" = "serial" ]; then
+    echo "Error: 'serial' is not available on the CrowPanel."
+    echo "       Its USB-Serial/JTAG is not brought out to a connector; the"
+    echo "       console is the CH343 UART bridge on the 'UART' USB-C port,"
+    echo "       which works in both 'host' and 'midi_device' mode."
+    exit 1
 fi
 
 echo "Switching to $BOARD_LABEL - $MODE_LABEL..."
@@ -141,6 +163,11 @@ echo "  idf.py set-target $TARGET"
 echo "  idf.py build flash monitor"
 if [ "$MODE" = "midi_device" ]; then
     echo ""
-    echo "Reminder: USB-MIDI device mode disconnects USB-Serial/JTAG."
-    echo "  Enter download mode before flashing (hold BOOT, tap RESET)."
+    if [ "$BOARD" = "crowpanel" ]; then
+        echo "Note: flashing and the console stay on the CH343 UART bridge"
+        echo "  ('UART' USB-C), so nothing changes about how you flash."
+    else
+        echo "Reminder: USB-MIDI device mode disconnects USB-Serial/JTAG."
+        echo "  Enter download mode before flashing (hold BOOT, tap RESET)."
+    fi
 fi

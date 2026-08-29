@@ -1,0 +1,85 @@
+# Elecrow CrowPanel Advanced 7.0 inch specific settings (ESP32-P4)
+#
+# Board settings only. What the USB 2.0 connector does (unused / USB-MIDI
+# device) lives in sdkconfig.defaults.usbmode.*, which switch_board.sh appends
+# to this file.
+#
+# The board carries two USB-C connectors:
+#   "UART"    - CH343 USB-UART bridge on UART0 (GPIO37/38). Flashing, console
+#               and `idf.py monitor` all use this one, in every USB mode.
+#   "USB 2.0" - wired to the ESP32-P4's USB 2.0 controller. The P4's
+#               USB-Serial/JTAG is not brought out, so unlike on the S3 boards
+#               nothing is lost by handing this port to USB-MIDI.
+CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL=y
+
+# Target: ESP32-P4 (RISC-V dual-core)
+CONFIG_IDF_TARGET="esp32p4"
+
+# Enable experimental features (required for 200MHz PSRAM)
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# ESP32-P4 minimum chip revision (early silicon).
+# The CrowPanel's ESP32-P4 is Rev v1.3, same as the Tab5's. ESP-IDF v5.5.5
+# raised the default minimum to Rev v3.1, which is a different, INCOMPATIBLE
+# silicon family and rejects v1.x hardware at flash time. Opt into pre-v3
+# support and pin the minimum to Rev v1.0 so v1.3 boots.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# Custom partition table
+# CONFIG_PARTITION_TABLE_SINGLE_APP is not set
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# PSRAM configuration (ESP32-P4NRW32: 32MB PSRAM in Hex mode)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+# The MIPI-DSI controller scans the framebuffer straight out of PSRAM, so the
+# same 200MHz requirement as the Tab5 applies.
+# CONFIG_SPIRAM_SPEED_80M is not set
+# CONFIG_SPIRAM_SPEED_20M is not set
+CONFIG_SPIRAM_SPEED_200M=y
+
+# Use PSRAM for memory allocation
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# Compiler optimization for size
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# USB Host settings for the USB 2.0 port (MIDI host)
+CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=4096
+
+# USB Host power management
+# Disable USB suspend to prevent disconnection issues
+CONFIG_USB_HOST_HW_BUFFER_BIAS_BALANCED=y
+
+# Display settings (1024x600 landscape).
+# Font size 3 rather than the Tab5's 4: the panel is 1024 wide, not 1280.
+CONFIG_USB_MIDI_LCD_FONT_SIZE=3
+CONFIG_USB_MIDI_LCD_BACKLIGHT_LEVEL=200
+
+# Use the full 16MB flash. Needed for the coredump partition, which sits
+# beyond the first 2MB.
+# CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Save a core dump to flash on panic. The console is on UART here so panics do
+# reach the terminal, but a dump survives a reset:
+#   idf.py coredump-info
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# Enable mbedtls CMAC support for PicoRuby
+CONFIG_MBEDTLS_CMAC_C=y
+
+# Brownout detection level
+# Level 5 (2.66V) - lowest level to prevent false triggers. The panel alone
+# draws several watts, so a host-powered USB port can sag under load.
+# CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7 is not set
+# CONFIG_ESP_BROWNOUT_DET_LVL_SEL_6 is not set
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
+CONFIG_ESP_BROWNOUT_DET_LVL=5
