@@ -17,7 +17,7 @@ ScreenXYPad& getScreenXYPad()
     return s_screenXYPad;
 }
 
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int DOT_RADIUS = 16;
 static constexpr int LABEL_TEXT_SIZE = 3;
 static constexpr int64_t DRAW_INTERVAL_US = 33000;  // ~30fps, same pacing as Tombola

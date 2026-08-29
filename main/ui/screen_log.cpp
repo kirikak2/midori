@@ -20,7 +20,7 @@ ScreenLog& getScreenLog()
 static portMUX_TYPE s_log_mutex = portMUX_INITIALIZER_UNLOCKED;
 
 // Board-specific text size and line settings
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int LOG_TEXT_SIZE = 2;
 static constexpr int LOG_LINE_HEIGHT = 24;
 static constexpr int LOG_LEFT_MARGIN = 10;
@@ -43,7 +43,7 @@ ScreenLog::ScreenLog()
     , m_isActive(false)
     , m_sprite(nullptr)
 {
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
     // Allocate log buffer from PSRAM on Tab5 (11KB buffer)
     m_logBuffer = (char (*)[MAX_LINE_LENGTH])heap_caps_malloc(
         MAX_LOG_LINES * MAX_LINE_LENGTH,

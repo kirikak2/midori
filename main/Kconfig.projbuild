@@ -25,7 +25,28 @@ menu "USB MIDI Host Configuration"
                 USB-A port for USB-MIDI host.
                 USB-C port for serial console and USB device mode.
                 Larger screen supports 4x3 pad grid (12 pads).
+
+        config USB_MIDI_BOARD_ELECROW_CROWPANEL
+            bool "Elecrow CrowPanel Advanced 7inch (ESP32-P4)"
+            help
+                Elecrow CrowPanel Advanced 7.0 inch with ESP32-P4 (RISC-V),
+                1024x600 MIPI-DSI display (EK79007) and a GT911 touch panel.
+                Two USB-C connectors: one is a CH343 USB-UART bridge (flashing
+                and console), the other is wired to the ESP32-P4's USB 2.0
+                controller.
+                Screen supports the same 4x3 pad grid as the Tab5 (12 pads).
     endchoice
+
+    config USB_MIDI_UI_ENABLED
+        bool
+        default y if USB_MIDI_BOARD_M5STACK_CORES3
+        default y if USB_MIDI_BOARD_M5STACK_TAB5
+        default y if USB_MIDI_BOARD_ELECROW_CROWPANEL
+        default n
+        help
+            Derived (not user-visible): whether this board has a display and
+            touch panel, and therefore builds the on-device UI (main/ui) and
+            the LCD boot console. Boards without one (Freenove) log to serial.
 
     choice USB_MIDI_USB_MODE
         prompt "USB port mode"
@@ -41,6 +62,12 @@ menu "USB MIDI Host Configuration"
             On the Tab5 (ESP32-P4) this setting only describes the USB-C
             port. The USB-A port is always a USB-MIDI host, independent of
             this choice.
+
+            On the CrowPanel (ESP32-P4) this describes the "USB 2.0" USB-C
+            connector, which is wired to the chip's high-speed OTG port.
+            Flashing always goes through the separate CH343 UART bridge, so
+            'serial' is not available there (USB-Serial/JTAG is not brought
+            out to any connector).
 
         config USB_MIDI_USB_MODE_HOST
             bool "USB-MIDI host (no USB device)"
@@ -85,8 +112,26 @@ menu "USB MIDI Host Configuration"
             is available in this build. Tab5 always has one on USB-A; the
             single-port ESP32-S3 boards only have one in USB host mode.
 
-    menu "M5Stack Display Settings"
-        depends on USB_MIDI_BOARD_M5STACK_CORES3 || USB_MIDI_BOARD_M5STACK_TAB5
+    config USB_MIDI_CONSOLE_ON_CDC
+        bool
+        default y if USB_MIDI_USB_MODE_MIDI_DEVICE
+        default n
+        help
+            Derived (not user-visible): whether the serial console rides on
+            the TinyUSB CDC interface instead of UART / USB-Serial-JTAG.
+
+            This is what makes `idf.py monitor` follow the USB-MIDI device
+            connector in that mode. Note what that means on the console you
+            were watching before: the log stops at "TinyUSB Driver installed"
+            and everything after it goes to the other connector, which looks
+            exactly like a hang if nothing is listening there.
+
+            On the CrowPanel, flashing still happens over its CH343 UART
+            bridge; only the console moves. Build in 'host' mode instead to
+            keep the console on UART.
+
+    menu "Display Settings"
+        depends on USB_MIDI_UI_ENABLED
 
         config USB_MIDI_LCD_FONT_SIZE
             int "LCD Font Size (pixels)"

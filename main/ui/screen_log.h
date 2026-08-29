@@ -30,10 +30,13 @@ public:
 
 private:
     // Board-specific display settings
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
     static constexpr int MAX_LOG_LINES = 100;    // Increased back to 100 with PSRAM
     static constexpr int MAX_LINE_LENGTH = 110;  // Increased back to 110 with PSRAM
-    static constexpr int VISIBLE_LINES = 25;     // Lines visible in content area (620px / 24px)
+    // Lines visible in the content area, at the 24px LOG_LINE_HEIGHT that
+    // screen_log.cpp uses on these boards (Tab5 620px -> 25, CrowPanel 500px
+    // -> 20).
+    static constexpr int VISIBLE_LINES = UI_CONTENT_HEIGHT / 24;
 #else
     static constexpr int MAX_LOG_LINES = 100;
     static constexpr int MAX_LINE_LENGTH = 54;

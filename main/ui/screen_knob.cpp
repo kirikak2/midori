@@ -37,7 +37,7 @@ static constexpr float MIN_ARC_DEG = 0.05f;
 // inside the ring's inner circle, which is what caps it at five.
 static constexpr int VALUE_MAX_CHARS = 5;
 
-#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
+#if defined(UI_LAYOUT_LARGE)
 static constexpr int BANK_TEXT_SIZE = 4;
 #else
 static constexpr int BANK_TEXT_SIZE = 2;

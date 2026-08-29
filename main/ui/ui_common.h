@@ -10,6 +10,16 @@
 extern "C" {
 #endif
 
+// Boards roomy enough for the spacious layout: bigger fonts, a 4x3 grid,
+// centred pad/knob grids. Screens branch on this rather than on a board
+// symbol, so a new large-screen board only has to add its geometry below.
+// Everything in the large branches is expressed relative to UI_SCREEN_WIDTH /
+// UI_CONTENT_* where the position matters.
+#if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5) || \
+    defined(CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL)
+#define UI_LAYOUT_LARGE 1
+#endif
+
 // Screen dimensions - board specific
 #if defined(CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
 // M5Stack Tab5: 5-inch 1280x720 display
@@ -56,6 +66,54 @@ extern "C" {
 #define UI_KNOB_BANK_W     50
 #define UI_KNOB_BANK_H    140
 #define UI_KNOB_BANK_GAP   20
+
+#elif defined(CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL)
+// Elecrow CrowPanel Advanced 7": 1024x600 display, native landscape
+#define UI_SCREEN_WIDTH         1024
+#define UI_SCREEN_HEIGHT        600
+
+// Layout constants (same bar heights as the Tab5; only the middle shrinks)
+#define UI_STATUS_BAR_HEIGHT     40
+#define UI_NAV_BAR_HEIGHT        60
+#define UI_CONTENT_HEIGHT       (UI_SCREEN_HEIGHT - UI_STATUS_BAR_HEIGHT - UI_NAV_BAR_HEIGHT)  // 500px
+#define UI_CONTENT_Y            UI_STATUS_BAR_HEIGHT
+
+// Navigation bar touch zones (3 equal sections)
+#define UI_NAV_ZONE_WIDTH       (UI_SCREEN_WIDTH / 3)
+#define UI_NAV_ZONE_LEFT_END    341
+#define UI_NAV_ZONE_RIGHT_START 683
+
+// Pad configuration (4x3 grid = 12 pads).
+// screen_pad centres the grid: 4*230 + 3*20 = 980 of 1024 across,
+// 3*150 + 2*20 = 490 of the 500px content area down.
+#define UI_PAD_COUNT       12
+#define UI_PAD_COLS        4
+#define UI_PAD_ROWS        3
+#define UI_PAD_WIDTH      230
+#define UI_PAD_HEIGHT     150
+#define UI_PAD_MARGIN      20
+
+// Knob configuration (4x3 grid = 12 knobs).
+// The grid is shifted left to leave room for the bank strip at the right
+// edge: 12 + 4*226 + 3*16 = 964, strip at 972..1016.
+#define UI_KNOB_COUNT      12
+#define UI_KNOB_COLS        4
+#define UI_KNOB_ROWS        3
+#define UI_KNOB_CELL_W    226
+#define UI_KNOB_CELL_H    150
+#define UI_KNOB_GAP_X      16
+#define UI_KNOB_GAP_Y      16
+#define UI_KNOB_GRID_X     12
+#define UI_KNOB_GRID_Y     52
+#define UI_KNOB_R_OUT      56     // Ring outer radius
+#define UI_KNOB_R_IN       43     // Ring inner radius
+#define UI_KNOB_RING_CY    62     // Ring centre, from the cell's top edge
+#define UI_KNOB_LABEL_Y   126     // Label baseline, from the cell's top edge
+#define UI_KNOB_TEXT_SIZE   2
+#define UI_KNOB_BANK_X    972     // Bank strip: 4*112 + 3*16 = 496 of 500px
+#define UI_KNOB_BANK_W     44
+#define UI_KNOB_BANK_H    112
+#define UI_KNOB_BANK_GAP   16
 
 #else
 // M5Stack CoreS3 SE: 320x240 display (default)
