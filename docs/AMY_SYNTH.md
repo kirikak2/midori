@@ -7,30 +7,31 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 - 対象ボード: M5Stack Tab5 / CrowPanel（どちらも ESP32-P4NRW32）
 - 対象外: M5Stack CoreS3 / Freenove（ESP32-S3）。CoreS3 も I2S アンプ（AW88298）を
   持つが、S3 の CPU / 内部 RAM で FM が何ボイス出るか分からないため当面サポートしない
-- 状態: **Phase 0〜3 を実装済み（2026-10-03）**。Tab5 / CrowPanel ともビルドは通るが、
-  **実機での動作は未確認**（下の「実装状況」）。方式と未確定事項は 2026-10-03 に決定済み
-  （末尾の「決定事項」）
+- 状態: **Phase 0〜3 を実装済み**。**Tab5 では内蔵スピーカーから正しく鳴ることを確認済み
+  （2026-10-04）**。CrowPanel はビルドのみで、実機では未確認（下の「実装状況」）。
+  方式と未確定事項は 2026-10-03 に決定済み（末尾の「決定事項」）
 - AMY: `shorepine/amy@00141f2`（2026-10-01）を `mrbgems/picoruby-amy/lib/amy` に
   サブモジュールで固定
 - 使い方: [mrbgems/picoruby-amy/README.md](../mrbgems/picoruby-amy/README.md) /
   サンプル [examples/amy_fm.rb](../examples/amy_fm.rb)
 
-## 実装状況（2026-10-03）
+## 実装状況（2026-10-04）
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| 0 | picoruby-midi のトランスポート登録表 | 実装済み |
-| 1 | パーティション拡張・ボードのオーディオ電源・gem の I2S とオーディオタスク | 実装済み・実機未確認 |
-| 2 | `AMY::Synth`（トランスポート）・`MIDIDevices.amy`・`BoardConfig::HAS_AMY` | 実装済み・実機未確認 |
-| 3 | `AMY.command` / `AMY::FM` / CC マッピング / 直接セット・サンプル | 実装済み・実機未確認 |
+| 0 | picoruby-midi のトランスポート登録表 | 実装済み（ホストで単体テスト済み） |
+| 1 | パーティション拡張・ボードのオーディオ電源・gem の I2S とオーディオタスク | 実装済み。Tab5 で動作確認済み / CrowPanel は未確認 |
+| 2 | `AMY::Synth`（トランスポート）・`MIDIDevices.amy`・`BoardConfig::HAS_AMY` | 実装済み。Tab5 で動作確認済み |
+| 3 | `AMY.command` / `AMY::FM` / CC マッピング / 直接セット・サンプル | 実装済み。Tab5 で発音を確認済み。現行の `examples/amy_fm.rb`（momentary パッド・XYPad・3 バンクのノブ）は未確認 |
 | 4 | `MIDI.route`（C 側の MIDI Thru） | 未着手 |
-| 5 | 負荷・遅延の詰め | 未着手（実機が要る） |
+| 5 | 負荷・遅延の詰め | 未着手（`AMY.render_load` の実測から） |
 
 ファイル：
 
 | 場所 | 中身 |
 |------|------|
-| `mrbgems/picoruby-amy/` | gem 本体（独立リポジトリではなく Midori 内の通常ディレクトリ。`lib/amy` だけがサブモジュール） |
+| `mrbgems/picoruby-amy/` | gem 本体。独立リポジトリ（[kirikak2/picoruby-amy](https://github.com/kirikak2/picoruby-amy)）を Midori のサブモジュールとして取り込み、その中で `lib/amy`（shorepine/amy）をサブモジュールにしている |
+| `mrbgems/picoruby-amy/mrblib/dx7_patches.rb` | DX7 プリセット名の表（`AMY.patch_name`）。AMY の `patches.h` のコメントから生成 |
 | `mrbgems/picoruby-amy/ports/esp32/amy_port.c` | I2S・オーディオタスク・`amy_start`・トランスポート登録 |
 | `mrbgems/picoruby-amy/mrblib/amy.rb` | `AMY` / `AMY::Synth` / `AMY::FM` / `AMY::FM::Operator` |
 | `components/amy/CMakeLists.txt` | AMY エンジンの IDF コンポーネント（P4 のときだけ中身がある） |
@@ -62,15 +63,31 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 - アプリ 2.12 MB（AMY 込み）。拡張前の factory（1.94 MB）には入らない
 - AMY が内部 RAM に静的に置く量：.data 11.0 KB（クリッピング表など `DRAM_ATTR`）、
   .bss 4.8 KB、IRAM .text 10.2 KB。[MEMORY_ALLOCATION.md](MEMORY_ALLOCATION.md) の
-  「内部 DRAM の静的配置が変わると LCD が出なくなることがある」に当たり得るので、
-  **実機で画面が正常に出るかを最初に確認する**
+  「内部 DRAM の静的配置が変わると LCD が出なくなることがある」に当たり得るとして
+  警戒したが、**Tab5 では起動・画面表示とも問題なかった**
 
-実機で最初に確認すること：
+実機で確認したこと（Tab5 / midi_device、2026-10-04）：
 
-1. 起動して画面が出る（上記の内部 RAM の件）
-2. `AMY.bleep` で両ボードのスピーカーから音が出る。Tab5 はピッチが正しいか
-   （MCLK 128 × fs と ES8388 reg24 の整合）、CrowPanel は左右に分かれて出るか
-3. `examples/amy_fm.rb` のパッド・ノブ。`AMY.render_load` の値（ログに 5 秒ごと）
+- 起動して画面が出る（上記の内部 RAM の件は問題なし）
+- `AMY.start` の後も USB-C のコンソールと USB-MIDI デバイスが生きている
+  （§2「Tab5：I2S のピンが USB PHY のパッドと重なる」の修正後）
+- ES8388 経由で内蔵スピーカーから正しく鳴る（`AMY.bleep`、`AMY::FM` + `MIDI::Device` で発音）
+
+実機確認の途中で起きた問題（どちらも修正済み。詳細は §2）：
+
+1. **書き込み後に画面が真っ暗**：拡張したアプリ領域が PicoRuby の固定アドレスの
+   フラッシュ FAT（0x210000〜）と重なり、起動時のフォーマットでアプリが壊れた。
+   factory を 0x310000 へ移した（「メモリとフラッシュ」）
+2. **`AMY.start` でコンソールが止まり、パッドも無音**：I2S のピン（GPIO 26/27）が USB PHY1 の
+   パッドで、ESP-IDF が既定の PHY mux を前提に USB-C 側の TinyUSB のパッドを切っていた。
+   gem の port でパッド有効フラグを mux の実状に合わせて直す（`p4_usb_pads_fixup()`）
+
+まだ確認していないこと：
+
+1. CrowPanel 全般：音が出るか、パンを振った音が左右に分かれて出るか
+2. 現行の `examples/amy_fm.rb`：momentary パッド、XYPad のグライドの音程、ノブ（パッチ名の表示、
+   パッチ切り替え後の CC マッピングの掛け直し、オペレータの ADSR）
+3. `AMY.render_load` の値（`examples/amy_fm.rb` がログに 5 秒ごとに出す）
 4. スクリプトを止めて別のスクリプトを起動したとき、前の音色や CC マッピングが残らない
 
 このドキュメントは次の 4 点を検討する。
@@ -757,12 +774,17 @@ t = UI::Tombola.new(sides: 6, device: dev)
 
 確認が要る点：
 
-- **XYPad のグライド**は何で実現しているか（ピッチベンド / ノートの付け替え）。
-  ピッチベンドなら AMY のベンド幅と XYPad の `glide_range` を合わせる設定が要る
+- **XYPad のグライド**：解決済み。XYPad の内蔵ハンドラはピッチベンドで実現しており、
+  AMY のベンド幅（±2 半音固定）に合わせて `glide_range: 2` にする
 - **Knob の更新頻度**。値の変化はノブごとに最新値 1 通に潰れるので、AMY への
   コマンド洪水にはならない想定だが、`UI.process` の周期で段差が出るかは実機で聴く
-- **FM プリセット名**。DX7 128 個の名前を UI に出すなら名前表を gem に持つ
-  （`patches.h` には名前が無い可能性があるので要確認）
+- **FM プリセット名**：解決済み。`patches.h` にはコメントとしてしか無いので、そこから
+  生成した名前表を gem に持たせた（`AMY.patch_name(n)`）
+
+実際のサンプル（[examples/amy_fm.rb](../examples/amy_fm.rb)）は上の例から次の点を変えた：
+パッドは `:momentary` で `note_on` / `note_off`、プリセット切り替えはパッドではなくノブ
+（ラベルにプリセット名を表示）、メインループは `loop do` ではなく `MIDI.bpm_loop`
+（素の `loop` では VM がタスクを切り替えず、UI や MIDI のイベントが処理されない）。
 
 ---
 
@@ -794,8 +816,8 @@ t = UI::Tombola.new(sides: 6, device: dev)
 
 ## 未確定事項（実機確認が必要）
 
-- ES8388 の MCLK 比：128 × fs / reg24 = 0x00 に決定済み（§2「ES8388 の MCLK 比」）。
-  44.1 kHz で M5Unified のレジスタ列のまま正しいピッチで鳴るかを実機で確認する
+- ES8388 の MCLK 比：128 × fs / reg24 = 0x00（§2「ES8388 の MCLK 比」）。
+  **Tab5 で M5Unified のレジスタ列のまま正しく鳴ることを確認済み（2026-10-04）**
 - CrowPanel：回路図で確定済み（NS4168 × 2 で L / R、GPIO 30 は AO3401 経由の
   電源スイッチ、Philips 形式。§2）。実機ではパンを振った音が左右に分かれて
   出るか（L / R の割り当てが逆でないか）だけ確認する
@@ -807,7 +829,7 @@ t = UI::Tombola.new(sides: 6, device: dev)
 - DX7 プリセット名：AMY の `patches.h` にはコメントにしか無いので、そこから生成した
   `mrblib/dx7_patches.rb`（`AMY.patch_name(n)`）を gem に入れた。AMY を更新したら再生成する
 - ALGO osc（osc 0）に掛けたフィルタ（`fm.filter_freq=`）が FM の出力全体に効くか（実機で聴く）
-- 内部 RAM の静的使用量が約 26 KB 増えたことで、起動時に画面が出なくならないか
-  （「実装状況」の項）
+- 内部 RAM の静的使用量が約 26 KB 増えたことで、起動時に画面が出なくならないか：
+  **Tab5 では問題なし（2026-10-04）**。CrowPanel は未確認
 - Ruby VM と描画の分離：AMY のソースで確認済み（キューロック + 描画ロック。
   §4「直接セット API」）

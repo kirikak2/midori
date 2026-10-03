@@ -142,7 +142,7 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-sam2695` | SAM2695 ラッパ（uart_midi 上の薄い層） |
 | `mrbgems/picoruby-ui` | M5Stack UI |
 | `mrbgems/picoruby-dfrobot_rotary_encoder` | DFRobot SEN0502 |
-| `mrbgems/picoruby-amy` | AMY ソフトシンセ（P4 ボードのみ。通常ディレクトリ、`lib/amy` がサブモジュール） |
+| `mrbgems/picoruby-amy` | AMY ソフトシンセ（P4 ボードのみ。中で `lib/amy`＝shorepine/amy をサブモジュールにしている） |
 
 これらは upstream picoruby には含めない方針のため、`components/picoruby-esp32/picoruby/mrbgems/`
 から移動した。ビルドへの取り込みは以下の 2 箇所：
@@ -718,7 +718,8 @@ HS では **HS 用コンフィグディスクリプタ**（バルク EP が 64�
 [mrbgems/picoruby-amy/README.md](mrbgems/picoruby-amy/README.md) を参照。
 
 Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepine/amy) で
-音を出す。CoreS3 / Freenove は対象外。**実機での動作は未確認**（ビルドのみ確認済み）。
+音を出す。CoreS3 / Freenove は対象外。**Tab5 では内蔵スピーカーから正しく鳴ることを確認済み**
+（2026-10-04）。CrowPanel はビルドのみで実機は未確認。
 
 - gem `picoruby-amy`（`require 'amy'`）が AMY エンジン・I2S・オーディオタスクを持ち、
   picoruby-midi のトランスポートとして振る舞う：`MIDI::Device.new(MIDIDevices.amy)`
