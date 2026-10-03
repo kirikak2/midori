@@ -10,7 +10,12 @@ set(INCLUDE_DIRS
     "ui"
     "../mrbgems/picoruby-usb_midi_host/include"
     "../mrbgems/picoruby-usb_midi_device/include"
+    "../mrbgems/picoruby-amy/include"
 )
+
+# Codec / amplifier power-up for the AMY synth (picoruby-amy); empty on
+# boards without it.
+list(APPEND SRCS "platform/board_audio.cpp")
 
 # Platform-specific sources
 if(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)

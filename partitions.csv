@@ -1,7 +1,15 @@
 # Name,   Type, SubType, Offset,  Size, Flags
-# Note: Larger factory partition for PicoRuby integration
 nvs,      data, nvs,     0x9000,  0x6000,
 phy_init, data, phy,     0xf000,  0x1000,
-factory,  app,  factory, 0x10000, 0x1F0000,
 # Core dump storage (task stacks only; CAPTURE_DRAM fails to write here).
 coredump, data, coredump, 0x200000, 0x10000,
+# PicoRuby's flash FAT disk. picoruby-filesystem-fat's ESP32 port reads and
+# writes this range at a hard-coded offset (FLASH_OFFSET 0x210000,
+# FLASH_SIZE 1 MB in ports/esp32/flash_disk.c), not through the partition
+# table. This entry only reserves it so nothing else is placed on top: an
+# app overlapping it gets its tail erased when PicoRuby formats the disk.
+picoruby_fat, data, fat, 0x210000, 0x100000,
+# ~3.94 MB, after the FAT disk: room for the AMY synth (patch tables, PCM
+# samples) on the P4 boards. Ends at 0x700000, inside the smallest flash we
+# build for (Freenove, 8 MB). 0x10000-0x200000 is left unused.
+factory,  app,  factory, 0x310000, 0x3F0000,

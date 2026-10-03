@@ -142,6 +142,7 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-sam2695` | SAM2695 ラッパ（uart_midi 上の薄い層） |
 | `mrbgems/picoruby-ui` | M5Stack UI |
 | `mrbgems/picoruby-dfrobot_rotary_encoder` | DFRobot SEN0502 |
+| `mrbgems/picoruby-amy` | AMY ソフトシンセ（P4 ボードのみ。通常ディレクトリ、`lib/amy` がサブモジュール） |
 
 これらは upstream picoruby には含めない方針のため、`components/picoruby-esp32/picoruby/mrbgems/`
 から移動した。ビルドへの取り込みは以下の 2 箇所：
@@ -151,8 +152,12 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 - `components/picoruby-esp32/CMakeLists.txt` … ESP32 port の C ファイル /
   include ディレクトリを `${CMAKE_SOURCE_DIR}/mrbgems/<gem>/...` で参照
 
-**注意**: gem の `mrblib/*.rb` や C を変更したら `idf.py fullclean`
-（`idf.py build` だけでは gem の .rb が再コンパイルされないことがある）。
+**注意**: gem の `mrblib/*.rb` や `src/`（mruby/c バインディング）を変更したら
+`rm -rf components/picoruby-esp32/picoruby/build/esp32` してからビルドする。
+CMake は rake（PicoRuby のビルド）を「`libmruby.a` が無いとき」にしか呼ばないので、
+`idf.py build` はもちろん `idf.py fullclean`（`build/` を消すだけ）でも gem の変更は
+反映されない（2026-10-04 に確認）。`ports/` の C は IDF 側のビルドなので通常の
+`idf.py build` で反映される。
 
 ### 重要：main_task.rbは自動生成ファイル
 
@@ -706,6 +711,52 @@ HS では **HS 用コンフィグディスクリプタ**（バルク EP が 64�
 張り替えるだけ（`CONFIG_USB_MIDI_CONSOLE_ON_CDC`）。CrowPanel の `midi_device`
 モードでもコンソールは "USB 2.0" 側の CDC に移る。書き込みは常に CH343 UART
 ブリッジなので、UART でログを見たいときは `host` モードでビルドする。
+
+## AMY シンセサイザー（2026-10-03）
+
+詳細は [docs/AMY_SYNTH.md](docs/AMY_SYNTH.md)、API は
+[mrbgems/picoruby-amy/README.md](mrbgems/picoruby-amy/README.md) を参照。
+
+Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepine/amy) で
+音を出す。CoreS3 / Freenove は対象外。**実機での動作は未確認**（ビルドのみ確認済み）。
+
+- gem `picoruby-amy`（`require 'amy'`）が AMY エンジン・I2S・オーディオタスクを持ち、
+  picoruby-midi のトランスポートとして振る舞う：`MIDI::Device.new(MIDIDevices.amy)`
+- AMY エンジンは IDF コンポーネント `components/amy`（ソースは gem の `lib/amy`）
+- ボード依存（Tab5 の ES8388 + SPK_EN、CrowPanel の GPIO 30 アンプ電源）は
+  [main/platform/board_audio.cpp](main/platform/board_audio.cpp) が電源コールバックとして注入。
+  ピン等は `components/picoruby-esp32/CMakeLists.txt` から `AMY_GEM_*` 定義で注入
+- **オーディオタスクは Core 0 / 優先度 3 の 1 本だけ**（描画 + I2S 書き込み）。
+  AMY 内部のレンダタスクは使わない。Core 1 に置くと Ruby VM（優先度 3）に止められる
+- **Tab5 の I2S（DOUT=26 / BCLK=27）は USB PHY1 のパッドを使う**。ESP-IDF の
+  `gpio_ll_func_sel()` は 24〜27 を別機能にするとき「PHY0 = USB-Serial/JTAG、PHY1 = OTG1.1」
+  という既定の mux を前提に USB パッドを切るが、Tab5 の midi_device モードは
+  OTG1.1 を PHY0（USB-C）へ付け替えている。そのため I2S の起動で **USB-C の
+  TinyUSB（CDC コンソール + USB-MIDI デバイス）が切れ**、PHY1 を実際に持つ USJ の
+  パッドは I2S の下で生きたまま残っていた（2026-10-04、irb の `AMY.start` で
+  コンソールが止まり、パッドも無音）。gem の port（`p4_usb_pads_fixup()`）が I2S 設定の
+  前後でパッド有効フラグを保存・復元し、mux の実状に合わせて I2S のピン側の
+  コントローラだけを切る
+- オーディオタスク（Core 0）はコンソールに書かない（stdout / stderr を `/dev/null` に。
+  起動ログは `AMY_GEM_start()` を呼んだ側で出す）。`AMY::FM` は synth フラグ 8
+  （`SYNTH_FLAGS_NO_NOTE_WARNINGS`）を立て、esp_timer から届く自動ノートオフで
+  AMY が警告を出さないようにしている。いずれも CDC コンソールへの他コアからの書き込みを
+  避けるための予防
+- Tab5 の MCLK は 128 × fs（ES8388 reg24 = 0x00 と対）。片方だけ変えるとピッチが 2 倍ずれる
+- スクリプト停止時に `picoruby_esp32_midi_cleanup()` が `AMY_GEM_reset()` を呼び、
+  synth・パッチ・CC マッピングを消す（オーディオは止めない）
+- アプリが 2 MB を超えたので `partitions.csv` の factory を 0x3F0000 に拡張し、
+  **0x310000 に移した**。PicoRuby のフラッシュ FAT は `flash_disk.c` の**固定アドレス
+  0x210000〜0x310000** を直接使う（パーティション表を見ない）ので、ここに重ねると
+  起動時のフォーマットでアプリが壊れて画面が真っ暗になる（2026-10-04 に発生）
+
+### picoruby-midi のトランスポート登録表（2026-10-03）
+
+`MIDI_Note_trigger()` / ノートスケジューラ / スクリプト停止時のクリーンアップは、
+送信先を `MIDI_transport_send(mask, ...)` で登録表から引く。USB Host 0x01 / UART 0x02 /
+USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコンストラクタで登録）、
+新しいトランスポート gem は `MIDI_transport_register()` で 0x08 以降のビットを得て、
+それを Ruby の `transport_id` として返す。picoruby-midi 側の改修は不要。
 
 ## 既知の課題
 

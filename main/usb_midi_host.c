@@ -25,6 +25,7 @@
 #include "platform.h"
 #include "picoruby-esp32.h"
 #include "picoruby_supervisor.h"
+#include "board_audio.h"
 #include "console_input.h"
 
 #if CONFIG_USB_MIDI_HOST_ENABLED
@@ -40,6 +41,10 @@ static const char *TAG = "MIDORI";
 void app_main(void)
 {
     ESP_ERROR_CHECK(platform_init());
+
+    /* AMY synth: register the board's codec / amplifier power-up before
+     * any script can start the engine. */
+    board_audio_init();
 
 #if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
     /* Start the USB device role (CDC + MIDI) first. On Tab5 this is the

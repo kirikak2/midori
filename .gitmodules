@@ -22,3 +22,6 @@
 [submodule "mrbgems/picoruby-sam2695"]
 	path = mrbgems/picoruby-sam2695
 	url = https://github.com/kirikak2/picoruby-sam2695.git
+[submodule "mrbgems/picoruby-amy"]
+	path = mrbgems/picoruby-amy
+	url = https://github.com/kirikak2/picoruby-amy.git
