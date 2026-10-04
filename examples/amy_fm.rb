@@ -23,8 +23,10 @@
 #   * Not CC-mappable (patch, algorithm, operator envelopes, ...): the knob
 #     sets the parameter on the AMY::FM object directly.
 #
-# Operator knobs are only sent once touched. Touching an envelope stage
-# replaces that operator's preset (DX7) envelope with a plain ADSR.
+# Changing the preset moves the Algo, Feedback and operator knobs to the
+# preset's values (read back from AMY). Operator knobs are only sent once
+# touched; touching an envelope stage replaces that operator's DX7 envelope
+# with an ADSR built from the preset's stages.
 #
 # MIDI channel 1 (channel: 0 in Ruby) plays this synth.
 
@@ -75,15 +77,38 @@ restore_voice = Proc.new do
   fm.volume = UI.knob_value(K_VOLUME, bank: 1) / 127.0
 end
 
+# Operator knobs: [bank, DX7 operator, first knob] -- six knobs each
+# (Level, Ratio, Attack, Decay, Sustain, Release).
+OP_KNOBS = [[2, 1, 1], [2, 2, 7], [3, 3, 1], [3, 4, 7]]
+OP_LEVEL_MAX = 2.0   # DX7 presets drive carriers up to 2
+
+# Put the knobs a preset defines (algorithm, feedback, operators) where the
+# preset is. fm.patch= has read them back from AMY. notify: false: this only
+# moves the knobs, it does not send anything.
+sync_knobs = Proc.new do
+  UI.knob_set(2, fm.algorithm, bank: 1, notify: false) if fm.algorithm
+  UI.knob_set(3, fm.feedback * 127.0, bank: 1, notify: false) if fm.feedback
+  OP_KNOBS.each do |bank, n, first|
+    op = fm.op(n)
+    UI.knob_set(first, AMY.unscale(op.level, 0, OP_LEVEL_MAX), bank: bank, notify: false) if op.level
+    UI.knob_set(first + 1, AMY.unscale(op.ratio, 0.5, 16, log: true), bank: bank, notify: false) if op.ratio
+    UI.knob_set(first + 2, AMY.unscale(op.attack, 1, 2000, log: true), bank: bank, notify: false)
+    UI.knob_set(first + 3, AMY.unscale(op.decay, 10, 4000, log: true), bank: bank, notify: false)
+    UI.knob_set(first + 4, op.sustain * 127.0, bank: bank, notify: false)
+    UI.knob_set(first + 5, AMY.unscale(op.release, 10, 4000, log: true), bank: bank, notify: false)
+  end
+end
+
 # ---- Knobs, bank A: voice ----------------------------------------------------
 UI.knob(1, bank: 1, label: AMY.patch_name(FIRST_PATCH), color: :yellow,
         min: FIRST_PATCH, max: 255, value: FIRST_PATCH) do |v|
   n = v.to_i
   if n != fm.patch
-    fm.patch = n
+    fm.patch = n            # also reads the preset's values back from AMY
     map_ccs.call
     restore_voice.call
     UI.knob_label(1, AMY.patch_name(n), bank: 1)
+    sync_knobs.call
   end
 end
 UI.knob(2, bank: 1, label: "Algo", color: :yellow, min: 1, max: 32, value: 1) do |v|
@@ -122,9 +147,9 @@ UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
 end
 
 # ---- Knobs, banks B / C: operators 1-2 and 3-4 (DX7 numbering) -----------
-[[2, 1, 1], [2, 2, 7], [3, 3, 1], [3, 4, 7]].each do |bank, n, first|
-  UI.knob(first, bank: bank, label: "Op#{n} Level", color: :green, value: 100) do |v|
-    fm.op(n).level = v / 127.0
+OP_KNOBS.each do |bank, n, first|
+  UI.knob(first, bank: bank, label: "Op#{n} Level", color: :green, value: 64) do |v|
+    fm.op(n).level = v / 127.0 * OP_LEVEL_MAX
   end
   UI.knob(first + 1, bank: bank, label: "Op#{n} Ratio", color: :yellow, value: 32) do |v|
     fm.op(n).ratio = AMY.scale(v, 0.5, 16, log: true)
@@ -146,6 +171,7 @@ end
 map_ccs.call
 restore_voice.call
 fm.reverb = UI.knob_value(7, bank: 1) / 127.0
+sync_knobs.call   # start on the first preset's values
 
 # ---- Pads: hold to play ---------------------------------------------------
 # The note sounding on each pad is remembered, so releasing it ends the right
