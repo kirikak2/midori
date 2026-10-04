@@ -141,10 +141,7 @@ end
 UI.knob(11, bank: 1, label: "Velocity", color: :red, min: 1, max: 127, value: 100) do |v|
   play[:velocity] = v.to_i
 end
-UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
-        origin: :center, value: 0) do |v|
-  play[:octave] = v.to_i
-end
+# Knob 12 (Octave) is defined after the pads and the XYPad, which it shifts.
 
 # ---- Knobs, banks B / C: operators 1-2 and 3-4 (DX7 numbering) -----------
 OP_KNOBS.each do |bank, n, first|
@@ -181,8 +178,12 @@ NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 COLORS = [:red, :orange, :yellow, :green, :cyan, :blue, :purple, :magenta]
 held = {}
 
+def note_label(note)
+  "#{NOTE_NAMES[note % 12]}#{note / 12 - 1}"
+end
+
 SCALE.each_with_index do |base, i|
-  label = "#{NOTE_NAMES[base % 12]}#{base / 12 - 1}"
+  label = note_label(base)
   UI.pad(i + 1, label: label, color: COLORS[i % COLORS.size], type: :momentary) do |on|
     if on
       note = base + 12 * play[:octave]
@@ -201,14 +202,34 @@ end
 # bend is per channel (and global inside AMY), so several fingers gliding at
 # once bend each other. Y sends CC 74, which the mapping above turns into
 # the filter cutoff.
+XY_SCALE = [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72]   # C pentatonic, C3..C6
 xy = UI::XYPad.new(
-  scale: [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72],   # C pentatonic, C3..C6
+  scale: XY_SCALE,
   glide_range: 2,
   y_cc: CC_CUTOFF,
   y_range: 0..127,
   velocity: 100,
   device: dev
 )
+
+# ---- Octave (knob 12, bank A) -----------------------------------------------
+# Shifts the pads and the XYPad's scale, and relabels the pads so the screen
+# shows what they now play. A pad held while the knob moves still ends the
+# note it started. The USB keyboard is routed to AMY in C and is not shifted.
+UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
+        origin: :center, value: 0) do |v|
+  oct = v.to_i
+  if oct != play[:octave]
+    play[:octave] = oct
+    SCALE.each_with_index { |base, i| UI.pad_label(i + 1, note_label(base + 12 * oct)) }
+    shifted = XY_SCALE.map { |n| n + 12 * oct }
+    s = 1
+    while s <= UI::XYPad::MAX_TOUCHES
+      xy.slot(s, scale: shifted)
+      s += 1
+    end
+  end
+end
 
 # ---- USB-MIDI keyboard (optional) ---------------------------------------
 # MIDI.route forwards everything the keyboard sends straight to AMY in C
