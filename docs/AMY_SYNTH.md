@@ -23,7 +23,7 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 | 1 | パーティション拡張・ボードのオーディオ電源・gem の I2S とオーディオタスク | 実装済み。Tab5 で動作確認済み / CrowPanel は未確認 |
 | 2 | `AMY::Synth`（トランスポート）・`MIDIDevices.amy`・`BoardConfig::HAS_AMY` | 実装済み。Tab5 で動作確認済み |
 | 3 | `AMY.command` / `AMY::FM` / CC マッピング / 直接セット・サンプル | 実装済み。Tab5 で発音を確認済み。現行の `examples/amy_fm.rb`（momentary パッド・XYPad・3 バンクのノブ）は未確認 |
-| 4 | `MIDI.route`（C 側の MIDI Thru） | 未着手 |
+| 4 | `MIDI.route`（C 側の MIDI Thru） | 実装済み（2026-10-04、ホストで単体テスト済み・実機未確認） |
 | 5 | 負荷・遅延の詰め | 未着手（`AMY.render_load` の実測から） |
 
 ファイル：
@@ -556,6 +556,36 @@ MIDI.unroute(MIDIDevices.usb_midi_host, MIDIDevices.amy)
 - スクリプト停止時（Supervisor のクリーンアップ）にルート表を空にする
 
 これは picoruby-midi への機能追加なので、AMY gem 自体の範囲外として別タスクに切る。
+
+#### 実装（2026-10-04）
+
+picoruby-midi に入れた（`include/midi_route.h` / `src/midi_route.c` / `mrblib/midi_route.rb`）。
+
+- **ルート表**（OS 非依存、8 エントリ）：受信元のビット・送信先のマスク・チャンネル条件。
+  `channel:` 0〜15 はそのチャンネルのボイスメッセージだけを通し、省略（`nil`）は全チャンネルと
+  システムメッセージ（クロック・Start / Stop・SysEx）を通す。同じ受信元・同じチャンネル条件の
+  ルートは送信先をまとめる。転送は登録表の `MIDI_transport_send()` で、同じ送信先に二重には送らない。
+  受信元自身へは送らない
+- **受信元**は入力タスクが読むトランスポートだけ：USB-MIDI Host（受信パケットをそのまま転送。
+  SysEx も含む）と UART（パーサを通したイベントを USB-MIDI パケットに戻して転送。SysEx は対象外）
+- **入力タスク**は「Ruby の `MIDI::Input` が読んでいる」か「ルートがある」間動く。Ruby 用キューへの
+  積み込みは `MIDI::Input` が動いているときだけ（バインディングの `_start_task` / `_stop_task` が
+  `MIDI_Input_set_queueing()` で切り替える）。ルートだけのときにキューが溢れて警告を出し続けないため。
+  `MIDI::Input` を止めてもルートが残っていればタスクは止めない
+- **USB 機器がまだ挿さっていなくても** `MIDI.route` できる：`MIDI_Input_start_routing()` が
+  「タスクが必要」と印を付けるので、picoruby-usb_midi_host が接続時にタスクを起動する
+- **入力タスクの優先度を 1 → 4 に上げた**（Core 1）。PicoRuby の VM（3）より上にしないと、
+  スクリプトが Core 1 を使っている間ルーティングが止まる。タスクは毎回 1 tick（10 ms）待つので
+  VM はほぼ削らない。**この待ちは最低 1 tick にすること**：元の `vTaskDelay(pdMS_TO_TICKS(5))` は
+  100 Hz の tick では 0 tick になって待たず、入力タスクが空回りしていた。優先度 1 のうちは表に
+  出なかったが、4 に上げたら Core 1 の VM が止まり、USB 機器を挿している間 `UI.process` が回らず
+  パッド・ノブ・XYPad が効かなくなった（2026-10-04）
+- Midori の `picoruby_esp32_midi_cleanup()` が最初に `MIDI_route_clear()` を呼ぶ
+- [examples/amy_fm.rb](../examples/amy_fm.rb) は USB キーボードを `MIDI.route(usb, fm.synth)` で
+  AMY に直結し、CC でマップできないエンベロープ（CC 73 / 72）だけを Ruby の `MIDI::Input` で拾う
+
+遅延の目安は入力タスクのポーリング間隔（1 tick = 10 ms）+ USB Host 側の受信。Ruby のループ
+（`MIDI.sleep_ms` は 50 ms 刻み）には依存しない。
 
 ### 停止・切り替え時の扱い
 

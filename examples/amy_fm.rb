@@ -1,7 +1,8 @@
 # AMY FM synth on the built-in speaker (Tab5 / CrowPanel)
 #
 # A DX7-style FM synth played from the screen and, if one is plugged in,
-# from a USB-MIDI keyboard on the USB host port. Use the nav bar arrows to
+# from a USB-MIDI keyboard on the USB host port (routed to AMY in C with
+# MIDI.route). Use the nav bar arrows to
 # move between the three screens.
 #
 #   Pads    12 notes of C major, held for as long as you press (note_on on
@@ -184,21 +185,19 @@ xy = UI::XYPad.new(
 )
 
 # ---- USB-MIDI keyboard (optional) ---------------------------------------
-# Notes and CCs are passed on to AMY from Ruby here; CC 73 / 72 (attack /
-# release on many keyboards) set operator 1's envelope directly.
-# The input registers itself with MIDI, and MIDI.bpm_loop below processes
-# it on every pass.
+# MIDI.route forwards everything the keyboard sends straight to AMY in C
+# (the input task), so playing it does not wait on this script's loop.
+# Mapped CCs (74 cutoff, 71 reso, ...) land in AMY's CC mappings that way.
+# What AMY cannot map -- the envelopes -- is picked out in Ruby on the side:
+# CC 73 / 72 (attack / release on many keyboards) set operator 1's envelope.
 usb = MIDIDevices.usb_midi_host
 if usb
+  MIDI.route(usb, fm.synth)
   input = MIDI::Input.new(MIDI::Device.new(usb))
-  input.on(:note_on)  { |e| dev.note_on(e[:note], e[:velocity]) }
-  input.on(:note_off) { |e| dev.note_off(e[:note]) }
-  input.on(:pitch_bend) { |e| dev.pitch_bend(e[:value]) if e[:value] }
   input.on(:control_change) do |e|
     case e[:cc]
     when 73 then fm.op(1).attack  = AMY.scale(e[:value], 1, 2000, log: true)
     when 72 then fm.op(1).release = AMY.scale(e[:value], 10, 4000, log: true)
-    else dev.control_change(e[:cc], e[:value])   # mapped CCs land in AMY
     end
   end
 end

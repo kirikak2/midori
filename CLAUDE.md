@@ -759,6 +759,21 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
 新しいトランスポート gem は `MIDI_transport_register()` で 0x08 以降のビットを得て、
 それを Ruby の `transport_id` として返す。picoruby-midi 側の改修は不要。
 
+### MIDI.route（MIDI Thru / 2026-10-04）
+
+`MIDI.route(from, to, channel: nil)` で、受信をトランスポート間で **C の入力タスクが直接転送**する
+（Ruby を通らない）。受信元は USB-MIDI Host と UART、送信先は登録表の任意のトランスポート。
+`MIDI.unroute(from, to = nil)` / `MIDI.unroute_all`。スクリプト停止時に
+`picoruby_esp32_midi_cleanup()` が `MIDI_route_clear()` で全消去する。
+
+- 入力タスクは「`MIDI::Input` が読んでいる」か「ルートがある」間動き、Ruby 用キューへの積み込みは
+  前者のときだけ（`MIDI_Input_set_queueing()`）
+- 入力タスクの優先度は 4（Core 1、Ruby VM の 3 より上）。ルーティングを VM に止めさせないため。
+  ループの待ちは**最低 1 tick**（`CONFIG_FREERTOS_HZ=100` では `pdMS_TO_TICKS(5)` が 0 になり
+  `vTaskDelay(0)` は待たない）。0 tick のまま優先度を上げると Core 1 の VM が止まり、
+  UI 入力が一切効かなくなる（2026-10-04 に発生）
+- 詳細は [docs/AMY_SYNTH.md](docs/AMY_SYNTH.md) の「他デバイスからの入力を AMY へ繋ぐ」
+
 ## 既知の課題
 
 ### USB MIDIデバイスの電源ON順序問題（2026-03-18）
