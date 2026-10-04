@@ -739,13 +739,20 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
   前後でパッド有効フラグを保存・復元し、mux の実状に合わせて I2S のピン側の
   コントローラだけを切る
 - オーディオタスク（Core 0）はコンソールに書かない（stdout / stderr を `/dev/null` に。
-  起動ログは `AMY_GEM_start()` を呼んだ側で出す）。`AMY::FM` は synth フラグ 8
+  起動ログは `AMY_GEM_start()` を呼んだ側で出す）。`AMY::FM` / `AMY::Synth` は synth フラグ 8
   （`SYNTH_FLAGS_NO_NOTE_WARNINGS`）を立て、esp_timer から届く自動ノートオフで
   AMY が警告を出さないようにしている。いずれも CDC コンソールへの他コアからの書き込みを
   避けるための予防
 - Tab5 の MCLK は 128 × fs（ES8388 reg24 = 0x00 と対）。片方だけ変えるとピッチが 2 倍ずれる
 - スクリプト停止時に `picoruby_esp32_midi_cleanup()` が `AMY_GEM_reset()` を呼び、
   synth・パッチ・CC マッピングを消す（オーディオは止めない）
+- 音源クラスは 2 つ：`AMY::FM`（DX7 プリセット 128〜255）と `AMY::Synth`
+  （オシレータ最大 4 + LFO 1 + フィルタ + ADSR × 2。Juno パッチ 0〜127 と同じ osc 配置で、
+  読み込んだプリセットを `AMY._synth_state` で読み戻してノブに反映する。2026-10-04、実機未確認）。
+  トランスポートは `AMY::Transport`（旧名 `AMY::Synth`、`fm.transport` / `syn.transport`）。
+  サンプル: [examples/amy_fm.rb](examples/amy_fm.rb) / [examples/amy_synth.rb](examples/amy_synth.rb)
+- エコーは有効（`features.echo = 1`）。ディレイライン（約 512 KB、PSRAM）はレベルを
+  初めて 0 より上げたときに確保される
 - アプリが 2 MB を超えたので `partitions.csv` の factory を 0x3F0000 に拡張し、
   **0x310000 に移した**。PicoRuby のフラッシュ FAT は `flash_disk.c` の**固定アドレス
   0x210000〜0x310000** を直接使う（パーティション表を見ない）ので、ここに重ねると

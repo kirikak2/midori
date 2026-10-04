@@ -38,7 +38,7 @@ raise "AMY is not available on this board" unless MIDIDevices.amy
 
 FIRST_PATCH = 128   # DX7 presets: 128..255
 fm  = AMY::FM.new(channel: 0, voices: 6, patch: FIRST_PATCH)
-dev = MIDI::Device.new(fm.synth)
+dev = MIDI::Device.new(fm.transport)
 
 CC_PORTA    = 5
 CC_PAN      = 10
@@ -239,7 +239,7 @@ end
 # CC 73 / 72 (attack / release on many keyboards) set operator 1's envelope.
 usb = MIDIDevices.usb_midi_host
 if usb
-  MIDI.route(usb, fm.synth)
+  MIDI.route(usb, fm.transport)
   input = MIDI::Input.new(MIDI::Device.new(usb))
   input.on(:control_change) do |e|
     case e[:cc]

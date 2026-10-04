@@ -7,13 +7,13 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 - 対象ボード: M5Stack Tab5 / CrowPanel（どちらも ESP32-P4NRW32）
 - 対象外: M5Stack CoreS3 / Freenove（ESP32-S3）。CoreS3 も I2S アンプ（AW88298）を
   持つが、S3 の CPU / 内部 RAM で FM が何ボイス出るか分からないため当面サポートしない
-- 状態: **Phase 0〜3 を実装済み**。**Tab5 では内蔵スピーカーから正しく鳴ることを確認済み
+- 状態: **Phase 0〜4 と Phase 6（`AMY::Synth`）を実装済み**。**Tab5 では内蔵スピーカーから正しく鳴ることを確認済み
   （2026-10-04）**。CrowPanel はビルドのみで、実機では未確認（下の「実装状況」）。
   方式と未確定事項は 2026-10-03 に決定済み（末尾の「決定事項」）
 - AMY: `shorepine/amy@00141f2`（2026-10-01）を `mrbgems/picoruby-amy/lib/amy` に
   サブモジュールで固定
 - 使い方: [mrbgems/picoruby-amy/README.md](../mrbgems/picoruby-amy/README.md) /
-  サンプル [examples/amy_fm.rb](../examples/amy_fm.rb)
+  サンプル [examples/amy_fm.rb](../examples/amy_fm.rb) / [examples/amy_synth.rb](../examples/amy_synth.rb)
 
 ## 実装状況（2026-10-04）
 
@@ -21,19 +21,21 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 |-------|------|------|
 | 0 | picoruby-midi のトランスポート登録表 | 実装済み（ホストで単体テスト済み） |
 | 1 | パーティション拡張・ボードのオーディオ電源・gem の I2S とオーディオタスク | 実装済み。Tab5 で動作確認済み / CrowPanel は未確認 |
-| 2 | `AMY::Synth`（トランスポート）・`MIDIDevices.amy`・`BoardConfig::HAS_AMY` | 実装済み。Tab5 で動作確認済み |
+| 2 | `AMY::Transport`（トランスポート）・`MIDIDevices.amy`・`BoardConfig::HAS_AMY` | 実装済み。Tab5 で動作確認済み |
 | 3 | `AMY.command` / `AMY::FM` / CC マッピング / 直接セット・サンプル | 実装済み。Tab5 で発音を確認済み。現行の `examples/amy_fm.rb`（momentary パッド・XYPad・3 バンクのノブ）は未確認 |
 | 4 | `MIDI.route`（C 側の MIDI Thru） | 実装済み（2026-10-04、ホストで単体テスト済み・実機未確認） |
 | 5 | 負荷・遅延の詰め | 未着手（`AMY.render_load` の実測から） |
+| 6 | `AMY::Synth`（複数オシレータのシンセ、§5）・エコー有効化・`examples/amy_synth.rb` | 実装済み（2026-10-04）。ホストの AMY で Juno パッチの読み戻しと Ruby（CRuby / mruby/c）を確認、Tab5 向けビルド成功。**実機未確認** |
 
 ファイル：
 
 | 場所 | 中身 |
 |------|------|
 | `mrbgems/picoruby-amy/` | gem 本体。独立リポジトリ（[kirikak2/picoruby-amy](https://github.com/kirikak2/picoruby-amy)）を Midori のサブモジュールとして取り込み、その中で `lib/amy`（shorepine/amy）をサブモジュールにしている |
-| `mrbgems/picoruby-amy/mrblib/dx7_patches.rb` | DX7 プリセット名の表（`AMY.patch_name`）。AMY の `patches.h` のコメントから生成 |
+| `mrbgems/picoruby-amy/mrblib/patch_names.rb` | Juno / DX7 プリセット名の表（`AMY.patch_name`）。AMY の `patches.h` のコメントから生成（旧 `dx7_patches.rb`） |
 | `mrbgems/picoruby-amy/ports/esp32/amy_port.c` | I2S・オーディオタスク・`amy_start`・トランスポート登録 |
-| `mrbgems/picoruby-amy/mrblib/amy.rb` | `AMY` / `AMY::Synth` / `AMY::FM` / `AMY::FM::Operator` |
+| `mrbgems/picoruby-amy/mrblib/amy.rb` | `AMY` / `AMY::Transport` / `AMY::FM` / `AMY::FM::Operator` |
+| `mrbgems/picoruby-amy/mrblib/amy_synth.rb` | `AMY::Synth` / `AMY::Synth::Oscillator` / `AMY::Synth::LFO`（§5） |
 | `components/amy/CMakeLists.txt` | AMY エンジンの IDF コンポーネント（P4 のときだけ中身がある） |
 | `main/platform/board_audio.cpp` | ボード依存の電源 ON（Tab5: ES8388 + SPK_EN / CrowPanel: GPIO 30） |
 | `mrbgems/picoruby-midi/src/midi_transport_registry.c` | Phase 0 の登録表（OS 非依存） |
@@ -122,7 +124,7 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 | コーデック初期化 | Tab5 の ES8388 を I2C で設定 | **完全にボード依存** | Midori（`main/platform/`） |
 | アンプ電源 | Tab5: IO エキスパンダ PI4IOE5V6408 のビット / CrowPanel: GPIO30 | **完全にボード依存** | Midori（`main/platform/`） |
 | I2C バスの所有 | Tab5 の内部 I2C は M5Unified（`M5.In_I2C`）が握っている | **Midori の構成に依存** | Midori |
-| Ruby API / トランスポート | `AMY::Synth`、`send_packet` | なし | gem |
+| Ruby API / トランスポート | `AMY::Transport`、`send_packet` | なし | gem |
 
 つまり**本当にボード依存なのは「コーデック」と「アンプ電源」の 2 点だけ**で、
 これは既存の gem でも同じ形で解決済みのパターンになっている：
@@ -153,7 +155,7 @@ mrbgems/picoruby-amy/
 ├── include/amy_gem_config.h         ビルド定義（ピン・タスク・DMA 等）の既定値
 ├── src/amy.c, src/mrubyc/amy.c      mruby/c バインディング
 ├── ports/esp32/amy_port.c           I2S チャネル + オーディオタスク + amy_start()
-├── mrblib/amy.rb                    AMY, AMY::Synth（トランスポート）, AMY::FM
+├── mrblib/amy.rb                    AMY, AMY::Transport（トランスポート）, AMY::FM
 ├── sig/amy.rbs
 ├── example/fm_basic.rb
 └── README.md
@@ -464,7 +466,7 @@ FM 6 ボイス（+ reverb）の負荷を測って、優先度（2 か 3）・ボ
 `connected?`（+ `transport_id`）だけ。AMY gem はこれを実装する：
 
 ```ruby
-amy = MIDIDevices.amy            # => AMY::Synth（未対応ボードでは nil）
+amy = MIDIDevices.amy            # => AMY::Transport（未対応ボードでは nil）
 dev = MIDI::Device.new(amy)
 dev.note_on(60, 100)             # → AMY が鳴る
 dev.control_change(74, 90)       # → AMY の CC マッピングへ
@@ -581,7 +583,7 @@ picoruby-midi に入れた（`include/midi_route.h` / `src/midi_route.c` / `mrbl
   出なかったが、4 に上げたら Core 1 の VM が止まり、USB 機器を挿している間 `UI.process` が回らず
   パッド・ノブ・XYPad が効かなくなった（2026-10-04）
 - Midori の `picoruby_esp32_midi_cleanup()` が最初に `MIDI_route_clear()` を呼ぶ
-- [examples/amy_fm.rb](../examples/amy_fm.rb) は USB キーボードを `MIDI.route(usb, fm.synth)` で
+- [examples/amy_fm.rb](../examples/amy_fm.rb) は USB キーボードを `MIDI.route(usb, fm.transport)` で
   AMY に直結し、CC でマップできないエンベロープ（CC 73 / 72）だけを Ruby の `MIDI::Input` で拾う
 
 遅延の目安は入力タスクのポーリング間隔（1 tick = 10 ms）+ USB Host 側の受信。Ruby のループ
@@ -656,7 +658,7 @@ fm.op(2).envelope(attack: 10, decay: 300, sustain: 0.5, release: 400)
 fm.volume = 0.7
 fm.reverb = 0.3
 
-dev = MIDI::Device.new(fm.synth)  # 演奏は MIDI::Device 経由
+dev = MIDI::Device.new(fm.transport)  # 演奏は MIDI::Device 経由
 ```
 
 synth 宛てのコマンドは AMY 側で全ボイスに適用される（osc 番号はボイス内相対）
@@ -776,7 +778,7 @@ require 'midi'
 require 'amy'
 
 fm  = AMY::FM.new(channel: 0, voices: 6, patch: 128)
-dev = MIDI::Device.new(fm.synth)
+dev = MIDI::Device.new(fm.transport)
 
 fm.map_cc(74, :filter_freq, min: 100, max: 8000, log: true)
 fm.map_cc(20, :feedback)
@@ -818,13 +820,369 @@ t = UI::Tombola.new(sides: 6, device: dev)
 
 ---
 
+## 5. 複数オシレータのシンセ `AMY::Synth`（2026-10-04 実装）
+
+`AMY::FM` と同じ使い勝手で、**オシレータを複数並べて音を作るシンセ**のクラスを足す。
+オシレータの波形・音程・音量、フィルタ、エンベロープ、LFO を `UI.knob` や
+`MIDI::Input#on` から動かして音作りする（`examples/amy_fm.rb` と同じ形）。
+ここでは AMY（`shorepine/amy@00141f2`）で**できること**を整理し、それに沿った
+仕様と決定事項（5.7）、実装（5.8）をまとめる。
+
+### 5.1 名前：トランスポートを `AMY::Transport` に改名（2026-10-04 決定）
+
+`AMY::Synth` は当初 **picoruby-midi のトランスポート**（`AMY::Synth.instance`、
+`MIDIDevices.amy`、`fm.synth` の戻り値）の名前だった。新しいクラスにこの名前を
+使うため、どちらかを改名する必要があった。
+
+| 案 | 新クラス | トランスポート | 影響 |
+|----|---------|---------------|------|
+| **A（採用）** | `AMY::Synth` | `AMY::Transport` に改名 | `mrblib/amy.rb`、`sig/amy.rbs`、README、`main_task_base.rb`。スクリプトは `MIDIDevices.amy` / `fm.synth` 経由なので、ほぼ影響しない |
+| B | 別名（`AMY::Poly` / `AMY::Analog` / `AMY::Subtractive` など） | `AMY::Synth` のまま | 既存コードの変更なし。ただし「AMY の synth（1〜16）」という AMY 側の用語と、トランスポートの `AMY::Synth` がずれたまま残る |
+
+**A を採用し、改名は済ませた**：
+
+- `AMY::Synth` → `AMY::Transport`（`AMY::Transport.instance`）
+- `AMY::FM#synth` → `AMY::FM#transport`（旧名は残していない。新しい
+  `AMY::Synth` と紛らわしいため）。`examples/amy_fm.rb` と gem の README /
+  example を追従済み。**SD カードに `fm.synth` を使う古いスクリプトがあれば
+  `fm.transport` に書き換える**
+- `MIDIDevices.amy` は名前そのまま（中身が `AMY::Transport` になるだけ）
+
+新しい `AMY::Synth` もトランスポートは `syn.transport` で返す（FM と同じ形）。
+
+### 5.2 AMY で使える部品（音作りに関係するもの）
+
+AMY の `docs/synth.md` / `docs/api.md` / `docs/juno_patches.md` から、
+この用途に関係するものだけを抜き出す。
+
+**オシレータの波形**（`wave` / ワイヤ `w`）
+
+| 値 | 波形 | 備考 |
+|----|------|------|
+| 0 | SINE | |
+| 1 | PULSE | `duty`（`d`）でパルス幅。ControlCoefficient なので LFO で PWM できる |
+| 2 / 3 | SAW_DOWN / SAW_UP | 帯域制限済み |
+| 4 | TRIANGLE | |
+| 5 | NOISE | |
+| 6 | KS | Karplus-Strong（撥弦） |
+| 7 | PCM | 内蔵の `pcm_tiny`（11 サンプル、22.05 kHz）。`preset` でサンプル選択 |
+| 20 | SILENT | 音を出さない osc。チェーンの先頭にして VCF / VCA だけを担当させる |
+
+ALGO（FM）・PARTIAL 系・AUDIO_IN・CUSTOM は対象外。`WAVETABLE` は
+`AMY_WAVETABLE` を定義していない（`components/amy/CMakeLists.txt`）ので使えない。
+
+**ボイスの組み方**
+
+- synth（1〜16）ごとに `num_voices`（`iv`）と `oscs_per_voice`（`in`）を決める。
+  synth 宛てのコマンドの osc 番号は**ボイス内相対**で、全ボイスに一度に効く
+  （`AMY::FM` と同じ）
+- エンジン全体の osc 上限は `max_oscs = 250`（AMY の既定値のまま）。
+  6 osc × 6 ボイス = 36 で、FM（8 osc × 6 ボイス = 48）より少ない
+- **チェーン**（`chained_osc` / `c`）：先頭に送ったノートオン / オフが
+  チェーンの各メンバーへ**ノートオン時に 1 度だけ**コピーされ、以後は各 osc が
+  自分の係数で鳴る。出力は 1 本のバッファに足し合わされ、**先頭の osc の
+  フィルタ・ディストーション・パン・バス**が和に掛かる。先頭が `SILENT` なら
+  **先頭の amp エンベロープも和に掛かる**（Juno パッチの構成）。規則は 2 つ：
+  ノートは先頭に送る、先頭の osc 番号はメンバーより小さくする
+- **チェーンしない構成**：osc を付けずに synth へノートを送ると、ボイス内の
+  **すべての osc**にノートオンが届く。osc ごとに別のフィルタ・パン・エンベロープを
+  持てるが、その分フィルタの数（＝負荷）が増える
+
+**ControlCoefficients**（`amp` / `freq` / `filter_freq` / `duty` / `pan`、
+`dist_drive` / `dist_mix`）
+
+値は「定数 + 各ソース × 係数」で、スロットの並びは
+`const, note, vel, eg0, eg1, mod0, bend, ext0, ext1, mod1`。
+
+- `freq` の既定は `{const: 440, note: 1, bend: 1}`。周波数系は対数領域で足すので、
+  `const` を 2 倍にすると 1 オクターブ上、`const: 440 * 1.005` で少しデチューン。
+  `eg0` / `mod0` などの係数の単位は**オクターブ**
+- `amp` の既定は `{const: 1, vel: 1, eg0: 1}`（対数領域で掛け合わせ）。
+  `const: 0` でその osc は無音
+- `filter_freq` の `note` 係数がキートラッキング、`eg1` 係数がフィルタ
+  エンベロープの深さ（オクターブ）
+- **評価はブロック単位**（256 サンプル ≒ 5.8 ms）。LFO・エンベロープは音声レート
+  ではないので、オシレータ同士のクロスモジュレーション（FM 的な使い方）、
+  ハードシンク、リングモジュレーションは**できない**
+
+**エンベロープ**：osc ごとに 2 本（`bp0` = `A`、`bp1` = `B`）。それぞれ最大 8 組の
+（時間 ms, 値）で、**最後の 1 組がリリース**。カーブは `eg0_type` / `eg1_type`
+（0 = 通常、1 = 線形、2 = DX7、3 = 指数）。ADSR は `[a, 1, d, s, r, 0]` の 3 組で
+表す（`AMY::FM::Operator` と同じ）。
+
+**LFO**：`mod_source`（`L`）で同じボイス内の osc を最大 2 つ指定でき、それぞれが
+`mod0` / `mod1` 係数になる。LFO 用の osc は普通の osc（SINE / TRIANGLE / PULSE /
+SAW / NOISE、周波数は `freq` の const に Hz で与える）で、チェーンに入れなければ
+音は出ない。**LFO もボイスごと**にある（Juno パッチと同じ）。ノートオンで位相がリセットされるかは要確認。
+チェーンでビブラートを掛けるには、先頭ではなく**各メンバーの `freq` に `mod0`**
+を書く（先頭の `freq` を揺らしても先頭にしか効かない）。
+
+**フィルタ**：`filter_type`（`G`）＝ 0 なし / 1 LPF / 2 BPF / 3 HPF / 4 LPF24 /
+5 ノッチ / 6 フェイザー。`resonance`（`R`）は 0.5〜16。osc ごとに 1 つ。
+
+**その他の osc パラメータ**：`portamento`（`m`、ms）、`phase`（`P`）、
+ディストーション（`dist_clip` / `dist_fold` / `dist_crush` / `dist_drive` /
+`dist_mix`。amp エンベロープの後・フィルタの前。osc ごと・バスごと）。
+
+**synth / バス単位**：`synth_level`（`iV`）、`volume`、リバーブ（`h`）、
+コーラス（`k`）、EQ（`x`）、エコー（`M`：レベル・ディレイ ms・最大ディレイ ms・
+フィードバック・フィルタ係数）。エコーは当初 `features.echo = 0` で無効にしていたが、
+このシンセのために**有効化した**（5.7）。ディレイラインはバスごとに PSRAM
+（`ram_caps_delay = MALLOC_CAP_SPIRAM`）に、**レベルが初めて 0 を超えたときに**取られる
+（AMY の `config_echo()`。既定の最大 743 ms → 2 の冪に切り上げて 65536 サンプル ×
+2 ch × 4 byte = 約 512 KB）。エコーを使わないスクリプトでは確保されない。
+ピッチベンドは **±2 半音固定**。
+
+**CC マッピング**（`midi_cc` の直接パラメータ形）：`filter_freq`、`resonance`、
+`pan`、`duty`、`portamento`、amp、バスのエフェクト量などは AMY 内で低遅延に
+CC へ紐付けられる（ボイス内相対 osc 指定、最大 4 組を 1 つの CC で同時に動かせる）。
+**ブレークポイント（エンベロープ）・波形・osc 参照（`chained_osc` / `mod_source`）
+はマップできない**ので、`AMY::FM` と同じく Ruby からの直接セットで扱う。
+
+**読み戻し**：`yield_synth_events` で synth の現在の設定（osc ごとのイベント列）を
+取り出せる。`AMY::FM#refresh` が使っている `AMY._fm_state` と同じ仕組みで、
+osc ごとに波形・係数・ブレークポイント・フィルタを返す汎用版を作れる。
+
+**プリセット**：patch 0〜127 は **Juno-60 の工場出荷パッチ**で、まさにこのクラスが
+目指す構成（下記）になっている。ユーザーパッチ 1024〜1055 にはワイヤコマンド列を
+登録できる（RAM 上。電源を切ると消える）。
+
+### 5.3 ボイス構成の案：Juno パッチと同じ並び
+
+Juno パッチ（`docs/juno_patches.md`）の osc 配置をそのまま標準にする：
+
+```
+osc 0  SILENT   VCF + VCA（filter, bp0 = amp EG, bp1 = filter EG）  ← ノートはここへ
+osc 1  LFO      （チェーンに入れない。各 osc が mod_source=1 で参照）
+osc 2  OSC 1    ┐
+osc 3  OSC 2    │ chained_osc で 0 → 2 → 3 → … とつなぐ
+osc 4  OSC 3    │ 各メンバーは amp {vel: 0, eg0: 0}（ベロシティと EG は先頭で 1 回だけ）
+osc 5  OSC 4    ┘ （Juno: PULSE / SAW_UP / PULSE(サブ, -1 oct) / NOISE）
+```
+
+利点：
+
+- **Juno パッチ 0〜127 をそのまま読み込んで出発点にできる**（`synth.patch = 3`）。
+  `refresh` で読み戻せば、ノブがプリセットの値に追従する（`AMY::FM` と同じ流れ）
+- VCF / VCA がボイスに 1 つなので、osc を増やしても重いフィルタは増えない
+- 「オシレータを何本か足して、1 つのフィルタとアンプを通す」という減算合成の
+  定番の形になる
+
+**オシレータは最大 4 本**（Juno と同じ）。Juno パッチをそのまま読めるように、
+ボイス構成は常に 4 本ぶん（osc 2〜5）を確保し、`oscs_per_voice` は **6 固定**。
+使わないオシレータは `level = 0`（amp の const 0）で黙らせる
+（amp 0 の osc の描画が省かれるかは要確認。省かれないなら 4 本ぶんの負荷が常に掛かる）。
+**LFO は 1 本**（osc 1、`mod0` のみ。`mod1` は使わない）。
+
+**osc ごとにフィルタやパンを分けたい場合**（レイヤー / スプリット的な音）は
+チェーンしない構成が必要になるが、ボイス構成も API も別物になるので、
+最初の版では扱わない（5.7 の決定事項）。
+
+### 5.4 Ruby API
+
+`AMY::FM` と同じく、名前付きアクセサ（L2）＋ `map_cc`（L3）＋ `set` / `get`
+（逃げ道）の 3 本立て。値は Ruby 側に現在値を持ち、`refresh` で AMY から読み戻す。
+
+```ruby
+syn = AMY::Synth.new(channel: 1, voices: 6)   # channel 1 = AMY synth 2
+syn.patch = 5                     # Juno パッチ 0〜127 をプリセットとして呼ぶ（new では省略時は初期ボイス）
+syn.init_voice                    # 初期ボイスへ戻す
+
+# オシレータ 1〜4（ボイス内 osc 2〜5 に対応）
+syn.osc(1).wave   = :saw          # :sine :triangle :saw(=SAW_UP) :saw_down :pulse :noise :ks :pcm
+syn.osc(1).level  = 0.8           # amp const
+syn.osc(2).wave   = :pulse
+syn.osc(2).duty   = 0.3
+syn.osc(2).octave = -1            # freq const = 440 * 2**(octave + cents / 1200)
+syn.osc(2).detune = 7             # cents
+syn.osc(3).wave   = :noise
+syn.osc(3).level  = 0.1
+
+# フィルタ（osc 0 = 先頭）
+syn.filter        = :lowpass24    # :none :lowpass :lowpass24 :bandpass :highpass :notch :phaser
+syn.cutoff        = 1200          # filter_freq const（Hz）
+syn.resonance     = 2.0
+syn.filter_env    = 2.5           # filter_freq の eg1 係数（オクターブ）
+syn.key_track     = 0.5           # filter_freq の note 係数
+syn.filter_envelope(attack: 5, decay: 400, sustain: 0.3, release: 300)  # bp1
+
+# アンプ（osc 0 = 先頭）
+syn.amp_envelope(attack: 10, decay: 200, sustain: 0.7, release: 500)    # bp0
+syn.velocity      = 1.0           # amp の vel 係数（0 でベロシティ無視）
+
+# LFO（osc 1）
+syn.lfo.wave      = :triangle
+syn.lfo.rate      = 5.0           # Hz
+syn.lfo.vibrato   = 0.02          # 各 osc の freq mod0（オクターブ）
+syn.lfo.filter    = 1.0           # 先頭の filter_freq mod0（オクターブ）
+syn.lfo.tremolo   = 0.0           # 先頭の amp mod0
+syn.lfo.pwm       = 0.2           # 各 osc の duty mod0（PWM）
+
+syn.glide         = 100           # portamento（ms、全 osc）
+syn.volume = 0.7; syn.reverb = 0.3; syn.chorus = 0.5
+syn.echo(level: 0.3, delay: 375, feedback: 0.4)   # echo_level= / echo_delay= / echo_feedback= も可
+
+syn.refresh                       # AMY から全パラメータを読み戻す
+
+syn.map_cc(74, :cutoff, min: 100, max: 8000, log: true)
+syn.map_cc(71, :resonance, min: 0.7, max: 8)
+syn.map_cc(70, :duty, osc: 2, min: 0.05, max: 0.95)
+syn.map_cc(5, :glide)             # osc: 省略で 4 本まとめて（1 つの CC に 4 組）
+
+dev = MIDI::Device.new(syn.transport)   # 演奏は MIDI::Device 経由（FM と同じ）
+```
+
+API の実装メモ：
+
+- **1 つのパラメータが複数の osc に書かれるもの**（`lfo.vibrato` は全メンバーの
+  `freq`、`glide` は全 osc の `portamento`）は、Ruby 側で osc ごとにコマンドを
+  組み立てる。`map_cc` は 1 つの CC に最大 4 組の（パラメータ, osc）を持てるので、
+  osc 4 本までなら 1 つの CC で同時に動かせる
+- **ControlCoefficient の部分更新**：`freq` などは係数リストを丸ごと送る
+  （空欄は「変えない」）。`osc(2).octave=` と `osc(2).detune=` はどちらも
+  `freq` の const に入るので、Ruby 側で両方から const を計算して送る
+- `octave` / `detune` の 2 のべき乗は `MRBC_USE_MATH=0` のため `**` が使えない。
+  既存の `AMY._log_scale` / `_log_unscale` を ±4 オクターブの範囲で使う（5.8）
+- `refresh`：`AMY._fm_state` を一般化した `AMY._synth_state(synth)` を C に足し、
+  osc ごとの波形・amp / freq / filter_freq / duty / pan の係数・ブレークポイント・
+  フィルタ種別・レゾナンス・`chained_osc` / `mod_source` とバスのエフェクトを返す
+  （書式は 5.8）。osc 配置は Juno と同じであることを前提に読む
+- **Juno パッチのフィルタ EG**：Juno-60 は ENV が 1 本で、AMY の Juno パッチも
+  `filter_freq` の **`eg0`** 係数（= amp と同じ `bp0`）でフィルタを動かしている
+  （例：patch 1 の `F300.23,0.661,,2.252`）。このクラスはフィルタ EG を独立した
+  `bp1`（`eg1` 係数）にするので、パッチを読んだら `eg0` の深さを `eg1` に移し、
+  `bp0` を `bp1` にも写して、同じ音のまま 2 本の ADSR として扱えるようにする
+- **パッチの保存**：最初の版では持たない（5.7）。後で足すなら、現在の設定を
+  ワイヤコマンド列にしてユーザーパッチ 1024〜1055 に登録するか、SD に書き出す
+- **エンベロープは ADSR のみ**（5.7）。`amp_envelope` / `filter_envelope` が
+  `[a, 1, d, s, r, 0]` を `bp0` / `bp1` に送る。Juno パッチの EG は ADSR より
+  点が多いことがあるので、`refresh` は読んだブレークポイントを ADSR に近似して
+  ノブに出す（`AMY::FM::Operator.adsr_from` と同じ扱い）
+
+### 5.5 UI への割り当て（`examples/amy_synth.rb`）
+
+`examples/amy_fm.rb` と同じ骨格（パッド 12 個・XYPad・ノブ 4 バンク・
+USB キーボードは `MIDI.route`）。
+
+| バンク | ノブ |
+|--------|------|
+| A（全体） | Patch（Juno 名）/ Cutoff / Reso / Filter Env / Key Track / Volume / Reverb / Chorus / Pan / Glide / Velocity / Octave |
+| B（OSC 1〜3） | OSC 1〜3 それぞれ Wave / Level / Octave / Detune（3 × 4 = 12） |
+| C（OSC 4・EG） | OSC 4 の Wave / Level / Octave / Detune、Amp A / D / S / R、Filter A / D / S / R |
+| D（LFO・FX） | LFO Rate / Wave / Vibrato / Filter / Tremolo / PWM、Filter Type、Duty、Echo Level / Time / Feedback、（空き 1） |
+
+- Wave や Filter Type のような**離散値はノブで段階選択**し、ラベルに現在値を出す
+  （Patch ノブと同じ手法）
+- Patch を切り替えたら `refresh` → `UI.knob_set(..., notify: false)` で全ノブを
+  追従させる（`amy_fm.rb` の `sync_knobs` と同じ）
+
+### 5.6 制約と注意点
+
+- **負荷**：FM（6 オペレータ）と比べると osc 数は少ないが、ボイスごとに
+  LPF24 が 1 本走る。P4 での描画時間は未計測（§2「描画負荷の上限」）。
+  ボイス数 × osc 数の上限は Phase 5 の計測で決める
+- **ピッチベンド ±2 半音固定**：XYPad の `glide_range: 2` は FM と同じ
+- **ベロシティの二重掛け**：チェーンのメンバーの `amp` の `vel` / `eg0` を 0 に
+  しておかないと、ベロシティと EG が先頭とメンバーで 2 回掛かる。クラスが
+  初期化時に必ず設定する
+- **ノートは先頭（osc 0）へ**：`AMY.command` で直接ノートを送るときは osc 0 宛てか
+  osc 無指定にする。MIDI 経由のノートがチェーン構成で正しく 1 回だけ鳴るかは
+  Juno パッチで実機確認する
+- **パン・バスはチェーン全体で 1 つ**（先頭のもの）。osc ごとのパンは効かない
+- **クロスモジュレーション・ハードシンク・リングモジュレーションは無い**
+  （係数はブロック単位で評価される）
+- **エコー**：ディレイライン（約 512 KB、PSRAM）はレベルを初めて 0 より上げたときに
+  確保され、以後は解放されない（`AMY.reset` でも残る。FM だけのスクリプトでは確保されない）
+- **ウェーブテーブル無し**、PCM は `pcm_tiny` の 11 サンプルのみ
+- `FM` と `Synth` は別の synth（チャンネル）に置けば同時に鳴らせる。
+  `AMY.reset`（スクリプト停止時）で両方消える
+- gem の `mrblib/` を変えたら `rm -rf components/picoruby-esp32/picoruby/build/esp32`
+  してからビルドする（CLAUDE.md）
+
+### 5.7 決定事項（2026-10-04）
+
+| 項目 | 決定 |
+|------|------|
+| 名前 | トランスポートを `AMY::Transport` に改名し、新クラスを `AMY::Synth` とする（5.1、改名済み） |
+| ボイス構成 | Juno と同じ「SILENT 先頭（VCF / VCA）+ LFO + チェーン」に固定（5.3）。osc ごとにフィルタ / パンを持つ構成は扱わない |
+| オシレータの本数 | **最大 4 本**。ボイスは常に 4 本ぶん確保（`oscs_per_voice` = 6） |
+| LFO | **1 本**（osc 1、`mod0`） |
+| エンベロープ | **ADSR のみ**（amp = `bp0`、filter = `bp1`）。多点ブレークポイントとピッチエンベロープは扱わない |
+| Juno パッチ | **0〜127 をプリセットとして呼べる**（`syn.patch = n`、`refresh` で読み戻してノブを追従） |
+| パッチの保存 | **当面なし** |
+| エコー | **有効化する**（`features.echo = 1`、`syn.echo(...)`） |
+
+### 5.8 実装（2026-10-04）
+
+| 場所 | 中身 |
+|------|------|
+| `mrblib/amy_synth.rb` | `AMY::Synth`（ボイス構成・パッチ読み込み・読み戻し・フィルタ / アンプ / EG / エフェクト・`set` / `get`・`map_cc`）、`Oscillator`、`LFO` |
+| `ports/esp32/amy_port.c` | `AMY_GEM_synth_state()`：`yield_synth_events()`（バスのエフェクトを含む）を描画ロックの下で読み、osc ごとに 1 行のテキストにする。`features.echo = 1` |
+| `src/mrubyc/amy.c` | `AMY._synth_state(synth)`（2 KB のバッファ） |
+| `mrblib/patch_names.rb` | Juno 名（`JUNO_PATCH_NAMES`）を追加。`AMY.patch_name(1)` → `"A12 Brass Swell"` |
+| `examples/amy_synth.rb` | 5.5 のノブ 4 バンク + パッド + XYPad + USB キーボード |
+
+`AMY._synth_state` の書式（キーは AMY のワイヤ文字。既定値と違うものだけ出る）：
+
+```
+synth 6 6 1.0000
+osc 0 w=20 a=0.591 F=300.228,0.661,,2.252 G=4 R=1.0150 c=2 L=1 A=518,1.0000,83561,0.2990,310,0.0000
+osc 1 w=4 a=,,0 f=0.608864 A=148,1.0000,10000,0.0000
+osc 2 w=1 a=0,,0,0 d=0.72 c=3 L=1
+...
+fx V=1.0000 h=0.0000,0.8500,0.5000,3000.0 k=1.0000,512.0,0.5000,0.5000 M=0.0000,500.0,0.0,0.0000,0.0000
+```
+
+実装で分かったこと・決めたこと：
+
+- **既定値は読み戻しに出てこない**（`set_event_for_osc()` が既定値との差分だけを返す）。
+  エンベロープでは `A518,1,...` のアタック先 1.0 が eg0 の既定（キーゲート 0,1.0,0,0）と
+  一致するので値が欠ける。C 側で eg0 の既定を補ってから出す。係数の空欄は Ruby 側で
+  AMY の既定（`amp` = 1 / vel 1 / eg0 1、`freq` = 440 Hz、`duty` / `pan` = 0.5、
+  `resonance` = 0.7）で埋める
+- **オクターブ / デチューン**は `freq` の const（440 Hz = 弾いた音）に入れる。`Math` が
+  無いので、2 の冪は既存の `AMY._log_scale` / `_log_unscale` を ±4 オクターブの範囲で使う
+- **LFO は音符に依存させない**：`freq` の note / bend 係数を 0、`amp` の vel / eg0 係数を 0。
+  AMY の LFO はボイスごとの osc で、ノートオンが届かなくても `mod_source` からの参照で
+  動く（`compute_mod_scale()` → `hold_and_modify()`）
+- **初期ボイス**（`init_voice`）は、前に読み込んだ Juno パッチの名残（LFO のディレイ用 EG
+  など）を消すため、管理する係数リストを全スロット明示で送る
+- **Juno パッチのフィルタ EG**：読み込み後、`filter_freq` の eg0 の深さを eg1 へ移し、
+  `bp0` をそのまま `bp1` に写す（音は変わらない）
+- **Glide の読み戻し**は AMY 内部で係数（alpha）に変換されるため、100 ms が 103 ms の
+  ように少しずれる
+- **シンボル数**：`amy_synth.rb` で新しいシンボルが約 140（セッタを含めると 200 前後）
+  増える。mruby/c の `MAX_SYMBOLS_COUNT` は 2048（`build_config/riscv-esp.rb`）で、
+  `require 'amy'` の時点で表に入る。実機で `Overflow MAX_SYMBOLS_COUNT` が出ないか確認する
+
+検証：
+
+- ホストでビルドした AMY（`yield_synth_events` を含む本物のエンジン）に Ruby の送信を
+  流し、初期ボイス・各セッタ・Juno パッチ 1 / 2 の読み込みと EG の分離・初期ボイスへの
+  戻しを、`_synth_state` の読み戻しで確認（CRuby）
+- 同じクラスを `picorbc` でコンパイルし、ホストの mruby/c VM（`MAX_SYMBOLS_COUNT=2048`）で
+  実行して同じ結果になることを確認
+- `idf.py build`（Tab5）成功・警告なし
+
+実機で確認すること：
+
+1. `examples/amy_synth.rb` が起動する（シンボル数・メモリ）
+2. 初期ボイスと Juno パッチが鳴る。Patch ノブで切り替えると各ノブがプリセットの値に動く
+3. Wave / Octave / Detune / Level、フィルタ（Cutoff・Reso・Flt Env・Key Track・種類）、
+   Amp / Filter の ADSR、LFO（Vibrato・LFO>Filter・Tremolo・PWM）が聴いて分かる効き方をするか
+4. エコー（Echo / Echo Time / Echo FB）が鳴り、PSRAM 確保で止まらないか
+5. Level 0 のオシレータが描画負荷に効くか（`AMY.render_load` を Level 0 / 1 で比べる）
+6. MIDI 経由のノートで、チェーンの各オシレータが 1 回だけ鳴っているか（音量が倍にならない）
+
+---
+
 ## 実装フェーズ（案）
 
 | Phase | 内容 | 完了条件 |
 |-------|------|----------|
 | 0 | picoruby-midi にトランスポート登録 API（案 2）。既存 3 トランスポートを固定ビットで自己登録に移行 | 既存スクリプト（pads / tombola / knobs / xypad）の挙動が変わらない |
 | 1 | 音出し。`partitions.csv` 拡張 + `board_audio_*`（ES8388 / アンプ）+ gem の I2S + オーディオタスク + `amy_start` | 起動時に AMY の startup bleep が両ボードのスピーカーで鳴る |
-| 2 | トランスポート。`AMY::Synth`、`MIDIDevices.amy`、`BoardConfig::HAS_AMY` | `MIDI::Device.new(MIDIDevices.amy).trigger(60)` で DX7 パッチが鳴る |
+| 2 | トランスポート。`AMY::Transport`（当初は `AMY::Synth`）、`MIDIDevices.amy`、`BoardConfig::HAS_AMY` | `MIDI::Device.new(MIDIDevices.amy).trigger(60)` で DX7 パッチが鳴る |
 | 3 | FM API（L1/L2/L3）と examples/amy_fm.rb | Knob / Pad / XYPad / Tombola から操作できる |
 | 4 | `MIDI.route`（picoruby-midi の C 側 Thru） | USB-MIDI キーボードで低遅延に演奏できる |
 | 5 | 負荷・遅延の詰め（ボイス数、ブロック長、優先度 2/3、`overload_threshold`）、Supervisor 停止時の挙動 | 6 ボイス FM + reverb で過負荷フェイルセーフが作動せず、UI も操作できる |
@@ -843,6 +1201,8 @@ t = UI::Tombola.new(sides: 6, device: dev)
 | オーディオタスク | gem のタスク 1 本で描画 + I2S 書き込み。**Core 0 / 優先度 2〜3**。AMY 内部タスク（multithread / multicore）は使わない |
 | ES8388 の MCLK 比 | 128 × fs / reg24 = 0x00（M5Unified と同じ） |
 | CrowPanel の音声出力 | NS4168 × 2（L / R）、Philips 形式、GPIO 30 = AO3401 経由の電源スイッチ（active-low） |
+| トランスポートの名前（2026-10-04） | `AMY::Transport`（旧 `AMY::Synth`）。`AMY::FM#synth` は `#transport` に。`AMY::Synth` は複数オシレータのシンセ（§5）に使う |
+| 複数オシレータのシンセ（2026-10-04） | `AMY::Synth`：Juno と同じボイス構成、オシレータ最大 4・LFO 1・ADSR のみ、Juno パッチ 0〜127 をプリセットに、保存なし、エコー有効化（§5.7） |
 
 ## 未確定事項（実機確認が必要）
 
@@ -857,7 +1217,7 @@ t = UI::Tombola.new(sides: 6, device: dev)
   AMY のベンド幅は ±2 半音固定なので `glide_range: 2` で一致する（`examples/amy_fm.rb`）。
   AMY のピッチベンドは synth 全体に掛かるため、複数の指で同時にグライドすると互いに影響する
 - DX7 プリセット名：AMY の `patches.h` にはコメントにしか無いので、そこから生成した
-  `mrblib/dx7_patches.rb`（`AMY.patch_name(n)`）を gem に入れた。AMY を更新したら再生成する
+  `mrblib/patch_names.rb`（Juno 名も含む）（`AMY.patch_name(n)`）を gem に入れた。AMY を更新したら再生成する
 - ALGO osc（osc 0）に掛けたフィルタ（`fm.filter_freq=`）が FM の出力全体に効くか（実機で聴く）
 - 内部 RAM の静的使用量が約 26 KB 増えたことで、起動時に画面が出なくならないか：
   **Tab5 では問題なし（2026-10-04）**。CrowPanel は未確認
