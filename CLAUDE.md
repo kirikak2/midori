@@ -147,17 +147,63 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 これらは upstream picoruby には含めない方針のため、`components/picoruby-esp32/picoruby/mrbgems/`
 から移動した。ビルドへの取り込みは以下の 2 箇所：
 
-- `components/picoruby-esp32/build_config/{xtensa,riscv}-esp.rb` …
-  `conf.gem File.expand_path('../../../mrbgems/<gem>', __dir__)`
+- `components/picoruby-esp32/build_config/microruby_gems.rb`（mruby VM、既定）と
+  `{xtensa,riscv}-esp.rb`（mruby/c VM）… `conf.gem` で gem を追加。**両方に足すこと**
 - `components/picoruby-esp32/CMakeLists.txt` … ESP32 port の C ファイル /
   include ディレクトリを `${CMAKE_SOURCE_DIR}/mrbgems/<gem>/...` で参照
 
-**注意**: gem の `mrblib/*.rb` や `src/`（mruby/c バインディング）を変更したら
-`rm -rf components/picoruby-esp32/picoruby/build/esp32` してからビルドする。
+**注意**: gem の `mrblib/*.rb` や `src/`（VM バインディング）を変更したら
+`rm -rf components/picoruby-esp32/picoruby/build/esp32-microruby`（mruby VM。
+mruby/c なら `build/esp32`）してからビルドする。
 CMake は rake（PicoRuby のビルド）を「`libmruby.a` が無いとき」にしか呼ばないので、
 `idf.py build` はもちろん `idf.py fullclean`（`build/` を消すだけ）でも gem の変更は
 反映されない（2026-10-04 に確認）。`ports/` の C は IDF 側のビルドなので通常の
 `idf.py build` で反映される。
+
+### Ruby VM は mruby（2026-10-07 に mruby/c から移行）
+
+ビルドする VM は CMake のキャッシュ変数 `PICORB_VM`（`mruby` 既定 / `mrubyc`）で選ぶ。
+mruby/c も引き続きビルドできる。既存のビルドディレクトリは設定時の値を保持するので、
+切り替えは `idf.py -DPICORB_VM=mruby reconfigure`（または fullclean）。
+2026-10-07 時点で mruby 版は Tab5 / CoreS3 のビルドとホスト（Linux）上のテストのみで、
+**実機では未確認**。
+
+- ビルド設定は `build_config/{xtensa,riscv}-esp-microruby.rb`、gem 一覧は
+  `build_config/microruby_gems.rb`（mruby 標準の `*-ext` 系 gem も入れている。
+  mruby/c が組み込みで持っていたメソッドを補うため）。libmruby は
+  `picoruby/build/esp32-microruby/`
+- **mrb_state / mrb_value のレイアウトを変える define は libmruby と IDF 側で一致させる**
+  （`CMakeLists.txt` の `ADDITIONAL_DEFINITIONS`）。ずれてもリンクは通り、メモリが静かに壊れる。
+  `MRB_UTF8_STRING` は picoruby-mruby も追加するが、mruby コアの設定後に足すのでコアだけ
+  抜けてリンクエラーになる。上流 R2P2 と同様にビルド設定で明示している
+- Supervisor（`picoruby_supervisor.c`）はスクリプトごとに `mrb_open_with_custom_alloc()`
+  で新しい VM を開き、終われば実行タスク上で `mrb_close()` する（gem の final が走り、
+  FAT のボリュームも GC で unmount される）。5 秒タイムアウトで強制終了したときは VM を
+  **閉じずに捨てる**（途中状態のヒープは触らない）。次の open がヒーププールを丸ごと初期化し、
+  プール外の状態（tick タイマの VM ポインタ、FatFs[]）だけ `cleanup_vm()` で外す
+- mruby では全 gem がオープン時に初期化される（mrblib もその場で実行）ので `require` は
+  実質何もしない。**どれかの gem の mrblib がロード時に例外を出すと `mrb_open()` はそこで
+  止まり、以降の gem は未初期化のまま VM が返る**。Supervisor はこれを検出して
+  「Gem initialization failed: ...」を出す。mruby/c では require されるまで実行されない
+  コードなので、移行で初めて表に出る（`picoruby-rapicco` が先頭で存在しない
+  `karmatic_arcade` を require しており、`MIDI.start!` が無いというエラーで発覚。
+  2026-10-07。mruby 版では shell gembox を展開して rapicco を外している）。
+  同様に **mrblib がロード時に別 gem の定数を参照するなら、その gem に依存（add_dependency）
+  させて初期化順を保証する**（picoruby-network が `ESP32::WiFi` を読むため、ESP32 ビルドでは
+  picoruby-esp32 に依存させた）
+- C バインディングの `mrb_get_args` で `"i"` は `mrb_int`（MRB_INT64 なので 8 バイト）を書く。
+  `int` 変数を渡すとスタックを 4 バイト壊す（picoruby-gpio の `GPIO.new(pin, dir)` 系で発見・修正）
+- Midori 側 gem の `*_gem_final` は何もしない（USB host / UART / MIDI 入力タスク /
+  スケジューラ / AMY はスクリプトをまたいで生きているプロセス全体の C 状態。強制終了時は
+  final 自体が走らないので、停止は従来どおり `picoruby_esp32_midi_cleanup()` 任せ）
+- picoruby-machine の ESP32 HAL（`ports/esp32/machine.c`）は tick タイマと stdin タスクを
+  1 回だけ作り、`picorb_hal_final` で VM ポインタを外す（mruby/c は rrt0.c が init を
+  1 回に絞っていた）
+- PicoRuby タスクの C スタックは mruby では 32KB（mruby/c は 16KB）
+- **mruby/c との違いで踏みやすいもの**: mruby/c はクラスメソッドとインスタンスメソッドを
+  区別しない。C で `define_method` したメソッドを `Klass.foo` と呼んでいると mruby では
+  NoMethodError（picoruby-filesystem-fat の `FAT.init_spi` / `init_sdmmc` がこれだった）。
+  モジュールに生やす C 関数は `mrb_define_module_function_id` で定義する
 
 ### 重要：main_task.rbは自動生成ファイル
 
