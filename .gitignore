@@ -1,5 +1,6 @@
 .vscode/
 *.code-workspace
 build/
+build-mruby/
 sdkconfig
 sdkconfig.defaults
