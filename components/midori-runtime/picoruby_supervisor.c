@@ -26,7 +26,8 @@
 #include <mruby/array.h>
 #include <mruby/presym.h>
 
-// Defined in picoruby-esp32.c; some gems reach the running VM through it.
+// The running VM. Defined by picoruby's compiler (ccontext.c), which
+// allocates through it, so the supervisor keeps it pointing at the VM it runs.
 extern mrb_state *global_mrb;
 
 /*

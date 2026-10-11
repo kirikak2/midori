@@ -136,8 +136,16 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
 - 中身: `CMakeLists.txt`（ボード設定・gem の ports）、`build_config/`、`mrblib/`
   （`main_task_base.rb` / `board_config.rb.in`）、Supervisor、コンソール入力、
   `picoruby-esp32.c`（スクリプト一覧・停止要求などの C API。名前は互換のため据え置き）
-- `components/midori-runtime/picoruby/` が picoruby のサブモジュール。現在は
-  kirikak2/picoruby の `selfbuild`（upstream master への追従は作業中）
+- `components/midori-runtime/picoruby/` が picoruby のサブモジュール。kirikak2/picoruby の
+  **`midori` ブランチ = upstream picoruby/picoruby の master + 小さなパッチ**（2026-10-12 時点で 2 本:
+  picoruby-gpio の `mrb_int` 修正、picoruby-machine の ESP32 HAL を 1 回だけ初期化する修正）。
+  upstream を取り込むときは `git fetch upstream && git rebase upstream/master`（remote `upstream` は
+  picoruby/picoruby）。パッチは upstream に PR して減らしていく
+- ビルド設定の名前は upstream に合わせている（`build_config/{xtensa,riscv}-esp-picoruby.rb`、
+  libmruby は `picoruby/build/esp32-picoruby/`）。`main_task.rb` をコンパイルする mrbc は
+  クロスビルドが自分用に作る `picoruby/build/mrbc/default/bin/mrbc`
+- `global_mrb` は picoruby のコンパイラ（`mruby-compiler/src/ccontext.c`）が定義する。
+  Supervisor が実行中の VM を指すように更新している
 - upstream の変化（ports の追加、define、rake の呼び方）は R2P2-ESP32 の
   `components/picoruby-esp32/CMakeLists.txt` を参照して追う
 
@@ -152,9 +160,8 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
   mruby / mruby/c 両方のバインディングを持つ
 - 両 gem が同じ名前で定義していた C シンボルは FAT 側を `mrb_fat__*` / `c_fat__*` /
   `mrb_fat_vfs_methods_type` に改名して共存させている
-- マウントは `main_task_base.rb` の `mount_root_volume` / `mount_sd_card` が行う
-  （`Shell.setup_root_volume` / `Shell.setup_sdcard` は使わない。フォーク版は FAT を優先し、
-  upstream 版は SD にも littlefs を使うため）
+- マウント: `/` は `Shell.setup_root_volume(:flash, ...)`（upstream のまま）、`/sd` は
+  `main_task_base.rb` の `mount_sd_card`（`Shell.setup_sdcard` は SD にも littlefs を使うので使わない）
 - SDMMC のスロット / クロックは `FAT.new(:sd, driver: sdmmc, sdmmc_slot:, sdmmc_freq_khz:)` で渡す
   （`SDMMC` クラスの拡張に依存しない）
 - FAT の port（`ports/esp32/sd_disk.c`）は IDF 側でコンパイルする（`CMakeLists.txt`）。
@@ -182,13 +189,13 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 これらは upstream picoruby には含めない方針のため、`components/midori-runtime/picoruby/mrbgems/`
 から移動した。ビルドへの取り込みは以下の 2 箇所：
 
-- `components/midori-runtime/build_config/microruby_gems.rb` … `conf.gem` で gem を追加
-  （P4 専用の gem は `riscv-esp-microruby.rb` 側。例: picoruby-amy）
+- `components/midori-runtime/build_config/picoruby_gems.rb` … `conf.gem` で gem を追加
+  （P4 専用の gem は `riscv-esp-picoruby.rb` 側。例: picoruby-amy）
 - `components/midori-runtime/CMakeLists.txt` … ESP32 port の C ファイル /
   include ディレクトリを `${CMAKE_SOURCE_DIR}/mrbgems/<gem>/...` で参照
 
 **注意**: gem の `mrblib/*.rb` や `src/`（VM バインディング）を変更したら
-`rm -rf components/midori-runtime/picoruby/build/esp32-microruby` してからビルドする。
+`rm -rf components/midori-runtime/picoruby/build/esp32-picoruby` してからビルドする。
 CMake は rake（PicoRuby のビルド）を「`libmruby.a` が無いとき」にしか呼ばないので、
 `idf.py build` はもちろん `idf.py fullclean`（`build/` を消すだけ）でも gem の変更は
 反映されない（2026-10-04 に確認）。`ports/` の C は IDF 側のビルドなので通常の
@@ -204,10 +211,10 @@ mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の
 2026-10-07 時点で mruby 版は Tab5 / CoreS3 のビルドとホスト（Linux）上のテストのみで、
 **実機では未確認**。
 
-- ビルド設定は `build_config/{xtensa,riscv}-esp-microruby.rb`、gem 一覧は
-  `build_config/microruby_gems.rb`（mruby 標準の `*-ext` 系 gem も入れている。
+- ビルド設定は `build_config/{xtensa,riscv}-esp-picoruby.rb`、gem 一覧は
+  `build_config/picoruby_gems.rb`（mruby 標準の `*-ext` 系 gem も入れている。
   mruby/c が組み込みで持っていたメソッドを補うため）。libmruby は
-  `picoruby/build/esp32-microruby/`
+  `picoruby/build/esp32-picoruby/`
 - **mrb_state / mrb_value のレイアウトを変える define は libmruby と IDF 側で一致させる**
   （`CMakeLists.txt` の `ADDITIONAL_DEFINITIONS`）。ずれてもリンクは通り、メモリが静かに壊れる。
   `MRB_UTF8_STRING` は picoruby-mruby も追加するが、mruby コアの設定後に足すのでコアだけ
@@ -224,9 +231,10 @@ mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の
   コードなので、移行で初めて表に出る（`picoruby-rapicco` が先頭で存在しない
   `karmatic_arcade` を require しており、`MIDI.start!` が無いというエラーで発覚。
   2026-10-07。mruby 版では shell gembox を展開して rapicco を外している）。
-  同様に **mrblib がロード時に別 gem の定数を参照するなら、その gem に依存（add_dependency）
-  させて初期化順を保証する**（picoruby-network が `ESP32::WiFi` を読むため、ESP32 ビルドでは
-  picoruby-esp32 に依存させた）
+  同様に **mrblib がロード時に別 gem の定数を参照するなら、その gem を先に初期化させる**。
+  初期化順は依存関係を満たしたうえで `conf.gem` した順なので、picoruby-network（shell の依存）が
+  読む `ESP32::WiFi` のために `picoruby_gems.rb` で picoruby-esp32 を shell より前に置いている
+  （upstream R2P2-ESP32 と同じ。以前はフォークで network に依存を足していた）
 - C バインディングの `mrb_get_args` で `"i"` は `mrb_int`（MRB_INT64 なので 8 バイト）を書く。
   `int` 変数を渡すとスタックを 4 バイト壊す（picoruby-gpio の `GPIO.new(pin, dir)` 系で発見・修正）
 - Midori 側 gem の `*_gem_final` は何もしない（USB host / UART / MIDI 入力タスク /
@@ -1138,7 +1146,7 @@ TinyUSB CDC 経由で使える。
   （未定義時はスタブ / MIDI 単機能）。P4 の PHY mux 切り替えは
   `CONFIG_IDF_TARGET_ESP32P4` 限定で、S3 では ESP-IDF の `usb_phy` ドライバが
   PHY を USB-OTG に引き渡す
-- `components/midori-runtime/build_config/microruby_gems.rb` … S3 でも
+- `components/midori-runtime/build_config/picoruby_gems.rb` … S3 でも
   `picoruby-usb_midi_device` gem をビルドに含める
 
 ### picoruby-usb_midi_device への設定注入（2026-08-02）

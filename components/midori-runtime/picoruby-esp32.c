@@ -49,10 +49,6 @@ EXT_RAM_BSS_ATTR uint8_t heap_pool[HEAP_SIZE];
 uint8_t heap_pool[HEAP_SIZE];
 #endif
 
-// The running VM (set by picoruby_supervisor.c). The prism compiler
-// allocates through it (prism_xallocator.h), so Kernel.load needs it.
-mrb_state *global_mrb = NULL;
-
 // Script management (accessible from picoruby_supervisor.c)
 static char g_current_script[128] = {0};
 char g_requested_script[128] = {0};

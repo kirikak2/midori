@@ -247,27 +247,9 @@ def unmount_sd_card
   end
 end
 
-# The internal flash is littlefs, mounted as "/" (formatted on first use).
-# Shell.setup_root_volume is not used for this: the picoruby fork's version
-# prefers FAT whenever the FAT gem is built in.
-def mount_root_volume
-  return if VFS.volume_index("/")
-  flash = Littlefs.new(:flash, label: 'storage')
-  retry_count = 0
-  begin
-    VFS.mount(flash, "/")
-  rescue => e
-    puts e.message
-    puts "Try to format the volume..."
-    flash.mkfs
-    retry_count += 1
-    retry if retry_count == 1
-    raise e
-  end
-end
-
 # The SD card is FAT (picoruby-filesystem-fat, a midori gem), mounted as
-# "/sd". Upstream's Shell.setup_sdcard would put littlefs on it instead.
+# "/sd". Shell.setup_sdcard would put littlefs on it instead. (The internal
+# flash, "/", is littlefs: Shell.setup_root_volume.)
 def mount_sd_card(driver, sdmmc_slot: -1, sdmmc_freq_khz: -1)
   print "Initializing SD card(#{driver.class})... "
   sd = FAT.new(:sd, label: "SD", driver: driver,
@@ -508,7 +490,7 @@ else
   begin
     STDIN.echo = false
     puts "Initializing FLASH disk as the root volume... "
-    mount_root_volume
+    Shell.setup_root_volume(:flash, label: 'storage')
     Shell.setup_system_files
     puts "Available"
   rescue => e

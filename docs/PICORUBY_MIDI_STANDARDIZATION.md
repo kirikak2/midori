@@ -105,7 +105,7 @@ Phase 1〜7 まで完了。Midori 上で動作確認済み（M5Stack Tab5 / ESP3
 - **mrubyc VM ビルド確認**: midori 経由で end-to-end 通過済み（M5Stack Tab5 / ESP32-P4）。
 - **mruby VM ビルド確認**: バインディングは Phase 3 でフィーチャ等価まで揃えたが、
   単独ビルド検証は presym 生成を伴うため picoruby 側に dedicated build_config が必要。
-  midori の `xtensa-esp-microruby.rb` / `riscv-esp-microruby.rb` には現状 MIDI gem を含めて
+  midori の `xtensa-esp-picoruby.rb` / `riscv-esp-picoruby.rb` には現状 MIDI gem を含めて
   いないため、フル mruby ビルド検証は upstream 提出時に PicoRuby メンテナの CI マトリクスへ
   委譲する想定。
 - **picoruby-sam2695 が picoruby-uart_midi 経由で動作する確認**: Phase 5c 完了直後に

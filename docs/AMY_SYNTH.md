@@ -1096,7 +1096,7 @@ USB キーボードは `MIDI.route`）。
 - **ウェーブテーブル無し**、PCM は `pcm_tiny` の 11 サンプルのみ
 - `FM` と `Synth` は別の synth（チャンネル）に置けば同時に鳴らせる。
   `AMY.reset`（スクリプト停止時）で両方消える
-- gem の `mrblib/` を変えたら `rm -rf components/midori-runtime/picoruby/build/esp32-microruby`
+- gem の `mrblib/` を変えたら `rm -rf components/midori-runtime/picoruby/build/esp32-picoruby`
   してからビルドする（CLAUDE.md）
 
 ### 5.7 決定事項（2026-10-04）

@@ -129,7 +129,7 @@ fi
 echo "Switching to $BOARD_LABEL - $MODE_LABEL..."
 
 # Detect a CPU architecture change (xtensa <-> riscv). PicoRuby builds into a
-# single arch-agnostic directory (picoruby/build/esp32-microruby) and rake does not
+# single arch-agnostic directory (picoruby/build/esp32-picoruby) and rake does not
 # notice that the toolchain changed, so those objects must go when the target
 # does. A mode switch on the same board keeps them (they do not depend on
 # sdkconfig).

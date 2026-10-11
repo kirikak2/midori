@@ -1,18 +1,16 @@
-MRuby::CrossBuild.new('esp32-microruby') do |conf|
+MRuby::CrossBuild.new('esp32-picoruby') do |conf|
   conf.toolchain('gcc')
 
-  conf.cc.command = 'riscv32-esp-elf-gcc'
-  conf.linker.command = 'riscv32-esp-elf-ld'
-  conf.archiver.command = 'riscv32-esp-elf-ar'
+  conf.cc.command = 'xtensa-esp32-elf-gcc'
+  conf.linker.command = 'xtensa-esp32-elf-ld'
+  conf.archiver.command = 'xtensa-esp32-elf-ar'
 
   conf.cc.host_command = 'gcc'
-  # ESP32-P4 uses RISC-V with single-precision float ABI
-  conf.cc.flags << '-march=rv32imafc_zicsr_zifencei'
-  conf.cc.flags << '-mabi=ilp32f'
   conf.cc.flags << '-Wall'
   conf.cc.flags << '-Wno-format'
   conf.cc.flags << '-Wno-unused-function'
   conf.cc.flags << '-Wno-maybe-uninitialized'
+  conf.cc.flags << '-mlongcalls'
 
   # Every define that changes the layout of mrb_state / mrb_value must also
   # be passed to the IDF side (ADDITIONAL_DEFINITIONS in CMakeLists.txt).
@@ -28,7 +26,8 @@ MRuby::CrossBuild.new('esp32-microruby') do |conf|
   conf.cc.defines << 'PICORB_ALLOC_ESTALLOC'
   conf.cc.defines << 'PICORB_ALLOC_ALIGN=8'
   conf.cc.defines << 'USE_FAT_SD_DISK'
-  conf.cc.defines << 'ESP32_PLATFORM'
+  conf.cc.defines << 'PICORB_PLATFORM_ESP32'
+  conf.cc.defines << 'MRC_PRISM_ARENA_BLOCK=2048'
   conf.cc.defines << 'NDEBUG'
 
   if ENV['PICORUBY_DEBUG']
@@ -38,9 +37,5 @@ MRuby::CrossBuild.new('esp32-microruby') do |conf|
 
   conf.picoruby
 
-  eval File.read(File.expand_path('microruby_gems.rb', __dir__))
-
-  # AMY software synthesizer — midori-specific gem. ESP32-P4 boards only
-  # (Tab5 / CrowPanel), so it is not in the xtensa (ESP32-S3) config.
-  conf.gem File.expand_path('../../../mrbgems/picoruby-amy', __dir__)
+  eval File.read(File.expand_path('picoruby_gems.rb', __dir__))
 end

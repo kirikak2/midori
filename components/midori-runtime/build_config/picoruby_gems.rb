@@ -1,8 +1,12 @@
-# Gem set shared by xtensa-esp-microruby.rb and riscv-esp-microruby.rb
+# Gem set shared by xtensa-esp-picoruby.rb and riscv-esp-picoruby.rb
 # (eval'ed inside their MRuby::CrossBuild block, so `conf` is the build).
 
 conf.gembox 'minimum'
 conf.gembox 'core'
+# Before the shell: mruby initialises gems in the order they are added
+# (dependencies first), and picoruby-network -- a dependency of the shell --
+# reads ESP32::WiFi while it loads. Same order as upstream R2P2-ESP32.
+conf.gem core: 'picoruby-esp32'
 # The 'shell' gembox minus picoruby-rapicco. mruby runs every gem's mrblib
 # when the VM opens (mruby/c only on require), and rapicco's starts with
 # `require 'karmatic_arcade'`, a font gem this build does not have: the
@@ -37,7 +41,6 @@ conf.gem core: 'picoruby-uart'
 conf.gem core: 'picoruby-pwm'
 
 # others
-conf.gem core: 'picoruby-esp32'
 conf.gem core: 'picoruby-rmt'
 conf.gem core: 'picoruby-mbedtls'
 conf.gem core: 'picoruby-socket'

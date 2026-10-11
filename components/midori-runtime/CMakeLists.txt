@@ -2,19 +2,20 @@
 # dropped on 2026-10-11; the midori gems keep their mruby/c bindings for other
 # hosts, but nothing here compiles them.
 file(MAKE_DIRECTORY ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-mbedtls/lib/mbedtls/include)
-file(MAKE_DIRECTORY ${COMPONENT_DIR}/picoruby/build/esp32-microruby/include)
-set(MRUBY_CONFIG_STRING "${COMPONENT_DIR}/build_config/${IDF_TARGET_ARCH}-esp-microruby.rb")
-set(LIBMRUBY_PATH "esp32-microruby")
-set(CUSTOM_TARGET_NAME "microruby")
+file(MAKE_DIRECTORY ${COMPONENT_DIR}/picoruby/build/esp32-picoruby/include)
+file(MAKE_DIRECTORY ${COMPONENT_DIR}/picoruby/build/prism/include)
+set(MRUBY_CONFIG_STRING "${COMPONENT_DIR}/build_config/${IDF_TARGET_ARCH}-esp-picoruby.rb")
+set(LIBMRUBY_PATH "esp32-picoruby")
+set(CUSTOM_TARGET_NAME "picoruby")
 set(MRUBY_GEM_DIR ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-mruby)
 set(ADDITIONAL_INCLUDE_DIRS
-  ${COMPONENT_DIR}/picoruby/build/esp32-microruby/include
+  ${COMPONENT_DIR}/picoruby/build/esp32-picoruby/include
   ${MRUBY_GEM_DIR}/include
   ${MRUBY_GEM_DIR}/lib/mruby/include
   ${MRUBY_GEM_DIR}/lib/mruby/mrbgems/mruby-task/include
 )
 # These must match what libmruby.a was compiled with (build_config/
-# *-esp-microruby.rb plus what picoruby-mruby's mrbgem.rake adds): several
+# *-esp-picoruby.rb plus what picoruby-mruby's mrbgem.rake adds): several
 # of them change the layout of mrb_state and mrb_value, and a mismatch
 # corrupts memory silently instead of failing to link.
 set(ADDITIONAL_DEFINITIONS
@@ -73,7 +74,6 @@ idf_component_register(
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-socket/ports/esp32/udp_socket.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-i2c/ports/esp32/i2c.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-uart/ports/esp32/uart.c
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-sdmmc/src/sdmmc.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_host/ports/esp32/usb_midi_host.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_host/ports/esp32/usb_host_driver.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_device/ports/esp32/usb_midi_device.c
@@ -90,9 +90,9 @@ idf_component_register(
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-mbedtls/include
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-mbedtls/lib/mbedtls/include
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-littlefs/ports/esp32
-    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler2/include
-    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler2/lib/prism/include
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-sdmmc/include
+    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler/include
+    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler/lib/prism/include
+    ${COMPONENT_DIR}/picoruby/build/prism/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_host/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_device/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-uart_midi/include
@@ -128,7 +128,7 @@ idf_component_register(
 add_definitions(
   ${ADDITIONAL_DEFINITIONS}
   -DUSE_FAT_SD_DISK
-  -DESP32_PLATFORM
+  -DPICORB_PLATFORM_ESP32
   -DNDEBUG
 )
 
@@ -138,8 +138,8 @@ set(LIBMRUBY_FILE ${PICORUBY_DIR}/build/${LIBMRUBY_PATH}/lib/libmruby.a)
 # Build PicoRuby
 add_custom_command(
   OUTPUT ${LIBMRUBY_FILE}
-  COMMAND ${CMAKE_COMMAND} -E echo "MRUBY_CONFIG=${MRUBY_CONFIG_STRING} rake"
-  COMMAND ${CMAKE_COMMAND} -E env MRUBY_CONFIG=${MRUBY_CONFIG_STRING} rake
+  COMMAND ${CMAKE_COMMAND} -E echo "MRUBY_CONFIG=${MRUBY_CONFIG_STRING} CONFIG_IDF_TARGET=${CONFIG_IDF_TARGET} rake"
+  COMMAND ${CMAKE_COMMAND} -E env MRUBY_CONFIG=${MRUBY_CONFIG_STRING} CONFIG_IDF_TARGET=${CONFIG_IDF_TARGET} rake
   WORKING_DIRECTORY ${PICORUBY_DIR}
   COMMENT "PicoRuby build"
   VERBATIM
@@ -153,8 +153,9 @@ target_link_libraries(${COMPONENT_LIB} PRIVATE libmruby)
 target_include_directories(
   ${COMPONENT_LIB}
   PRIVATE
-    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler2/include
-    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler2/lib/prism/include
+    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler/include
+    ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler/lib/prism/include
+    ${COMPONENT_DIR}/picoruby/build/prism/include
     ${ADDITIONAL_INCLUDE_DIRS}
 )
 
@@ -430,7 +431,10 @@ file(WRITE ${COMPONENT_DIR}/mrblib/main_task.rb "${BOARD_CONFIG_CONTENT}\n${MAIN
 
 # Compile Ruby files
 set(RUBY_FILES main_task)
-set(PICORBC ${COMPONENT_DIR}/picoruby/bin/picorbc)
+# The host compiler the cross build makes for itself (mruby builds an mrbc
+# for every cross target; R2P2-ESP32 instead runs a separate host build that
+# links it as bin/mrbc).
+set(PICORBC ${COMPONENT_DIR}/picoruby/build/mrbc/default/bin/mrbc)
 set(GENERATED_C_FILES "")
 
 foreach(rb ${RUBY_FILES})
