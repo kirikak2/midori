@@ -134,7 +134,7 @@ EXT_RAM_BSS_ATTR uint8_t huge_buffer[256 * 1024];
 - ただしアクセス速度は遅い、DMA 用途には不適
 - 起動後 PSRAM 初期化 (`esp_psram: SPI SRAM memory test OK` のログ) が終わるまでは使用不可
 
-プロジェクト内の例: `components/picoruby-esp32/picoruby-esp32.c` の
+プロジェクト内の例: `components/midori-runtime/picoruby-esp32.c` の
 ```c
 EXT_RAM_BSS_ATTR uint8_t heap_pool[HEAP_SIZE];  // ESP32-P4 は 4 MiB
 ```

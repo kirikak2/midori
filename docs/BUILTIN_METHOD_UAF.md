@@ -105,7 +105,7 @@ FATFS インスタンス: fs@+46164 sizeof=4156 end@+50320
 |---|---|
 | `picoruby-filesystem-fat/lib/ff14b/source/ff.c` | `ff_clear_volumes()` 追加（`FatFs[]` をデリファレンスせずゼロクリア） |
 | `picoruby-filesystem-fat/lib/ff14b/source/ff.h` | `ff_clear_volumes()` プロトタイプ宣言 |
-| `components/picoruby-esp32/picoruby_supervisor.c` | `cleanup_vm()` の `mrbc_cleanup()` **直前**で `ff_clear_volumes()` を呼ぶ |
+| `components/midori-runtime/picoruby_supervisor.c` | `cleanup_vm()` の `mrbc_cleanup()` **直前**で `ff_clear_volumes()` を呼ぶ |
 
 ```c
 // picoruby_supervisor.c cleanup_vm()
@@ -197,9 +197,9 @@ coredump すら出ない。この制約下で有効だった手法:
   - `f_mount()`（`cfs->fs_type = 0` のダングリング書き込み地点）、`ff_clear_volumes()`（**修正**）
 - `picoruby-filesystem-fat/src/mrubyc/fat.c`
   - `c__mount()`: `mrbc_instance_new(sizeof(FATFS))` で FATFS を VM ヒープに確保 → `f_mount` に渡す
-- `components/picoruby-esp32/picoruby_supervisor.c`
+- `components/midori-runtime/picoruby_supervisor.c`
   - `cleanup_vm()`（`mrbc_cleanup` 前に `ff_clear_volumes` を呼ぶ）
-- `components/picoruby-esp32/mrblib/main_task_base.rb`
+- `components/midori-runtime/mrblib/main_task_base.rb`
   - `try_init_sd_card` / `Shell.setup_sdcard` 経由で UI モード・スクリプトモード両方で `f_mount` する
 - `picoruby-mrubyc/lib/mrubyc/src/alloc.c`
   - `mrbc_raw_alloc_no_free()`（物理走査が size=0 ブロックで無限ループ＝ハングの発現点）、`mrbc_cleanup`

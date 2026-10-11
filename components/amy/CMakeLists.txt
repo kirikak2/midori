@@ -3,7 +3,7 @@
 #
 # The sources live in the picoruby-amy gem's submodule
 # (mrbgems/picoruby-amy/lib/amy); AMY ships no IDF component of its own.
-# Kept apart from picoruby-esp32 so it gets its own compile options.
+# Kept apart from midori-runtime so it gets its own compile options.
 #
 # Only the ESP32-P4 boards (Tab5 / CrowPanel) play audio through AMY; on
 # other targets this is an empty component. Keyed off IDF_TARGET, not a

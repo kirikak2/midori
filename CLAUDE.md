@@ -126,6 +126,21 @@ device.trigger(60, 100, duration: 200, channel: 0)
 
 ## PicoRuby関連
 
+### midori-runtime コンポーネント（2026-10-11）
+
+PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime/](components/midori-runtime/)
+（MIDoRI リポジトリで直接管理。サブモジュールではない）。以前は kirikak2/picoruby-esp32 の
+`selfbuild` ブランチをサブモジュールにしていたが、upstream の picoruby-esp32 は 2026-05 に
+アーカイブされ（picoruby/R2P2-ESP32 に統合）、差分もほぼすべて MIDoRI 固有だったので引き取った。
+
+- 中身: `CMakeLists.txt`（ボード設定・gem の ports）、`build_config/`、`mrblib/`
+  （`main_task_base.rb` / `board_config.rb.in`）、Supervisor、コンソール入力、
+  `picoruby-esp32.c`（スクリプト一覧・停止要求などの C API。名前は互換のため据え置き）
+- `components/midori-runtime/picoruby/` が picoruby のサブモジュール。現在は
+  kirikak2/picoruby の `selfbuild`（upstream master への追従は作業中）
+- upstream の変化（ports の追加、define、rake の呼び方）は R2P2-ESP32 の
+  `components/picoruby-esp32/CMakeLists.txt` を参照して追う
+
 ### midori-local mrbgem の置き場所（2026-07-27）
 
 MIDI 系および midori 固有の mrbgem は、picoruby サブモジュールの外側、
@@ -144,27 +159,28 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-dfrobot_rotary_encoder` | DFRobot SEN0502 |
 | `mrbgems/picoruby-amy` | AMY ソフトシンセ（P4 ボードのみ。中で `lib/amy`＝shorepine/amy をサブモジュールにしている） |
 
-これらは upstream picoruby には含めない方針のため、`components/picoruby-esp32/picoruby/mrbgems/`
+これらは upstream picoruby には含めない方針のため、`components/midori-runtime/picoruby/mrbgems/`
 から移動した。ビルドへの取り込みは以下の 2 箇所：
 
-- `components/picoruby-esp32/build_config/microruby_gems.rb`（mruby VM、既定）と
-  `{xtensa,riscv}-esp.rb`（mruby/c VM）… `conf.gem` で gem を追加。**両方に足すこと**
-- `components/picoruby-esp32/CMakeLists.txt` … ESP32 port の C ファイル /
+- `components/midori-runtime/build_config/microruby_gems.rb` … `conf.gem` で gem を追加
+  （P4 専用の gem は `riscv-esp-microruby.rb` 側。例: picoruby-amy）
+- `components/midori-runtime/CMakeLists.txt` … ESP32 port の C ファイル /
   include ディレクトリを `${CMAKE_SOURCE_DIR}/mrbgems/<gem>/...` で参照
 
 **注意**: gem の `mrblib/*.rb` や `src/`（VM バインディング）を変更したら
-`rm -rf components/picoruby-esp32/picoruby/build/esp32-microruby`（mruby VM。
-mruby/c なら `build/esp32`）してからビルドする。
+`rm -rf components/midori-runtime/picoruby/build/esp32-microruby` してからビルドする。
 CMake は rake（PicoRuby のビルド）を「`libmruby.a` が無いとき」にしか呼ばないので、
 `idf.py build` はもちろん `idf.py fullclean`（`build/` を消すだけ）でも gem の変更は
 反映されない（2026-10-04 に確認）。`ports/` の C は IDF 側のビルドなので通常の
 `idf.py build` で反映される。
 
-### Ruby VM は mruby（2026-10-07 に mruby/c から移行）
+### Ruby VM は mruby のみ（2026-10-07 に mruby/c から移行、2026-10-11 に mruby/c ビルドを撤去）
 
-ビルドする VM は CMake のキャッシュ変数 `PICORB_VM`（`mruby` 既定 / `mrubyc`）で選ぶ。
-mruby/c も引き続きビルドできる。既存のビルドディレクトリは設定時の値を保持するので、
-切り替えは `idf.py -DPICORB_VM=mruby reconfigure`（または fullclean）。
+MIDoRI 本体（midori-runtime）は mruby VM だけをビルドする。`PICORB_VM` キャッシュ変数と
+mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の汎用 gem（picoruby-amy /
+-midi / -midi-mml / -sam2695 / -uart_midi など）は**引き続き mruby/c バインディング
+（`src/mrubyc`）を保守する**。MIDoRI のビルドでは mruby/c 側はコンパイルされないので、
+そちらを変えたときは別途確認すること。
 2026-10-07 時点で mruby 版は Tab5 / CoreS3 のビルドとホスト（Linux）上のテストのみで、
 **実機では未確認**。
 
@@ -207,11 +223,11 @@ mruby/c も引き続きビルドできる。既存のビルドディレクトリ
 
 ### 重要：main_task.rbは自動生成ファイル
 
-`components/picoruby-esp32/mrblib/main_task.rb`はCMakeによって自動生成されるファイル。**直接編集しないこと。**
+`components/midori-runtime/mrblib/main_task.rb`はCMakeによって自動生成されるファイル。**直接編集しないこと。**
 
 修正する場合は以下のソースファイルを編集：
-- `components/picoruby-esp32/mrblib/main_task_base.rb` - メインのRubyコード
-- `components/picoruby-esp32/board_config.rb.in` - ボード設定テンプレート
+- `components/midori-runtime/mrblib/main_task_base.rb` - メインのRubyコード
+- `components/midori-runtime/board_config.rb.in` - ボード設定テンプレート
 
 ビルド時にこれらが結合されて`main_task.rb`が生成される。
 
@@ -352,7 +368,7 @@ M5Stack以外のボード（Freenove等）では、USB-MIDIを使用するため
 
 #### C側実装（console_input.c / 2026-08-02 改訂）
 
-コンソール入力は専用タスク [components/picoruby-esp32/console_input.c](components/picoruby-esp32/console_input.c)
+コンソール入力は専用タスク [components/midori-runtime/console_input.c](components/midori-runtime/console_input.c)
 が担当する（`console_input_start()` を app_main から呼ぶ）。データフロー：
 
 ```
@@ -772,7 +788,7 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
 - AMY エンジンは IDF コンポーネント `components/amy`（ソースは gem の `lib/amy`）
 - ボード依存（Tab5 の ES8388 + SPK_EN、CrowPanel の GPIO 30 アンプ電源）は
   [main/platform/board_audio.cpp](main/platform/board_audio.cpp) が電源コールバックとして注入。
-  ピン等は `components/picoruby-esp32/CMakeLists.txt` から `AMY_GEM_*` 定義で注入
+  ピン等は `components/midori-runtime/CMakeLists.txt` から `AMY_GEM_*` 定義で注入
 - **オーディオタスクは Core 0 / 優先度 3 の 1 本だけ**（描画 + I2S 書き込み）。
   AMY 内部のレンダタスクは使わない。Core 1 に置くと Ruby VM（優先度 3）に止められる
 - **Tab5 の I2S（DOUT=26 / BCLK=27）は USB PHY1 のパッドを使う**。ESP-IDF の
@@ -883,8 +899,8 @@ ESP32リスタートなしでRubyスクリプトを動的に切り替えるた�
 - **PicoRuby Task** (Core 1, Priority 3): main_task.rbを実行（UIモードまたはスクリプトモード）
 
 **主要ファイル**:
-- `components/picoruby-esp32/picoruby_supervisor.c` - Supervisor実装
-- `components/picoruby-esp32/mrblib/main_task_base.rb` - メインRubyコード
+- `components/midori-runtime/picoruby_supervisor.c` - Supervisor実装
+- `components/midori-runtime/mrblib/main_task_base.rb` - メインRubyコード
 
 **スクリプトの明示的停止（2026-08-02）**:
 Scripts 画面の `[Stop]` ボタン、またはシリアルコンソールの `stop` コマンドから
@@ -933,9 +949,9 @@ Tab5はUSB-Aが常にHostなので、モードはUSB-Cポートの役割のみ�
 ### アーキテクチャ
 
 **設定ファイル**:
-- `components/picoruby-esp32/mrblib/board_config.rb.in` - ボード設定テンプレート
-- `components/picoruby-esp32/mrblib/board_config.rb` - CMakeで自動生成（DO NOT EDIT）
-- `components/picoruby-esp32/CMakeLists.txt` - ボード別設定の定義
+- `components/midori-runtime/mrblib/board_config.rb.in` - ボード設定テンプレート
+- `components/midori-runtime/mrblib/board_config.rb` - CMakeで自動生成（DO NOT EDIT）
+- `components/midori-runtime/CMakeLists.txt` - ボード別設定の定義
 
 **初期化コード** (main_task_base.rb):
 ```ruby
@@ -1005,7 +1021,7 @@ device = MIDI::Device.new(sam)
 
 新しいボードを追加する場合、または既存ボードの設定を変更する場合：
 
-1. `components/picoruby-esp32/CMakeLists.txt` を編集
+1. `components/midori-runtime/CMakeLists.txt` を編集
 2. 該当するボード設定セクション（`if(CONFIG_USB_MIDI_BOARD_*)`）で以下を設定：
    - `SAM2695_TX_PIN` / `SAM2695_RX_PIN`
    - `HAS_SAM2695` (true/false)
@@ -1091,7 +1107,7 @@ TinyUSB CDC 経由で使える。
     S3 は host モードのみ y
 - `main/usb_midi_host.c` … `CONFIG_USB_MIDI_HOST_ENABLED` /
   `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE` で起動するドライバを切り替え
-- `components/picoruby-esp32/CMakeLists.txt` … 上記から `HAS_USB_MIDI_HOST` /
+- `components/midori-runtime/CMakeLists.txt` … 上記から `HAS_USB_MIDI_HOST` /
   `HAS_USB_MIDI_DEVICE` を導出して board_config.rb を生成。加えて
   `CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE=y` のとき
   `target_compile_definitions` で gem に USB アイデンティティを注入する
@@ -1101,7 +1117,7 @@ TinyUSB CDC 経由で使える。
   （未定義時はスタブ / MIDI 単機能）。P4 の PHY mux 切り替えは
   `CONFIG_IDF_TARGET_ESP32P4` 限定で、S3 では ESP-IDF の `usb_phy` ドライバが
   PHY を USB-OTG に引き渡す
-- `components/picoruby-esp32/build_config/xtensa-esp.rb` … S3 でも
+- `components/midori-runtime/build_config/microruby_gems.rb` … S3 でも
   `picoruby-usb_midi_device` gem をビルドに含める
 
 ### picoruby-usb_midi_device への設定注入（2026-08-02）
@@ -1111,7 +1127,7 @@ gem は製品名を持たない汎用 USB-MIDI デバイス（既定は MIDI 単
 一覧と既定値は
 [mrbgems/picoruby-usb_midi_device/include/usb_midi_device_config.h](mrbgems/picoruby-usb_midi_device/include/usb_midi_device_config.h)。
 
-`components/picoruby-esp32/CMakeLists.txt`（ボード分岐の直後）:
+`components/midori-runtime/CMakeLists.txt`（ボード分岐の直後）:
 
 | 定義 | 値 |
 |------|-----|

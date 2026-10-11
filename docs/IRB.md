@@ -4,14 +4,14 @@
 
 シリアルコンソール（`midi_device` モードでは USB-C の CDC）から **irb** を起動し、
 Ruby の式をその場で評価する機能。R2P2 の irb と同じく
-[picoruby-shell](../components/picoruby-esp32/picoruby/mrbgems/picoruby-shell/mrblib/shell.rb)
+[picoruby-shell](../components/midori-runtime/picoruby/mrbgems/picoruby-shell/mrblib/shell.rb)
 の `Shell#start(:irb)` を使い、1 行ごとに **PicoRuby の Sandbox** でコンパイル /
 実行する。
 
 irb は Supervisor から **SD カードのスクリプトと同じ扱い**で起動される
 （専用の PicoRuby タスク + まっさらな VM、終了したら UI モードに戻る）。
 `Kernel.load` もスクリプトを Sandbox で実行する（[picoruby-require の
-`load_file`](../components/picoruby-esp32/picoruby/mrbgems/picoruby-require/mrblib/require.rb)）
+`load_file`](../components/midori-runtime/picoruby/mrbgems/picoruby-require/mrblib/require.rb)）
 ので、irb とスクリプトは実行機構まで揃っている。
 
 ## 使い方
@@ -72,7 +72,7 @@ Stop を押すか、別のスクリプトを選ぶと irb は終了する（後�
                                      UI モードで再起動
 ```
 
-### Supervisor 層（[picoruby_supervisor.c](../components/picoruby-esp32/picoruby_supervisor.c)）
+### Supervisor 層（[picoruby_supervisor.c](../components/midori-runtime/picoruby_supervisor.c)）
 
 irb は擬似スクリプトパス `SUPERVISOR_IRB_PATH`（`":irb"`）として、通常の
 「要求スクリプト」スロットを流れる。こうすることで停止・VM クリーンアップ・
@@ -88,7 +88,7 @@ UI モード復帰といったライフサイクル処理を一切分岐せず�
 `get_autorun_script` は `":irb"` のとき **nil を返す**。Script モードが
 `File.exist?(":irb")` を試さないようにするため。
 
-### コンソール層（[console_input.c](../components/picoruby-esp32/console_input.c)）
+### コンソール層（[console_input.c](../components/midori-runtime/console_input.c)）
 
 コンソールタスクは 3 つのモードを持つ：
 
@@ -118,7 +118,7 @@ irb 中に C 側の行編集を止めるのは、`Editor::Line` が自前でエ�
 `console_input_irb_exit()` を呼ぶ。クラッシュや強制停止でコンソールが
 無反応のまま残らないようにするため。
 
-### Ruby 層（[main_task_base.rb](../components/picoruby-esp32/mrblib/main_task_base.rb)）
+### Ruby 層（[main_task_base.rb](../components/midori-runtime/mrblib/main_task_base.rb)）
 
 `run_irb` が Script モードと同じ最小限の初期化（machine / watchdog / shell、
 SD の再マウント）を済ませてから `Shell.new(clean: true).start(:irb)` を呼ぶ。

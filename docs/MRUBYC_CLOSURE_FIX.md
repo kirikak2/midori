@@ -61,7 +61,7 @@ h.call    # 期待: tag=HELLO
 
 ### 2. mrubyc の Proc / callinfo のライフサイクルを読む
 
-`OP_GETUPVAR` の実装 ([vm.c:823](../components/picoruby-esp32/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/vm.c)):
+`OP_GETUPVAR` の実装 ([vm.c:823](../components/midori-runtime/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/vm.c)):
 
 ```c
 static inline void op_getupvar( mrbc_vm *vm, mrbc_value *regs EXT )
@@ -74,7 +74,7 @@ static inline void op_getupvar( mrbc_vm *vm, mrbc_value *regs EXT )
 }
 ```
 
-`proc->callinfo` を辿って親フレームの reg を読む。一方 `mrbc_pop_callinfo` ([vm.c:237](../components/picoruby-esp32/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/vm.c)) は:
+`proc->callinfo` を辿って親フレームの reg を読む。一方 `mrbc_pop_callinfo` ([vm.c:237](../components/midori-runtime/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/vm.c)) は:
 
 ```c
 void mrbc_pop_callinfo( mrbc_vm *vm )
@@ -100,7 +100,7 @@ MEPC : 0x4003547e   <-- op_getconst
 MTVAL: 0x00425357   <-- "USB" + 2 (not a valid pointer!)
 ```
 
-`OP_GETCONST` で読んでいるのは `vm->callinfo_tail->own_class`。同様にダングリング。`c_proc_call` ([c_proc.c:125](../components/picoruby-esp32/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/c_proc.c)):
+`OP_GETCONST` で読んでいるのは `vm->callinfo_tail->own_class`。同様にダングリング。`c_proc_call` ([c_proc.c:125](../components/midori-runtime/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/c_proc.c)):
 
 ```c
 static void c_proc_call(mrbc_vm *vm, mrbc_value v[], int argc)
@@ -200,7 +200,7 @@ if( !callinfo ) return;
 callinfo->is_called_block = 1;
 ```
 
-`callinfo->own_class` は `mrbc_push_callinfo` の初期値 0 のまま。`OP_GETCONST` ([vm.c:705](../components/picoruby-esp32/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/vm.c)) は `vm->callinfo_tail->own_class == 0` なら `find_class_by_object(self)` フォールバックに落ちる。midori のハンドラ proc は self = top-level Object なので Object のクラスチェーンから `UI` 定数が引ける。**正常に解決される**。
+`callinfo->own_class` は `mrbc_push_callinfo` の初期値 0 のまま。`OP_GETCONST` ([vm.c:705](../components/midori-runtime/picoruby/mrbgems/picoruby-mrubyc/lib/mrubyc/src/vm.c)) は `vm->callinfo_tail->own_class == 0` なら `find_class_by_object(self)` フォールバックに落ちる。midori のハンドラ proc は self = top-level Object なので Object のクラスチェーンから `UI` 定数が引ける。**正常に解決される**。
 
 → `midi_monitor.rb` 動作。`closure_repro.rb` も引き続き動作。LCD も無事。**ここまでが bc2ee1d としていったんマージ**。
 

@@ -39,7 +39,7 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
 | `components/amy/CMakeLists.txt` | AMY エンジンの IDF コンポーネント（P4 のときだけ中身がある） |
 | `main/platform/board_audio.cpp` | ボード依存の電源 ON（Tab5: ES8388 + SPK_EN / CrowPanel: GPIO 30） |
 | `mrbgems/picoruby-midi/src/midi_transport_registry.c` | Phase 0 の登録表（OS 非依存） |
-| `components/picoruby-esp32/` | ピン等の注入（CMakeLists）・`HAS_AMY`・`MIDIDevices.amy`・停止時の `AMY_GEM_reset()` |
+| `components/midori-runtime/` | ピン等の注入（CMakeLists）・`HAS_AMY`・`MIDIDevices.amy`・停止時の `AMY_GEM_reset()` |
 | `partitions.csv` | factory を 0x310000 から 0x3F0000（PicoRuby のフラッシュ FAT 0x210000〜0x310000 の後ろ） |
 
 設計からの変更点：
@@ -174,7 +174,7 @@ void AMY_GEM_set_power_callback(amy_gem_power_cb_t cb, void *arg);
 ```
 
 ピン・I2S 形式・MCLK 比・タスクのコア / 優先度は
-`components/picoruby-esp32/CMakeLists.txt` のボード分岐で決め、
+`components/midori-runtime/CMakeLists.txt` のボード分岐で決め、
 `target_compile_definitions` で `AMY_GEM_*` として port に注入する
 （`picoruby-usb_midi_device` と同じ流れ）。Ruby 側には `BoardConfig::HAS_AMY` だけを出す。
 
@@ -383,7 +383,7 @@ CrowPanel（I2S は 21〜23）は対象外で、何もしない。
 #### コンソールに書かない
 
 上の件の調査中に入れた予防策。midi_device モードのコンソールは USB CDC で、TinyUSB の
-タスク（Core 1）以外のコアから書き込むと壊れる（[console_input.c](../components/picoruby-esp32/console_input.c)
+タスク（Core 1）以外のコアから書き込むと壊れる（[console_input.c](../components/midori-runtime/console_input.c)
 が Core 1 に固定されているのと同じ理由）。
 
 - オーディオタスク（Core 0）の冒頭で stdout / stderr を `/dev/null` に向ける（newlib では
@@ -1096,7 +1096,7 @@ USB キーボードは `MIDI.route`）。
 - **ウェーブテーブル無し**、PCM は `pcm_tiny` の 11 サンプルのみ
 - `FM` と `Synth` は別の synth（チャンネル）に置けば同時に鳴らせる。
   `AMY.reset`（スクリプト停止時）で両方消える
-- gem の `mrblib/` を変えたら `rm -rf components/picoruby-esp32/picoruby/build/esp32`
+- gem の `mrblib/` を変えたら `rm -rf components/midori-runtime/picoruby/build/esp32-microruby`
   してからビルドする（CLAUDE.md）
 
 ### 5.7 決定事項（2026-10-04）

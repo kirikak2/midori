@@ -46,7 +46,7 @@ CrowPanel では**繋がっていないパッドを叩いていた**。`tinyusb_
 に *"The default port is `TINYUSB_PORT_HIGH_SPEED_0` on ESP32-P4"* と書かれている。
 
 gem 側にポートの選択肢を追加した（`USB_MIDI_DEVICE_HIGH_SPEED`、既定 0）。
-CrowPanel だけ `components/picoruby-esp32/CMakeLists.txt` から 1 を注入する。
+CrowPanel だけ `components/midori-runtime/CMakeLists.txt` から 1 を注入する。
 これに伴い gem 側で必要になったもの：
 
 - **HS 用コンフィグレーションディスクリプタ**。バルクエンドポイントのサイズは

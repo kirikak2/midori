@@ -161,7 +161,7 @@ idf.py monitor
 ```
 
 > **Development note**: Stale build artifacts can cause inconsistencies. Use `idf.py fullclean build` to be safe.
-> Also consider deleting the `build/` directory under `components/picoruby-esp32/picoruby/` before building.
+> Also consider deleting the `build/` directory under `components/midori-runtime/picoruby/` before building.
 
 ## Running Scripts
 

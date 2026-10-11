@@ -1,7 +1,3 @@
-[submodule "components/picoruby-esp32"]
-	path = components/picoruby-esp32
-	url = https://github.com/kirikak2/picoruby-esp32.git
-	branch = selfbuild
 [submodule "mrbgems/picoruby-dfrobot_rotary_encoder"]
 	path = mrbgems/picoruby-dfrobot_rotary_encoder
 	url = https://github.com/kirikak2/picoruby-dfrobot_rotary_encoder.git
@@ -26,3 +22,7 @@
 [submodule "mrbgems/picoruby-amy"]
 	path = mrbgems/picoruby-amy
 	url = https://github.com/kirikak2/picoruby-amy.git
+[submodule "components/midori-runtime/picoruby"]
+	path = components/midori-runtime/picoruby
+	url = https://github.com/kirikak2/picoruby.git
+	branch = selfbuild

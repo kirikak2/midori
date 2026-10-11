@@ -60,6 +60,6 @@ dependencies:
 direct_dependencies:
 - espressif/esp_tinyusb
 - m5stack/m5unified
-manifest_hash: 80d2dbe3f5c9aa0accb07234df6d1ecda5f31c0f638289f2bde3f820f1d43e65
+manifest_hash: 1e1e4812c1b7e31db6cb1d57464ac10736709d2d3d9fedd73ef9660ff7fb3a9d
 target: esp32p4
 version: 2.0.0

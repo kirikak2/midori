@@ -1118,7 +1118,7 @@ typedef struct {
 - `main/platform/platform_m5stack.cpp`: M5Stack初期化
 - `main/lcd_console/lcd_console.cpp`: 現在のログ出力実装
 - `main/usb_midi_host.c`: USB MIDIデバイス情報取得
-- `components/picoruby-esp32/`: PicoRuby統合
+- `components/midori-runtime/`: PicoRuby統合
 
 ## 実装状況・トラブルシューティング
 
@@ -1136,7 +1136,7 @@ typedef struct {
    - ESP-IDFのfatfsとPicoRubyのFatFsライブラリの競合を回避するアーキテクチャ
    - PicoRuby側でSDカードをマウントし、スクリプト一覧をC側に通知
 
-3. **ScriptManager クラス** (`components/picoruby-esp32/picoruby-esp32.c`)
+3. **ScriptManager クラス** (`components/midori-runtime/picoruby-esp32.c`)
    ```c
    // C側API
    void picoruby_esp32_clear_script_list(void);
@@ -1147,7 +1147,7 @@ typedef struct {
    void picoruby_esp32_set_script_list_ready(bool ready);
    ```
 
-4. **Ruby側通知関数** (`components/picoruby-esp32/mrblib/main_task_base.rb`)
+4. **Ruby側通知関数** (`components/midori-runtime/mrblib/main_task_base.rb`)
    ```ruby
    def notify_scripts_to_c
      sm = ScriptManager.new
@@ -1251,9 +1251,9 @@ idf.py flash monitor
 | `main/usb_midi_host.c` | picoruby_taskで`picoruby_esp32()`を呼び出すよう変更 |
 | `main/ui/screen_script.cpp` | PicoRubyのスクリプトリストAPIを使用 |
 | `main/ui/screen_script.h` | refreshFromSD()メソッド追加 |
-| `components/picoruby-esp32/picoruby-esp32.c` | ScriptManager登録、スクリプトリスト管理API追加 |
-| `components/picoruby-esp32/picoruby-esp32.h` | スクリプトリスト管理API宣言追加 |
-| `components/picoruby-esp32/mrblib/main_task_base.rb` | `notify_scripts_to_c`関数追加 |
+| `components/midori-runtime/picoruby-esp32.c` | ScriptManager登録、スクリプトリスト管理API追加 |
+| `components/midori-runtime/picoruby-esp32.h` | スクリプトリスト管理API宣言追加 |
+| `components/midori-runtime/mrblib/main_task_base.rb` | `notify_scripts_to_c`関数追加 |
 
 #### 次のステップ
 

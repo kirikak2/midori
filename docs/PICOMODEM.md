@@ -32,7 +32,7 @@ UI モード（`> ` プロンプト待ち）でのみ動作する。
 
 ## プロトコル
 
-フレーム形式（[picoruby-picomodem](../components/picoruby-esp32/picoruby/mrbgems/picoruby-picomodem/mrblib/picomodem.rb) が実装）：
+フレーム形式（[picoruby-picomodem](../components/midori-runtime/picoruby/mrbgems/picoruby-picomodem/mrblib/picomodem.rb) が実装）：
 
 ```
 STX(0x02) | Length(2, BE) | Cmd(1) | Payload(N) | CRC16(2, BE)
@@ -81,7 +81,7 @@ PicoModem のファイル I/O は **PicoRuby の VFS 経由でしか行えない
                                           （VFS をバイパスして TinyUSB へ）
 ```
 
-### C 側 — [console_input.c](../components/picoruby-esp32/console_input.c)
+### C 側 — [console_input.c](../components/midori-runtime/console_input.c)
 
 | 追加 API | 役割 |
 |---------|------|
@@ -124,7 +124,7 @@ VFS を通るので、**0x0A を含むフレームは必ず壊れる**。
 取り合う。行編集では問題にならないが、バイナリ転送ではバイト順序が乱れる
 可能性がある。動作確認済みなのは `midi_device`（CDC）モードのみ。
 
-### Ruby バインディング — [picoruby_supervisor.c](../components/picoruby-esp32/picoruby_supervisor.c)
+### Ruby バインディング — [picoruby_supervisor.c](../components/midori-runtime/picoruby_supervisor.c)
 
 ```ruby
 sm = ScriptManager.new
@@ -137,7 +137,7 @@ ConsoleIO.new.write(binary_string)  # バイナリセーフな出力
 `ConsoleIO#write` は mrbc 文字列の `data` / `size` をそのまま渡すので NUL バイトでも
 切れない。
 
-### Ruby 側 — [main_task_base.rb](../components/picoruby-esp32/mrblib/main_task_base.rb)
+### Ruby 側 — [main_task_base.rb](../components/midori-runtime/mrblib/main_task_base.rb)
 
 UI モードのメインループ先頭：
 

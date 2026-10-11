@@ -153,9 +153,9 @@ MIDIDevices.usb_midi_device  # -> init_usb_midi_device（require 'usb_midi_devic
 
 ボード設定は `board_config.rb.in` テンプレートから CMake によって自動生成されます：
 
-- **ソースファイル**: `components/picoruby-esp32/mrblib/board_config.rb.in`
-- **生成ファイル**: `components/picoruby-esp32/mrblib/board_config.rb`
-- **設定元**: `components/picoruby-esp32/CMakeLists.txt` (Kconfig に基づく)
+- **ソースファイル**: `components/midori-runtime/mrblib/board_config.rb.in`
+- **生成ファイル**: `components/midori-runtime/mrblib/board_config.rb`
+- **設定元**: `components/midori-runtime/CMakeLists.txt` (Kconfig に基づく)
 
 ## トラブルシューティング
 
@@ -171,7 +171,7 @@ MIDIDevicesモジュールから取得したデバイスが nil の場合：
 
 ハードウェアのピンアサインを変更する場合：
 
-1. `components/picoruby-esp32/CMakeLists.txt` を編集
+1. `components/midori-runtime/CMakeLists.txt` を編集
 2. 該当するボードの設定セクションで `SAM2695_TX_PIN` などを変更
 3. リビルド: `idf.py build`
 

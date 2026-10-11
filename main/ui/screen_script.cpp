@@ -6,8 +6,8 @@
 #include "esp_log.h"
 
 extern "C" {
-#include "../../components/picoruby-esp32/picoruby-esp32.h"
-#include "../../components/picoruby-esp32/picoruby_supervisor.h"
+#include "../../components/midori-runtime/picoruby-esp32.h"
+#include "../../components/midori-runtime/picoruby_supervisor.h"
 }
 
 static const char* TAG = "SCREEN_SCRIPT";
