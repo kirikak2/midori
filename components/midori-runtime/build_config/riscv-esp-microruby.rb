@@ -27,7 +27,6 @@ MRuby::CrossBuild.new('esp32-microruby') do |conf|
   conf.cc.defines << 'MRB_UTF8_STRING'
   conf.cc.defines << 'PICORB_ALLOC_ESTALLOC'
   conf.cc.defines << 'PICORB_ALLOC_ALIGN=8'
-  conf.cc.defines << 'USE_FAT_FLASH_DISK'
   conf.cc.defines << 'USE_FAT_SD_DISK'
   conf.cc.defines << 'ESP32_PLATFORM'
   conf.cc.defines << 'NDEBUG'

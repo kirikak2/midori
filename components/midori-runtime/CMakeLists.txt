@@ -50,8 +50,7 @@ idf_component_register(
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-machine/ports/esp32/machine.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-machine/ports/common/machine.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-io-console/ports/esp32/io-console.c
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-filesystem-fat/ports/esp32/flash_disk.c
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-filesystem-fat/ports/esp32/sd_disk.c
+    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-littlefs/ports/esp32/flash_hal.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-env/ports/esp32/env.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-gpio/ports/esp32/gpio.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-adc/ports/esp32/adc.c
@@ -83,15 +82,14 @@ idf_component_register(
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/ports/esp32/midi.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ui/ports/esp32/ui.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-amy/ports/esp32/amy_port.c
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-filesystem-fat/ports/esp32/sd_disk.c
   INCLUDE_DIRS
     ${COMPONENT_DIR}
     ${COMPONENT_DIR}/picoruby/include
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-machine/include
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-mbedtls/include
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-mbedtls/lib/mbedtls/include
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-filesystem-fat/ports/esp32
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-filesystem-fat/include
-    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-filesystem-fat/src/hal
+    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-littlefs/ports/esp32
     ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler2/include
     ${COMPONENT_DIR}/picoruby/mrbgems/mruby-compiler2/lib/prism/include
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-sdmmc/include
@@ -101,6 +99,9 @@ idf_component_register(
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ui/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-amy/include
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-filesystem-fat/ports/esp32
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-filesystem-fat/include
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-filesystem-fat/src/hal
     ${CMAKE_SOURCE_DIR}/main/ui
     ${ADDITIONAL_INCLUDE_DIRS}
   PRIV_REQUIRES
@@ -126,7 +127,6 @@ idf_component_register(
 
 add_definitions(
   ${ADDITIONAL_DEFINITIONS}
-  -DUSE_FAT_FLASH_DISK
   -DUSE_FAT_SD_DISK
   -DESP32_PLATFORM
   -DNDEBUG

@@ -1,10 +1,6 @@
 # Gem set shared by xtensa-esp-microruby.rb and riscv-esp-microruby.rb
 # (eval'ed inside their MRuby::CrossBuild block, so `conf` is the build).
 
-# Pull in FAT BEFORE the gemboxes so that gembox-time conditionals
-# (`if gems.any? { picoruby-filesystem-fat }`) see it and skip pulling
-# picoruby-littlefs as a dependency.
-conf.gem core: 'picoruby-filesystem-fat'
 conf.gembox 'minimum'
 conf.gembox 'core'
 # The 'shell' gembox minus picoruby-rapicco. mruby runs every gem's mrblib
@@ -48,6 +44,11 @@ conf.gem core: 'picoruby-socket'
 conf.gem core: 'picoruby-adafruit_sk6812'
 
 midori_gems = File.expand_path('../../../mrbgems', __dir__)
+
+# FAT for the SD card ("/sd"), next to littlefs on the internal flash ("/").
+# Added after the gemboxes: the picoruby fork's core.gembox leaves littlefs
+# out when it finds a gem of this name already in the build.
+conf.gem "#{midori_gems}/picoruby-filesystem-fat"
 
 # MIDI — midori-specific gems, live outside the picoruby submodule.
 conf.gem "#{midori_gems}/picoruby-usb_midi_host"

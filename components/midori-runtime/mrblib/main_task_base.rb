@@ -247,6 +247,38 @@ def unmount_sd_card
   end
 end
 
+# The internal flash is littlefs, mounted as "/" (formatted on first use).
+# Shell.setup_root_volume is not used for this: the picoruby fork's version
+# prefers FAT whenever the FAT gem is built in.
+def mount_root_volume
+  return if VFS.volume_index("/")
+  flash = Littlefs.new(:flash, label: 'storage')
+  retry_count = 0
+  begin
+    VFS.mount(flash, "/")
+  rescue => e
+    puts e.message
+    puts "Try to format the volume..."
+    flash.mkfs
+    retry_count += 1
+    retry if retry_count == 1
+    raise e
+  end
+end
+
+# The SD card is FAT (picoruby-filesystem-fat, a midori gem), mounted as
+# "/sd". Upstream's Shell.setup_sdcard would put littlefs on it instead.
+def mount_sd_card(driver, sdmmc_slot: -1, sdmmc_freq_khz: -1)
+  print "Initializing SD card(#{driver.class})... "
+  sd = FAT.new(:sd, label: "SD", driver: driver,
+               sdmmc_slot: sdmmc_slot, sdmmc_freq_khz: sdmmc_freq_khz)
+  VFS.mount(sd, "/sd")
+  puts "Available at /sd"
+rescue => e
+  puts "Not available"
+  puts "#{e.message} (#{e.class})"
+end
+
 # SD card initialization function (can be called at startup and on refresh)
 def try_init_sd_card
   return false if BoardConfig::SD_MODE == "none"
@@ -266,11 +298,10 @@ def try_init_sd_card
       sdmmc = SDMMC.new(
         clk_pin:  BoardConfig::SD_CLK_PIN,
         cmd_pin:  BoardConfig::SD_CMD_PIN,
-        d0_pin:   BoardConfig::SD_D0_PIN,
-        slot:     BoardConfig::SD_SLOT,
-        freq_khz: BoardConfig::SD_FREQ_KHZ
+        d0_pin:   BoardConfig::SD_D0_PIN
       )
-      Shell.setup_sdcard(sdmmc)
+      mount_sd_card(sdmmc, sdmmc_slot: BoardConfig::SD_SLOT,
+                           sdmmc_freq_khz: BoardConfig::SD_FREQ_KHZ)
     else
       # SPI mode (M5Stack)
       require "spi"
@@ -283,7 +314,7 @@ def try_init_sd_card
         copi_pin: BoardConfig::SD_MOSI_PIN,
         cs_pin:   BoardConfig::SD_CS_PIN
       )
-      Shell.setup_sdcard(spi)
+      mount_sd_card(spi)
     end
   rescue => e
     puts "SD card driver error: #{e.message}"
@@ -477,7 +508,7 @@ else
   begin
     STDIN.echo = false
     puts "Initializing FLASH disk as the root volume... "
-    Shell.setup_root_volume(:flash, label: 'storage')
+    mount_root_volume
     Shell.setup_system_files
     puts "Available"
   rescue => e

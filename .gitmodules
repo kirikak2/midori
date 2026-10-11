@@ -26,3 +26,6 @@
 	path = components/midori-runtime/picoruby
 	url = https://github.com/kirikak2/picoruby.git
 	branch = selfbuild
+[submodule "mrbgems/picoruby-filesystem-fat"]
+	path = mrbgems/picoruby-filesystem-fat
+	url = https://github.com/kirikak2/picoruby-filesystem-fat.git

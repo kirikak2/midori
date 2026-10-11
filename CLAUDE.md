@@ -141,6 +141,25 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
 - upstream の変化（ports の追加、define、rake の呼び方）は R2P2-ESP32 の
   `components/picoruby-esp32/CMakeLists.txt` を参照して追う
 
+### ファイルシステム: `/` は littlefs、`/sd` は FAT（2026-10-11）
+
+- 内蔵フラッシュの `/` は upstream の **picoruby-littlefs**（`ports/esp32/flash_hal.c` が
+  固定アドレス 0x210000〜0x310000 を直接使う。`partitions.csv` の `picoruby_root` は予約のみ）。
+  以前は同じ領域が FAT だったので、切り替え後の初回起動でフォーマットされる
+- SD カードの `/sd` は **mrbgems/picoruby-filesystem-fat**（upstream picoruby では 2026-07 に
+  削除済み。MIDoRI 側で別 gem kirikak2/picoruby-filesystem-fat として保守）。
+  SD 専用・ESP32 専用で、フラッシュ disk（littlefs と同じ固定領域を使っていた）と rp2040 port は外した。
+  mruby / mruby/c 両方のバインディングを持つ
+- 両 gem が同じ名前で定義していた C シンボルは FAT 側を `mrb_fat__*` / `c_fat__*` /
+  `mrb_fat_vfs_methods_type` に改名して共存させている
+- マウントは `main_task_base.rb` の `mount_root_volume` / `mount_sd_card` が行う
+  （`Shell.setup_root_volume` / `Shell.setup_sdcard` は使わない。フォーク版は FAT を優先し、
+  upstream 版は SD にも littlefs を使うため）
+- SDMMC のスロット / クロックは `FAT.new(:sd, driver: sdmmc, sdmmc_slot:, sdmmc_freq_khz:)` で渡す
+  （`SDMMC` クラスの拡張に依存しない）
+- FAT の port（`ports/esp32/sd_disk.c`）は IDF 側でコンパイルする（`CMakeLists.txt`）。
+  有効化の define は `USE_FAT_SD_DISK`（libmruby と IDF の両方）
+
 ### midori-local mrbgem の置き場所（2026-07-27）
 
 MIDI 系および midori 固有の mrbgem は、picoruby サブモジュールの外側、
@@ -157,6 +176,7 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-sam2695` | SAM2695 ラッパ（uart_midi 上の薄い層） |
 | `mrbgems/picoruby-ui` | M5Stack UI |
 | `mrbgems/picoruby-dfrobot_rotary_encoder` | DFRobot SEN0502 |
+| `mrbgems/picoruby-filesystem-fat` | FAT（SD カード `/sd` 用。upstream で削除された gem を引き取ったもの） |
 | `mrbgems/picoruby-amy` | AMY ソフトシンセ（P4 ボードのみ。中で `lib/amy`＝shorepine/amy をサブモジュールにしている） |
 
 これらは upstream picoruby には含めない方針のため、`components/midori-runtime/picoruby/mrbgems/`
@@ -233,7 +253,7 @@ mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の
 
 ### ESP32環境でのDir操作
 
-ESP32環境では`picoruby-dir` gemではなく`picoruby-filesystem-fat`が使用される。そのため：
+ESP32環境では`picoruby-dir` gemではなく VFS（`/` は littlefs、`/sd` は `picoruby-filesystem-fat`）が使用される。そのため：
 - `Dir.entries(path)` は**使用不可**
 - 代わりに `Dir.open(path) { |dir| dir.read }` を使用する
 
@@ -754,8 +774,8 @@ CLK 43 / CMD 44 / D0 39 は ESP32-P4 の**スロット 0 専用 IOMUX ピン**�
 P4 のスロット 0 は GPIO マトリクスを通せない。つまりピンを正しく設定しても
 スロット 1 のままではカードは見つからない。`picoruby-filesystem-fat` の ESP32
 ポートは `SDMMC_HOST_SLOT_1` 決め打ちだったので、`BoardConfig::SD_SLOT` /
-`SD_FREQ_KHZ` → `SDMMC.new(slot:, freq_khz:)` → `FAT.init_sdmmc` と渡せるように
-した。他ボードは `-1`（自動判定 → 従来どおりスロット 1）。
+`SD_FREQ_KHZ` → `FAT.init_sdmmc` と渡せるようにした（2026-10-11 からは
+`FAT.new(:sd, sdmmc_slot:, sdmmc_freq_khz:)` 経由）。他ボードは `-1`（自動判定 → 従来どおりスロット 1）。
 
 **"USB 2.0" コネクタは HS ポート**（2026-08-29）:
 ESP32-P4 のデバイス側ポートは 2 つ（FS = OTG1.1 / HS = OTG2.0）あり、
@@ -816,7 +836,8 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
 - エコーは有効（`features.echo = 1`）。ディレイライン（約 512 KB、PSRAM）はレベルを
   初めて 0 より上げたときに確保される
 - アプリが 2 MB を超えたので `partitions.csv` の factory を 0x3F0000 に拡張し、
-  **0x310000 に移した**。PicoRuby のフラッシュ FAT は `flash_disk.c` の**固定アドレス
+  **0x310000 に移した**。PicoRuby のフラッシュボリューム（当時は FAT の `flash_disk.c`、
+  2026-10-11 からは littlefs の `flash_hal.c`）は**固定アドレス
   0x210000〜0x310000** を直接使う（パーティション表を見ない）ので、ここに重ねると
   起動時のフォーマットでアプリが壊れて画面が真っ暗になる（2026-10-04 に発生）
 
