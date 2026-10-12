@@ -9,6 +9,8 @@
 #include "screen_knob.h"
 #include "screen_xypad.h"
 #include "screen_home.h"
+#include "screen_layout.h"
+#include "ui_layout.h"
 #include "ui_strip.h"
 #include <M5Unified.h>
 #include "esp_log.h"
@@ -77,6 +79,7 @@ esp_err_t UIManager::init()
     // Before anything else claims internal RAM: the screens' off-screen
     // buffer only fits there if it is taken while the heap is still whole.
     ui_strip::init();
+    ui_layout::init();
 
     // Initialize screens (placeholders for now)
     initScreens();
@@ -114,6 +117,7 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_TOMBOLA] = &getScreenTombola();
     m_screens[UI_SCREEN_KNOBS] = &getScreenKnobs();
     m_screens[UI_SCREEN_XYPAD] = &getScreenXYPad();
+    m_screens[UI_SCREEN_LAYOUT] = &getScreenLayout();
     m_screens[UI_SCREEN_HOME] = &getScreenHome();
 }
 
@@ -535,6 +539,9 @@ void UIManager::applyPendingRequest()
     if (index >= 0) {
         setScreen((ui_screen_index_t)index, arg, UI_SCREEN_SOURCE_SCRIPT);
     }
+
+    // Free the layouts of a script that has ended
+    ui_layout::collect();
 
     // The layout on screen was deleted (or its script ended): fall back to the
     // menu rather than showing a page nothing answers to any more.

@@ -351,6 +351,39 @@ void ui_knob_event_post(uint8_t bank, uint8_t index, float value, bool final)
     portEXIT_CRITICAL(&s_event_mutex);
 }
 
+void ui_widget_knob_event_post(uint8_t layout, uint8_t id, float value, bool final)
+{
+    portENTER_CRITICAL(&s_event_mutex);
+
+    // Same coalescing as ui_knob_event_post, keyed by layout + widget
+    for (int i = s_event_tail; i != s_event_head; i = (i + 1) % UI_EVENT_QUEUE_SIZE) {
+        if (s_event_queue[i].type == UI_EVENT_WIDGET
+         && s_event_queue[i].data.widget.kind == UI_WIDGET_KNOB
+         && s_event_queue[i].data.widget.layout == layout
+         && s_event_queue[i].data.widget.id == id) {
+            s_event_queue[i].data.widget.value = value;
+            if (final) s_event_queue[i].data.widget.final = true;
+            portEXIT_CRITICAL(&s_event_mutex);
+            return;
+        }
+    }
+
+    int next_head = (s_event_head + 1) % UI_EVENT_QUEUE_SIZE;
+    if (next_head != s_event_tail) {
+        ui_event_t& e = s_event_queue[s_event_head];
+        e.type = UI_EVENT_WIDGET;
+        e.data.widget.layout = layout;
+        e.data.widget.id = id;
+        e.data.widget.kind = UI_WIDGET_KNOB;
+        e.data.widget.phase = UI_WIDGET_CHANGE;
+        e.data.widget.state = false;
+        e.data.widget.final = final;
+        e.data.widget.value = value;
+        s_event_head = next_head;
+    }
+    portEXIT_CRITICAL(&s_event_mutex);
+}
+
 // --- Knobs ----------------------------------------------------------------
 
 knob_config_t  g_knob_bank0[UI_KNOB_COUNT] = {};
@@ -398,7 +431,7 @@ static knob_config_t* knob_at(uint8_t bank, uint8_t index)
 // Clamp to the knob's range, then snap to its step. Both are applied here and
 // nowhere else, so "the value changed" means the same thing to the display, to
 // the event queue and to the Ruby block.
-static float knob_quantize(const knob_config_t* k, float value)
+float ui_knob_quantize(const knob_config_t* k, float value)
 {
     float lo = k->min;
     float hi = k->max;
@@ -473,7 +506,7 @@ void ui_knob_set_config(uint8_t bank, uint8_t index, const char* label,
     fresh.origin = (origin == KNOB_ORIGIN_CENTER) ? KNOB_ORIGIN_CENTER : KNOB_ORIGIN_MIN;
     fresh.sensitivity = (sensitivity > 0.0f) ? sensitivity : 1.0f;
     fresh.notify = notify;
-    fresh.value = knob_quantize(&fresh, value);
+    fresh.value = ui_knob_quantize(&fresh, value);
     fresh.initial = fresh.value;
 
     portENTER_CRITICAL(&s_ui_mutex);
@@ -524,7 +557,7 @@ bool ui_knob_set_value(uint8_t bank, uint8_t index, float value, bool notify)
     knob_config_t* k = knob_at(bank, index);
     if (!k || !k->assigned) return false;
 
-    float quantized = knob_quantize(k, value);
+    float quantized = ui_knob_quantize(k, value);
 
     portENTER_CRITICAL(&s_ui_mutex);
     bool changed = (quantized != k->value);

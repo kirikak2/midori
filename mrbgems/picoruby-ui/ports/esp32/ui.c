@@ -40,6 +40,13 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->xypad_bend = 0.0f;
     event->xypad_x = 0.0f;
     event->xypad_y = 0.0f;
+    event->widget_layout = 0;
+    event->widget_id = 0;
+    event->widget_kind = 0;
+    event->widget_phase = 0;
+    event->widget_state = false;
+    event->widget_final = false;
+    event->widget_value = 0.0f;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -95,6 +102,16 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->xypad_bend = ui_evt.data.xypad.bend_semitones;
             event->xypad_x = ui_evt.data.xypad.x;
             event->xypad_y = ui_evt.data.xypad.y;
+            break;
+        case UI_EVENT_WIDGET:
+            event->type = PICORUBY_UI_EVENT_WIDGET;
+            event->widget_layout = ui_evt.data.widget.layout;
+            event->widget_id = ui_evt.data.widget.id;
+            event->widget_kind = ui_evt.data.widget.kind;
+            event->widget_phase = ui_evt.data.widget.phase;
+            event->widget_state = ui_evt.data.widget.state;
+            event->widget_final = ui_evt.data.widget.final;
+            event->widget_value = ui_evt.data.widget.value;
             break;
         default:
             break;
@@ -308,6 +325,89 @@ uint32_t picoruby_ui_menu_get_hidden(void)
 void picoruby_ui_cleanup(void)
 {
     ui_script_cleanup();
+}
+
+/* Layouts */
+
+void picoruby_ui_display(int out[8])
+{
+    out[0] = UI_SCREEN_WIDTH;
+    out[1] = UI_SCREEN_HEIGHT;
+    out[2] = 0;
+    out[3] = UI_CONTENT_Y;
+    out[4] = UI_SCREEN_WIDTH;
+    out[5] = UI_CONTENT_HEIGHT;
+#if defined(UI_LAYOUT_LARGE)
+    out[6] = 1;
+#else
+    out[6] = 0;
+#endif
+    out[7] = UI_LAYOUT_GAP;
+}
+
+bool picoruby_ui_layout_begin(int slot, const char *title)
+{
+    return ui_layout_begin(slot, title);
+}
+
+int picoruby_ui_layout_add_pad(int x, int y, int w, int h, const char *label,
+                               int color, int type)
+{
+    return ui_layout_add_pad(x, y, w, h, label, (uint16_t)color, (uint8_t)type);
+}
+
+int picoruby_ui_layout_add_knob(int x, int y, int w, int h, const char *label,
+                                int color, float min, float max, float step,
+                                float value, int origin, float sensitivity,
+                                bool notify)
+{
+    return ui_layout_add_knob(x, y, w, h, label, (uint16_t)color, min, max, step,
+                              value, (uint8_t)origin, sensitivity, notify);
+}
+
+int picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h)
+{
+    return ui_layout_add_view((uint8_t)kind, x, y, w, h);
+}
+
+bool picoruby_ui_layout_commit(void)
+{
+    return ui_layout_commit();
+}
+
+void picoruby_ui_layout_delete(int slot)
+{
+    ui_layout_delete(slot);
+}
+
+bool picoruby_ui_layout_pad_state(int slot, int id)
+{
+    return ui_layout_pad_state(slot, id);
+}
+
+void picoruby_ui_layout_set_label(int slot, int id, const char *label)
+{
+    ui_layout_set_label(slot, id, label);
+}
+
+void picoruby_ui_layout_set_color(int slot, int id, int color)
+{
+    ui_layout_set_color(slot, id, (uint16_t)color);
+}
+
+float picoruby_ui_layout_knob_value(int slot, int id)
+{
+    return ui_layout_knob_value(slot, id);
+}
+
+bool picoruby_ui_layout_knob_set_value(int slot, int id, float value)
+{
+    return ui_layout_knob_set_value(slot, id, value);
+}
+
+bool picoruby_ui_layout_knob_reset(int slot, int id)
+{
+    return ui_layout_knob_reset(slot, id);
 }
 
 /* Tombola sequencer */

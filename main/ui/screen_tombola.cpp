@@ -66,22 +66,14 @@ static constexpr float MAX_DRAG_OMEGA = 12.0f;
 // own 10ms step either way, so the note timing does not change with this.
 #if defined(UI_LAYOUT_LARGE)
 static constexpr int64_t DRAW_INTERVAL_US = 33000;  // ~30fps
-static constexpr int HUD_TEXT_SIZE = 2;
 #else
 static constexpr int64_t DRAW_INTERVAL_US = 50000;  // ~20fps
-static constexpr int HUD_TEXT_SIZE = 1;
 #endif
 
-// The play area: the largest square that fits the content area, centred. The
-// repainted rectangle and the polygon are sized from this.
-// Tab5: 620x620 / CoreS3: 180x180.
-static constexpr int BOX_SIZE =
-    (UI_SCREEN_WIDTH < UI_CONTENT_HEIGHT) ? UI_SCREEN_WIDTH : UI_CONTENT_HEIGHT;
-static constexpr int BOX_X = (UI_SCREEN_WIDTH - BOX_SIZE) / 2;
-static constexpr int BOX_Y = UI_CONTENT_Y + (UI_CONTENT_HEIGHT - BOX_SIZE) / 2;
-// How far a finger may wander and still count as a tap rather than a drag
-// (pixels). Scaled to the play area so it means the same thing on both panels.
-static constexpr int TAP_SLOP = (BOX_SIZE / 40 > 6) ? BOX_SIZE / 40 : 6;
+// The play area (m_boxX/Y/Size) is the largest square that fits the area
+// given to setArea(), centred: on its own screen the content area, so
+// Tab5 620x620 / CoreS3 180x180. The repainted rectangle and the polygon are
+// sized from it.
 
 // Floor on the finger's distance from the centre when converting a drag into
 // rotation, as a fraction of the radius. The conversion divides by that
@@ -780,6 +772,25 @@ ScreenTombola::ScreenTombola()
     g_mutex = xSemaphoreCreateMutexStatic(&g_mutexBuf);
     modelDefaults();
     memset(m_drawnBalls, 0, sizeof(m_drawnBalls));
+    resetArea();
+}
+
+void ScreenTombola::setArea(int x, int y, int w, int h)
+{
+    m_boxSize = (w < h) ? w : h;
+    m_boxX = x + (w - m_boxSize) / 2;
+    m_boxY = y + (h - m_boxSize) / 2;
+    // How far a finger may wander and still count as a tap rather than a
+    // drag. Scaled to the play area so it means the same thing at any size.
+    m_tapSlop = (m_boxSize / 40 > 6) ? m_boxSize / 40 : 6;
+    // The parameter readout: 2 on the big panels' full screen, 1 otherwise
+    m_hudTextSize = (m_boxSize >= 400) ? 2 : 1;
+    m_hasDrawnFrame = false;
+}
+
+void ScreenTombola::resetArea()
+{
+    setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
 }
 
 const char* ScreenTombola::getTitle()
@@ -848,7 +859,7 @@ void ScreenTombola::onTouch(int touchId, int x, int y, bool pressed)
 
     // A touch that never really moved was a tap, not a drag: drop a ball where
     // it landed. Deciding on release is what lets the same finger do both.
-    if (m_dragMoved > TAP_SLOP || !g_model.touchAdd) return;
+    if (m_dragMoved > m_tapSlop || !g_model.touchAdd) return;
 
     int cx, cy;
     float radius;
@@ -908,11 +919,11 @@ void ScreenTombola::onTouchMove(int touchId, int x, int y)
 
 void ScreenTombola::geometry(int& cx, int& cy, float& radius)
 {
-    cx = BOX_X + BOX_SIZE / 2;
-    cy = BOX_Y + BOX_SIZE / 2;
+    cx = m_boxX + m_boxSize / 2;
+    cy = m_boxY + m_boxSize / 2;
     // Two pixels of slack so the outermost vertex still lands inside the
     // sprite at radius == 1.0.
-    radius = (float)(BOX_SIZE / 2 - 2) * clampFloat(g_model.radiusRatio, 0.2f, 1.0f);
+    radius = (float)(m_boxSize / 2 - 2) * clampFloat(g_model.radiusRatio, 0.2f, 1.0f);
 }
 
 void ScreenTombola::polygonPoint(int cx, int cy, float radius, float angle, int i,
@@ -1024,10 +1035,10 @@ void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy, const TombolaFrame
     snprintf(hud, sizeof(hud), "N%d %.0frpm G%.2f B%.2f x%d",
              sides, (double)f.rotationRpm, (double)f.gravity, (double)f.bounce, ballCount);
 
-    int hudX = BOX_X + 4 - ox;
-    int hudY = BOX_Y + 4 - oy;
-    g->fillRect(hudX, hudY, BOX_SIZE - 8, 8 * HUD_TEXT_SIZE + 2, UI_COLOR_BLACK);
-    g->setTextSize(HUD_TEXT_SIZE);
+    int hudX = m_boxX + 4 - ox;
+    int hudY = m_boxY + 4 - oy;
+    g->fillRect(hudX, hudY, m_boxSize - 8, 8 * m_hudTextSize + 2, UI_COLOR_BLACK);
+    g->setTextSize(m_hudTextSize);
     g->setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
     g->setCursor(hudX, hudY);
     g->print(hud);
@@ -1064,7 +1075,7 @@ void ScreenTombola::paintFrame(bool fullRepaint)
 
     // Through the shared strip every band starts black, so there is nothing
     // to erase: the whole play area is recomposed each frame.
-    if (ui_strip::paint(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK,
+    if (ui_strip::paint(m_boxX, m_boxY, m_boxSize, m_boxSize, UI_COLOR_BLACK,
                         [&](LovyanGFX* g, int ox, int oy) { renderFrame(g, ox, oy, frame); })) {
         return;
     }
@@ -1074,7 +1085,7 @@ void ScreenTombola::paintFrame(bool fullRepaint)
     bool clear = fullRepaint || !m_hasDrawnFrame;
     ui_gfx().startWrite();
     if (clear) {
-        ui_gfx().fillRect(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK);
+        ui_gfx().fillRect(m_boxX, m_boxY, m_boxSize, m_boxSize, UI_COLOR_BLACK);
     } else {
         eraseFrame(&ui_gfx(), 0, 0);
     }

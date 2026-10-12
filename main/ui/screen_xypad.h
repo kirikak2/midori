@@ -28,7 +28,15 @@ public:
     void onTouchMove(int touchId, int x, int y) override;
     const char* getTitle() override;
 
+    // Where the pad is drawn and touched. The whole content area by default;
+    // a layout narrows it to its widget's cell while it shows, and puts it
+    // back (resetArea) before anything else can show this screen.
+    void setArea(int x, int y, int w, int h);
+    void resetArea();
+
 private:
+    int m_areaX, m_areaY, m_areaW, m_areaH;
+
     bool m_isActive;
     int64_t m_lastDrawUs;
     bool m_hadContent;   // Whether the previous frame painted anything -- lets
@@ -68,7 +76,7 @@ private:
     void pruneTrails(int64_t now);
     bool hasAnythingToDraw();
 
-    void renderFrame(LovyanGFX* g, int ox, int oy, int contentW, int64_t now);
+    void renderFrame(LovyanGFX* g, int ox, int oy, int64_t now);
     void paintFrame(int64_t now);
 
     // Degraded fallback used only if the strip could not be allocated: the

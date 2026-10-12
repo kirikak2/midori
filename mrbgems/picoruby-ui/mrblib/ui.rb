@@ -251,6 +251,9 @@ module UI
       # Screens travel as numbers; scripts see the same Symbols UI.show takes
       event[:screen] = SCREEN_NAMES[event[:screen]]
       event[:from] = SCREEN_NAMES[event[:from]]
+      # The layout shown, as the UI::Layout UI.layout returned
+      slot = event[:layout]
+      event[:layout] = slot ? $ui_layouts.values.find { |l| l.slot == slot } : nil
     end
     event
   end
@@ -304,6 +307,11 @@ module UI
     # Handle XYPad touch phases (built-in MIDI handler + on_touch)
     if type == :xypad_touch
       dispatch_xypad_event(event)
+    end
+
+    # Handle pads / knobs placed by UI.layout
+    if type == :widget
+      dispatch_widget_event(event)
     end
 
     handlers = $ui_handlers[type]

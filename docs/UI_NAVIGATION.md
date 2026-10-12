@@ -1,6 +1,9 @@
 # UI ナビゲーション（ホームメニュー）設計ドラフト
 
-- 状態: **ドラフト（仕様検討中）** / 2026-10-12（主要な論点は 9 章のとおり決定済み）
+- 状態: **実装済み**（2026-10-12）。ビルドのみで**実機は未確認**。実装メモは 10 章
+- 実装: [main/ui/screen_home.cpp](../main/ui/screen_home.cpp)（Home）/
+  [main/ui/ui_manager.cpp](../main/ui/ui_manager.cpp)（切り替え・Back・メニュー）/
+  [mrbgems/picoruby-ui/mrblib/ui.rb](../mrbgems/picoruby-ui/mrblib/ui.rb)（`UI.show` ほか）
 - 関連: [UI_LAYOUT_DSL.md](UI_LAYOUT_DSL.md)（レイアウト画面はこのメニューの 1 項目として載る）/
   [M5STACK_UI_DESIGN.md](M5STACK_UI_DESIGN.md)
 - 対象コード: [main/ui/ui_manager.cpp](../main/ui/ui_manager.cpp)（`handleTouch` / `nextScreen` /
@@ -208,7 +211,8 @@ UI.menu(reset: true)                               # 既定に戻す
 UI.on(:screen_change) do |e|
   e[:screen]    # => :knobs
   e[:from]      # => :xypad
-  e[:source]    # => :touch / :script
+  e[:source]    # => :touch / :script / :system（レイアウトが消えて Home に戻ったとき）
+  e[:layout]    # => 表示したレイアウトの UI::Layout（レイアウト画面以外では nil）
 end
 ```
 
@@ -251,8 +255,8 @@ ctl.on(:note_on) do |e|
 end
 ```
 
-ハンドラは `MIDI.bpm_loop` / `UI.process` の中で Ruby タスクから呼ばれるので、
-`UI.show` は（6.1 のとおり）要求を積んで即座に戻る。
+ハンドラは `MIDI.bpm_loop` か `MIDI.sleep_ms` の中で Ruby タスクから呼ばれる
+（`Kernel#sleep_ms` では呼ばれない）。`UI.show` は（6.1 のとおり）要求を積んで即座に戻る。
 
 ## 6. 実装方針
 
@@ -343,3 +347,17 @@ README / M5STACK_UI_DESIGN.md の画面遷移の説明を更新する。
 | D6 | タイルの長押し | **何もしない** | 3.1 |
 | D7 | スクリプトが Home に足せる項目 | **レイアウトのみ**（1 レイアウト 1 タイル、最大 4） | 3.1 |
 | D8 | MIDI 入力からの切り替え | **従来の `MIDI::Input#on` を流用**。専用ヘルパは作らない | 5 章 |
+
+## 10. 実装メモ
+
+- タイルは CoreS3 4 列・大画面 5 列 × 3 行。収まらないとき（CoreS3 でレイアウトを定義したとき）は
+  縦ドラッグで 1 行ずつスクロールし、右端に位置バーを出す。タップは指を離したときに
+  押した場所と同じタイルの上なら成立する
+- タイルの文字サイズは、最も長い固定名（"MIDI Info"）が収まる大きさで全タイル共通。
+  長いレイアウト名だけ小さくなり、それでも入らなければ末尾を切る
+- 状態表示: Tempo = BPM、Knobs = 現在のバンク、Tombola = 再生中、Scripts = 実行中の
+  スクリプト名、MIDI Info = 接続中。`Screen::getTileStatus()` で各画面が返す
+- `UI.screen` は保留中の要求があればその行き先を返す。Back / next / prev も要求した時点で
+  行き先を決めて積む
+- ナビバーの Home は Home 表示中、Back は戻り先が無い（または隠された・消えた）ときに灰色
+- `UI.knobs(bank:)` で Knobs 画面を表示中なら、画面はそのままバンクだけ切り替わる

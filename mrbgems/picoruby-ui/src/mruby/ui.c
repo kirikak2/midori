@@ -108,6 +108,7 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
         case PICORUBY_UI_EVENT_KNOB_CHANGE:   type = MRB_SYM(knob_change); break;
         case PICORUBY_UI_EVENT_KNOB_BANK:     type = MRB_SYM(knob_bank); break;
         case PICORUBY_UI_EVENT_XYPAD_TOUCH:   type = MRB_SYM(xypad_touch); break;
+        case PICORUBY_UI_EVENT_WIDGET:        type = MRB_SYM(widget); break;
         default:                              type = MRB_SYM(unknown); break;
     }
 
@@ -172,6 +173,24 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             HSET(bend_semitones, mrb_float_value(mrb, event.xypad_bend));
             HSET(x, mrb_float_value(mrb, event.xypad_x));
             HSET(y, mrb_float_value(mrb, event.xypad_y));
+            break;
+        }
+        case PICORUBY_UI_EVENT_WIDGET: {
+            /* layout is the slot and id the widget index, both 0-based: they
+             * are keys into the Ruby-side registry, not numbers a script sees. */
+            mrb_sym phase;
+            switch (event.widget_phase) {
+                case 0:  phase = MRB_SYM(press);   break;
+                case 1:  phase = MRB_SYM(release); break;
+                default: phase = MRB_SYM(change);  break;
+            }
+            HSET(layout, mrb_fixnum_value(event.widget_layout));
+            HSET(id, mrb_fixnum_value(event.widget_id));
+            HSET(kind, mrb_symbol_value(event.widget_kind == 0 ? MRB_SYM(pad) : MRB_SYM(knob)));
+            HSET(phase, mrb_symbol_value(phase));
+            HSET(state, mrb_bool_value(event.widget_state));
+            HSET(value, mrb_float_value(mrb, event.widget_value));
+            HSET(final, mrb_bool_value(event.widget_final));
             break;
         }
         default:
@@ -719,6 +738,142 @@ mrb_ui_xypad_get_scale(mrb_state *mrb, mrb_value self)
 }
 
 /* ------------------------------------------------------------------------
+ * Layouts
+ *
+ * The Ruby-visible API is UI.layout and UI::Layout (mrblib/ui_layout.rb),
+ * which resolves the grid to pixel rectangles before anything gets here.
+ * slot and id are 0-based.
+ * ------------------------------------------------------------------------ */
+
+/* UI._display -> [width, height, content_x, content_y, content_w, content_h,
+ *                 large?, gap] */
+static mrb_value
+mrb_ui_display(mrb_state *mrb, mrb_value self)
+{
+    int d[8];
+    picoruby_ui_display(d);
+    mrb_value v[8];
+    for (int i = 0; i < 8; i++) v[i] = mrb_fixnum_value(d[i]);
+    v[6] = mrb_bool_value(d[6] != 0);
+    return mrb_ary_new_from_values(mrb, 8, v);
+}
+
+/* UI._layout_begin(slot, title) -> true / false (false: no display) */
+static mrb_value
+mrb_ui_layout_begin(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, title;
+    mrb_get_args(mrb, "oo", &slot, &title);
+    return mrb_bool_value(picoruby_ui_layout_begin(val_to_i(slot), str_arg(mrb, title)));
+}
+
+/* UI._layout_add_pad(x, y, w, h, label, color, type) -> id or -1 */
+static mrb_value
+mrb_ui_layout_add_pad(mrb_state *mrb, mrb_value self)
+{
+    mrb_value a[7];
+    mrb_get_args(mrb, "ooooooo", &a[0], &a[1], &a[2], &a[3], &a[4], &a[5], &a[6]);
+    return mrb_fixnum_value(picoruby_ui_layout_add_pad(
+        val_to_i(a[0]), val_to_i(a[1]), val_to_i(a[2]), val_to_i(a[3]),
+        str_arg(mrb, a[4]), val_to_i(a[5]), val_to_i(a[6])));
+}
+
+/* UI._layout_add_knob(x, y, w, h, label, color, min, max, step, value,
+ *                     origin, sensitivity, notify) -> id or -1 */
+static mrb_value
+mrb_ui_layout_add_knob(mrb_state *mrb, mrb_value self)
+{
+    mrb_value a[13];
+    mrb_get_args(mrb, "ooooooooooooo", &a[0], &a[1], &a[2], &a[3], &a[4], &a[5],
+                 &a[6], &a[7], &a[8], &a[9], &a[10], &a[11], &a[12]);
+    return mrb_fixnum_value(picoruby_ui_layout_add_knob(
+        val_to_i(a[0]), val_to_i(a[1]), val_to_i(a[2]), val_to_i(a[3]),
+        str_arg(mrb, a[4]), val_to_i(a[5]),
+        val_to_f(a[6]), val_to_f(a[7]), val_to_f(a[8]), val_to_f(a[9]),
+        val_to_i(a[10]), val_to_f(a[11]), mrb_true_p(a[12])));
+}
+
+/* UI._layout_add_view(kind, x, y, w, h) -> id or -1 */
+static mrb_value
+mrb_ui_layout_add_view(mrb_state *mrb, mrb_value self)
+{
+    mrb_value a[5];
+    mrb_get_args(mrb, "ooooo", &a[0], &a[1], &a[2], &a[3], &a[4]);
+    return mrb_fixnum_value(picoruby_ui_layout_add_view(
+        val_to_i(a[0]), val_to_i(a[1]), val_to_i(a[2]), val_to_i(a[3]), val_to_i(a[4])));
+}
+
+static mrb_value
+mrb_ui_layout_commit(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(picoruby_ui_layout_commit());
+}
+
+static mrb_value
+mrb_ui_layout_delete(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot;
+    mrb_get_args(mrb, "o", &slot);
+    picoruby_ui_layout_delete(val_to_i(slot));
+    return mrb_nil_value();
+}
+
+/* UI._lw_pad_state(slot, id) */
+static mrb_value
+mrb_ui_lw_pad_state(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id;
+    mrb_get_args(mrb, "oo", &slot, &id);
+    return mrb_bool_value(picoruby_ui_layout_pad_state(val_to_i(slot), val_to_i(id)));
+}
+
+/* UI._lw_set_label(slot, id, label) / UI._lw_set_color(slot, id, color) */
+static mrb_value
+mrb_ui_lw_set_label(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id, label;
+    mrb_get_args(mrb, "ooo", &slot, &id, &label);
+    picoruby_ui_layout_set_label(val_to_i(slot), val_to_i(id), str_arg(mrb, label));
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ui_lw_set_color(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id, color;
+    mrb_get_args(mrb, "ooo", &slot, &id, &color);
+    picoruby_ui_layout_set_color(val_to_i(slot), val_to_i(id), val_to_i(color));
+    return mrb_nil_value();
+}
+
+/* UI._lw_knob_value(slot, id) */
+static mrb_value
+mrb_ui_lw_knob_value(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id;
+    mrb_get_args(mrb, "oo", &slot, &id);
+    return mrb_float_value(mrb, picoruby_ui_layout_knob_value(val_to_i(slot), val_to_i(id)));
+}
+
+/* UI._lw_knob_set_value(slot, id, value) -> whether the value moved */
+static mrb_value
+mrb_ui_lw_knob_set_value(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id, value;
+    mrb_get_args(mrb, "ooo", &slot, &id, &value);
+    return mrb_bool_value(picoruby_ui_layout_knob_set_value(val_to_i(slot), val_to_i(id),
+                                                            val_to_f(value)));
+}
+
+static mrb_value
+mrb_ui_lw_knob_reset(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id;
+    mrb_get_args(mrb, "oo", &slot, &id);
+    return mrb_bool_value(picoruby_ui_layout_knob_reset(val_to_i(slot), val_to_i(id)));
+}
+
+/* ------------------------------------------------------------------------
  * Gem initialization
  * ------------------------------------------------------------------------ */
 
@@ -791,6 +946,21 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_xypad_get_i,           mrb_ui_xypad_get_i,           MRB_ARGS_REQ(2));
     DEF(_xypad_set_scale,       mrb_ui_xypad_set_scale,       MRB_ARGS_REQ(2));
     DEF(_xypad_get_scale,       mrb_ui_xypad_get_scale,       MRB_ARGS_REQ(1));
+
+    /* Layouts */
+    DEF(_display,          mrb_ui_display,          MRB_ARGS_NONE());
+    DEF(_layout_begin,     mrb_ui_layout_begin,     MRB_ARGS_REQ(2));
+    DEF(_layout_add_pad,   mrb_ui_layout_add_pad,   MRB_ARGS_REQ(7));
+    DEF(_layout_add_knob,  mrb_ui_layout_add_knob,  MRB_ARGS_REQ(13));
+    DEF(_layout_add_view,  mrb_ui_layout_add_view,  MRB_ARGS_REQ(5));
+    DEF(_layout_commit,    mrb_ui_layout_commit,    MRB_ARGS_NONE());
+    DEF(_layout_delete,    mrb_ui_layout_delete,    MRB_ARGS_REQ(1));
+    DEF(_lw_pad_state,     mrb_ui_lw_pad_state,     MRB_ARGS_REQ(2));
+    DEF(_lw_set_label,     mrb_ui_lw_set_label,     MRB_ARGS_REQ(3));
+    DEF(_lw_set_color,     mrb_ui_lw_set_color,     MRB_ARGS_REQ(3));
+    DEF(_lw_knob_value,    mrb_ui_lw_knob_value,    MRB_ARGS_REQ(2));
+    DEF(_lw_knob_set_value, mrb_ui_lw_knob_set_value, MRB_ARGS_REQ(3));
+    DEF(_lw_knob_reset,    mrb_ui_lw_knob_reset,    MRB_ARGS_REQ(2));
 }
 
 void

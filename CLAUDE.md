@@ -788,6 +788,70 @@ pad.show
 ```
 
 サンプル: [examples/xypad.rb](examples/xypad.rb)
+
+## Home メニューと画面切り替え（2026-10-12）
+
+詳細は [docs/UI_NAVIGATION.md](docs/UI_NAVIGATION.md) を参照。
+
+ナビバーの左右は **Home / Back**（以前は `<` `>` で全画面を巡回）。各画面へは Home
+（[main/ui/screen_home.cpp](main/ui/screen_home.cpp)）のタイルから行く。起動時も Home。
+Back は Home を除いた直前の画面で、押すたびに 2 画面を往復する。旧 Main 画面の
+タイトルは **Tempo**（`UI_SCREEN_MAIN` / `:main` は互換のため残している）。
+
+- **画面の切り替えは UI タスクだけが行う**。他タスク（Ruby の `UI.show` など）は
+  `UIManager::requestScreen()` で 1 件分の保留に積み、`update()` の先頭で反映される。
+  以前の `UI.set_screen` は PicoRuby タスクから `setScreen()` を直接呼んでいて、
+  `leave()` / `enter()` が UI タスクの描画と並行していた
+- 画面切り替えのたびに `:screen_change`（`screen:` / `from:` / `source:` / `layout:`）を発行する
+- Ruby: `UI.show(:knobs, bank: 2)`、短縮形 `UI.knobs` / `UI.xypad` / `UI.tempo` …、
+  `UI.screen` / `UI.back` / `UI.next_screen` / `UI.prev_screen`、`UI.menu(hide:/only:)`。
+  移動できないときは例外ではなく false（MIDI 入力のハンドラから気軽に呼べるように）
+- `UI.menu` の設定とレイアウトはスクリプト終了時に `picoruby_esp32_midi_cleanup()` →
+  `picoruby_ui_cleanup()` で元に戻る
+- 画面を足すときは `ui_screen_index_t` の**末尾**に追加し（Ruby の `UI::SCREEN_*` と
+  `SCREEN_NAMES` も）、`ui_manager.cpp` の `MENU_ORDER` に載せる。Home のタイルに状態を
+  出すなら `Screen::getTileStatus()` を実装する
+
+## レイアウト DSL（2026-10-12）
+
+詳細は [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) を参照。
+
+pad / knob / XYPad / Tombola を 1 画面にグリッドで並べる。最大 4 レイアウト、それぞれが
+Home のタイル。**列・行は 0 始まり**、範囲は Range（`col: 0..2`）。
+
+```ruby
+UI.layout("Perform", cols: 4, rows: 3) do
+  areas <<~GRID
+    xy xy xy k
+    xy xy xy k
+    p  p  p  p
+  GRID
+  xypad area: :xy, scale: [48, 50, 52], device: dev
+  knob area: :k, label: "Cutoff" do |v| dev.control_change(74, v.to_i) end
+  grid(area: :p, cols: 4) { 4.times { |i| pad col: i do dev.trigger(36 + i) end } }
+end.show
+```
+
+- **グリッドの解決（トラック・areas・入れ子・検証）は Ruby**
+  （[mrblib/ui_layout.rb](mrbgems/picoruby-ui/mrblib/ui_layout.rb)）。C++ には画素の矩形だけが
+  渡る。ピュア Ruby なのでホストでテストできる:
+  `ruby test/layout_test.rb` / `cat mrblib/ui_layout.rb test/layout_test.rb | mruby`
+  （picoruby-ui ディレクトリで。mruby 版は `RBENV_VERSION=mruby-3.2.0`）
+- **mruby は末尾のキーワード引数を位置引数の Hash にまとめない**（CRuby はまとめる）。
+  `def add(kind, params)` に `add(:pad, label: "x")` と渡すと ArgumentError。
+  `{ label: "x" }` と明示する（ホストの mruby テストで発覚）
+- C 側はレイアウトを丸ごと組み立ててから差し替える（`ui_layout_begin` / `add_*` /
+  `commit`）。保持は [main/ui/ui_layout.cpp](main/ui/ui_layout.cpp)（再帰ミューテックス、
+  ヒープ確保）、画面は [main/ui/screen_layout.cpp](main/ui/screen_layout.cpp)
+- pad / knob の描画は [main/ui/ui_widgets.cpp](main/ui/ui_widgets.cpp) で Pads / Knobs 画面と共有
+- XYPad / Tombola はそれぞれの画面オブジェクトを、表示中だけ部品のセルに狭めて借りる
+  （`setArea()` / `resetArea()`）。モデルが 1 つなので 1 レイアウトに 1 つまで
+- 全画面合成中の `ui_strip::paint()` は自分の矩形にもクリップする（隣の部品へのはみ出し防止）
+- 新しい部品（Sequencer など）は `ui_widget_kind_t` に足し、`ScreenLayout` に描画とタッチを、
+  `ui_layout.rb` の `Builder` にメソッドを足す
+
+サンプル: [examples/layout.rb](examples/layout.rb)
+
 ## Elecrow CrowPanel Advanced 7inch 対応（2026-08-28）
 
 詳細は [docs/CROWPANEL.md](docs/CROWPANEL.md) を参照。

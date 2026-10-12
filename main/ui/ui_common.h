@@ -67,6 +67,9 @@ extern "C" {
 #define UI_KNOB_BANK_H    140
 #define UI_KNOB_BANK_GAP   20
 
+// Layout DSL default gap between cells (and around the grid)
+#define UI_LAYOUT_GAP      20
+
 #elif defined(CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL)
 // Elecrow CrowPanel Advanced 7": 1024x600 display, native landscape
 #define UI_SCREEN_WIDTH         1024
@@ -115,6 +118,8 @@ extern "C" {
 #define UI_KNOB_BANK_H    112
 #define UI_KNOB_BANK_GAP   16
 
+#define UI_LAYOUT_GAP      16
+
 #else
 // M5Stack CoreS3 SE: 320x240 display (default)
 #define UI_SCREEN_WIDTH         320
@@ -161,6 +166,8 @@ extern "C" {
 #define UI_KNOB_BANK_W     26
 #define UI_KNOB_BANK_H     42
 #define UI_KNOB_BANK_GAP    4
+
+#define UI_LAYOUT_GAP       6
 #endif
 
 // Screen count
@@ -291,6 +298,8 @@ float ui_knob_get_value(uint8_t bank, uint8_t index);
 // which is also the only case that marks the knob dirty or queues an event.
 // notify additionally requires the knob to carry a Ruby block.
 bool  ui_knob_set_value(uint8_t bank, uint8_t index, float value, bool notify);
+// Clamp to the knob's range and snap to its step (what every setter applies)
+float ui_knob_quantize(const knob_config_t* k, float value);
 bool  ui_knob_reset(uint8_t bank, uint8_t index);
 void  ui_knob_notify_all(uint8_t bank); // Re-announce every knob (the [Send] key)
 
@@ -360,7 +369,14 @@ typedef enum {
     UI_EVENT_KNOB_CHANGE,     // A knob was turned
     UI_EVENT_KNOB_BANK,       // The visible knob bank was switched
     UI_EVENT_XYPAD_TOUCH,     // An XYPad slot's touch moved through a phase
+    UI_EVENT_WIDGET,          // A pad / knob on a layout was operated
 } ui_event_type_t;
+
+typedef enum {
+    UI_WIDGET_PRESS = 0,      // Pad pressed
+    UI_WIDGET_RELEASE,        // Pad released
+    UI_WIDGET_CHANGE,         // Knob value moved
+} ui_widget_phase_t;
 
 typedef enum {
     XYPAD_PHASE_DOWN = 0,
@@ -406,6 +422,15 @@ typedef struct {
             float   x;               // Meaningful when the slot's x_mode is :cc
             float   y;
         } xypad;
+        struct {
+            uint8_t layout;  // For UI_EVENT_WIDGET: layout slot
+            uint8_t id;      // Widget index within the layout
+            uint8_t kind;    // ui_widget_kind_t
+            uint8_t phase;   // ui_widget_phase_t
+            bool    state;   // Pad state after the press / release
+            bool    final;   // Knob: last change of a drag
+            float   value;   // Knob value
+        } widget;
     } data;
 } ui_event_t;
 
@@ -560,6 +585,50 @@ int ui_xypad_touch_up(int touch_id);
 // (docs/UI_LAYOUT_DSL.md). Up to UI_LAYOUT_MAX_LAYOUTS live at once, each a
 // Home tile, all shown through UI_SCREEN_LAYOUT. Implemented in ui_layout.cpp.
 #define UI_LAYOUT_MAX_LAYOUTS  4
+#define UI_LAYOUT_MAX_WIDGETS 32
+#define UI_LAYOUT_TITLE_LEN   24
+
+typedef enum {
+    UI_WIDGET_PAD = 0,
+    UI_WIDGET_KNOB,
+    UI_WIDGET_XYPAD,      // The XYPad screen's view, drawn in the widget's cell
+    UI_WIDGET_TOMBOLA,    // Likewise the Tombola's
+} ui_widget_kind_t;
+
+typedef struct {
+    uint8_t kind;          // ui_widget_kind_t
+    int16_t x, y, w, h;    // Screen pixels, resolved by Ruby
+    union {
+        pad_config_t  pad;
+        knob_config_t knob;
+    };
+} ui_widget_t;
+
+// Defining a layout (PicoRuby task): begin, add each widget (each returns its
+// id, or -1), commit. Nothing is visible until commit swaps the whole layout
+// in, replacing whatever was in that slot.
+bool ui_layout_begin(int slot, const char* title);
+int  ui_layout_add_pad(int x, int y, int w, int h, const char* label,
+                       uint16_t color, uint8_t type);
+int  ui_layout_add_knob(int x, int y, int w, int h, const char* label,
+                        uint16_t color, float min, float max, float step,
+                        float value, uint8_t origin, float sensitivity,
+                        bool notify);
+int  ui_layout_add_view(uint8_t kind, int x, int y, int w, int h);
+bool ui_layout_commit(void);
+void ui_layout_delete(int slot);
+
+// Operating a widget from Ruby (PicoRuby task). Changes are drawn by the UI
+// task. ui_layout_knob_set_value returns whether the value moved.
+bool  ui_layout_pad_state(int slot, int id);
+void  ui_layout_set_label(int slot, int id, const char* label);
+void  ui_layout_set_color(int slot, int id, uint16_t color);
+float ui_layout_knob_value(int slot, int id);
+bool  ui_layout_knob_set_value(int slot, int id, float value);
+bool  ui_layout_knob_reset(int slot, int id);
+
+// Queues a layout knob change, coalesced per knob like ui_knob_event_post
+void ui_widget_knob_event_post(uint8_t layout, uint8_t id, float value, bool final);
 
 bool ui_layout_exists(int slot);
 int  ui_layout_last_shown(void);                 // -1 before any was shown

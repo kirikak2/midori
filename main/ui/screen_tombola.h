@@ -30,7 +30,17 @@ public:
     const char* getNavCenterLabel() override;
     void getTileStatus(char* buf, int len) override;
 
+    // The play area is the largest square that fits this rectangle, centred.
+    // The whole content area by default; a layout narrows it to its widget's
+    // cell while it shows and puts it back (resetArea) afterwards.
+    void setArea(int x, int y, int w, int h);
+    void resetArea();
+
 private:
+    int m_boxX, m_boxY, m_boxSize;
+    int m_tapSlop;
+    int m_hudTextSize;
+
     bool m_isActive;
 
     // Frames are composed off-screen through the shared strip (ui_strip.h),

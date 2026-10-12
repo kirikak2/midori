@@ -1,6 +1,7 @@
 #include "sdkconfig.h"
 #include "screen_knob.h"
 #include "ui_strip.h"
+#include "ui_widgets.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -172,48 +173,24 @@ void ScreenKnobs::drawKnob(int index, bool grabbed)
 {
     if (index < 0 || index >= UI_KNOB_COUNT) return;
 
-    int x, y, w, h;
-    cellRect(index, x, y, w, h);
-    int cx, cy;
-    ringCenter(index, cx, cy);
+    KnobGeom geom;
+    cellRect(index, geom.x, geom.y, geom.w, geom.h);
+    ringCenter(index, geom.cx, geom.cy);
+    geom.rIn = UI_KNOB_R_IN;
+    geom.rOut = UI_KNOB_R_OUT;
+    geom.labelY = UI_KNOB_LABEL_Y;
+    geom.textSize = UI_KNOB_TEXT_SIZE;
 
     const knob_config_t* k = ui_knob_get_config(ui_knob_get_bank(), index);
     bool assigned = (k && k->assigned);
 
-    ui_gfx().fillRect(x, y, w, h, UI_COLOR_BLACK);
-
-    if (!assigned) {
-        paintSpan(cx, cy, ANGLE_START, ANGLE_END, UI_COLOR_DARKGRAY);
-    } else {
-        float aOrigin = originAngle(k);
-        float aValue = valueAngle(k, k->value);
-        float lo = (aOrigin < aValue) ? aOrigin : aValue;
-        float hi = (aOrigin < aValue) ? aValue : aOrigin;
-
-        paintSpan(cx, cy, ANGLE_START, lo, UI_COLOR_DARKGRAY);
-        paintSpan(cx, cy, lo, hi, k->color);
-        paintSpan(cx, cy, hi, ANGLE_END, UI_COLOR_DARKGRAY);
-
-        drawValueText(index, k);
-    }
-
-    // Label, clipped to the cell
     char label[24];
     if (assigned && k->label[0] != '\0') {
         snprintf(label, sizeof(label), "%s", k->label);
     } else {
         snprintf(label, sizeof(label), "Knob %d", index + 1);
     }
-    int maxChars = w / (GLYPH_W * UI_KNOB_TEXT_SIZE);
-    if (maxChars > 0 && (int)strlen(label) > maxChars) label[maxChars] = '\0';
-
-    int labelW = (int)strlen(label) * GLYPH_W * UI_KNOB_TEXT_SIZE;
-    ui_gfx().setTextSize(UI_KNOB_TEXT_SIZE);
-    ui_gfx().setTextColor(assigned ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_BLACK);
-    ui_gfx().setCursor(x + (w - labelW) / 2, y + UI_KNOB_LABEL_Y);
-    ui_gfx().print(label);
-
-    if (grabbed) drawGrabRing(index, true);
+    ui_knob_paint(&ui_gfx(), 0, 0, geom, k, label, grabbed);
 
     m_drawn[index] = assigned ? k->value : 0.0f;
     m_hasDrawn[index] = true;

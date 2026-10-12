@@ -49,6 +49,8 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/screen_xypad.cpp"
         "ui/screen_home.cpp"
         "ui/ui_layout.cpp"
+        "ui/ui_widgets.cpp"
+        "ui/screen_layout.cpp"
     )
 endif()
 

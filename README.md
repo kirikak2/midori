@@ -41,11 +41,12 @@ end
 
 ### Play
 
-- **Touch screen UI** (CoreS3 / Tab5 / CrowPanel) — BPM, MIDI info, log, script selector and settings screens, plus playing surfaces scripts can drive:
+- **Touch screen UI** (CoreS3 / Tab5 / CrowPanel) — A Home menu of tiles leads to the tempo, MIDI info, log, script selector and settings screens and to playing surfaces scripts can drive; Home / Back on the nav bar, `UI.show(:knobs)` and friends from scripts or MIDI input ([docs](docs/UI_NAVIGATION.md)):
   - **Pads** — One-shot buttons (`UI.pad`)
   - **Knobs** — Banks of rotary knobs for continuous parameters such as CCs (`UI.knob`, [docs](docs/KNOBS.md))
   - **XY Pad** — Up to five fingers, each playing pitch (snapped to a scale, with glide) on X and a CC on Y (`UI::XYPad`, [docs](docs/XYPAD.md))
   - **Tombola** — A physics sequencer: balls bounce inside a rotating polygon and play a note on every wall hit (`UI::Tombola`, [docs](docs/TOMBOLA.md))
+  - **Layouts** — Any mix of the above on one screen, placed on a grid by column and row (`UI.layout`, [docs](docs/UI_LAYOUT_DSL.md))
 - **AMY synthesizer** (Tab5 / CrowPanel) — The [AMY](https://github.com/shorepine/amy) engine plays through the built-in speaker, as an ordinary MIDI output: `AMY::FM` (DX7 presets) and `AMY::Synth` (subtractive, Juno-style), see [docs](docs/AMY_SYNTH.md)
 - **Rotary encoders** — DFRobot SEN0502 I2C encoders as physical knobs
 
@@ -283,6 +284,7 @@ Ready-to-run scripts are in [examples/](examples/):
 | [knobs.rb](examples/knobs.rb) | CC knob banks |
 | [xypad.rb](examples/xypad.rb) | Multi-finger XY pad |
 | [tombola.rb](examples/tombola.rb) | Bouncing-ball sequencer |
+| [layout.rb](examples/layout.rb) | XY pad, knobs and pads on one screen; switching screens from MIDI |
 | [amy_fm.rb](examples/amy_fm.rb) / [amy_synth.rb](examples/amy_synth.rb) | Play the built-in synth from pads, XY pad, knobs and a USB keyboard |
 | [bach_air.rb](examples/bach_air.rb) | MML playback |
 | [midi_monitor.rb](examples/midi_monitor.rb) | Log every incoming MIDI message |

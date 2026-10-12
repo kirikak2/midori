@@ -69,14 +69,28 @@ ScreenXYPad::ScreenXYPad()
     memset(m_lastTrailPushUs, 0, sizeof(m_lastTrailPushUs));
     memset(m_ripples, 0, sizeof(m_ripples));
     memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
+    resetArea();
+}
+
+void ScreenXYPad::setArea(int x, int y, int w, int h)
+{
+    m_areaX = x;
+    m_areaY = y;
+    m_areaW = w;
+    m_areaH = h;
+}
+
+void ScreenXYPad::resetArea()
+{
+    setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
 }
 
 void ScreenXYPad::contentRect(int& x, int& y, int& w, int& h)
 {
-    x = 0;
-    y = UI_CONTENT_Y;
-    w = UI_SCREEN_WIDTH;
-    h = UI_CONTENT_HEIGHT;
+    x = m_areaX;
+    y = m_areaY;
+    w = m_areaW;
+    h = m_areaH;
 }
 
 uint16_t ScreenXYPad::slotColor(int index)
@@ -160,7 +174,7 @@ bool ScreenXYPad::hasAnythingToDraw()
 
 // --- Drawing ---------------------------------------------------------------
 
-void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int contentW, int64_t now)
+void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int64_t now)
 {
     // Ripples: an expanding two-pixel-thick ring per touchdown, fading to
     // black as it grows.
@@ -219,17 +233,19 @@ void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int contentW, int64_
         // the right edge, instead of letting it print off the strip/panel
         // and (depending on the GFX driver's wrap behaviour) reappear at the
         // left edge -- what looked like a stuck afterimage there before.
+        // Worked out in screen coordinates against the pad's own area, which
+        // is not the whole width when a layout hosts it.
         int textW = (int)strlen(label) * GLYPH_W * LABEL_TEXT_SIZE;
-        int labelX = x + DOT_RADIUS + 4;
-        if (labelX + textW > contentW) {
-            labelX = x - DOT_RADIUS - 4 - textW;
+        int labelX = m_touchX[s] + DOT_RADIUS + 4;
+        if (labelX + textW > m_areaX + m_areaW) {
+            labelX = m_touchX[s] - DOT_RADIUS - 4 - textW;
         }
-        if (labelX < 0) labelX = 0;
+        if (labelX < m_areaX) labelX = m_areaX;
         int labelY = y - (GLYPH_H * LABEL_TEXT_SIZE) / 2;
 
         g->setTextSize(LABEL_TEXT_SIZE);
         g->setTextColor(color, UI_COLOR_BLACK);
-        g->setCursor(labelX, labelY);
+        g->setCursor(labelX - ox, labelY);
         g->print(label);
     }
 }
@@ -242,7 +258,7 @@ void ScreenXYPad::paintFrame(int64_t now)
     // Composed off-screen through the shared strip, band by band. `now` is
     // fixed for the whole frame, so every band animates to the same instant.
     if (ui_strip::paint(cx, cy, cw, ch, UI_COLOR_BLACK, [&](LovyanGFX* g, int ox, int oy) {
-            renderFrame(g, ox, oy, cw, now);
+            renderFrame(g, ox, oy, now);
         })) {
         return;
     }
@@ -360,7 +376,7 @@ void ScreenXYPad::update()
 
 void ScreenXYPad::draw()
 {
-    ui_clear_content_area();
+    ui_gfx().fillRect(m_areaX, m_areaY, m_areaW, m_areaH, UI_COLOR_BLACK);
     memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
     m_hadContent = true;
     paintFrame(esp_timer_get_time());

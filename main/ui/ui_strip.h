@@ -115,9 +115,22 @@ template <typename F>
 bool paint(int x, int y, int w, int h, uint16_t bg, F&& draw)
 {
     if (composing()) {
+        // Clipped to the rectangle as well as the band, as the strip itself
+        // would be: a layout puts other widgets right next to it, and an
+        // XYPad ripple must not paint over them.
         LovyanGFX& g = gfx();
-        g.fillRect(x, y, w, h, bg);
-        draw(&g, 0, 0);
+        int32_t cx, cy, cw, ch;
+        g.getClipRect(&cx, &cy, &cw, &ch);
+        int x0 = (x > cx) ? x : cx;
+        int y0 = (y > cy) ? y : cy;
+        int x1 = (x + w < cx + cw) ? x + w : cx + cw;
+        int y1 = (y + h < cy + ch) ? y + h : cy + ch;
+        if (x1 > x0 && y1 > y0) {
+            g.setClipRect(x0, y0, x1 - x0, y1 - y0);
+            g.fillRect(x, y, w, h, bg);
+            draw(&g, 0, 0);
+            g.setClipRect(cx, cy, cw, ch);
+        }
         return true;
     }
 

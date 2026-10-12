@@ -371,3 +371,81 @@ int ui_xypad_touch_up(int touch_id)
     (void)touch_id;
     return -1;
 }
+
+// Layout stubs (docs/UI_LAYOUT_DSL.md) - no screen to put them on. Ruby still
+// resolves and validates the grid, so a script's mistakes show up here too;
+// ui_layout_begin returning false tells it nothing reached the device.
+
+bool ui_layout_begin(int slot, const char *title)
+{
+    (void)slot; (void)title;
+    return false;
+}
+
+int ui_layout_add_pad(int x, int y, int w, int h, const char *label,
+                      uint16_t color, uint8_t type)
+{
+    (void)x; (void)y; (void)w; (void)h; (void)label; (void)color; (void)type;
+    return -1;
+}
+
+int ui_layout_add_knob(int x, int y, int w, int h, const char *label,
+                       uint16_t color, float min, float max, float step,
+                       float value, uint8_t origin, float sensitivity,
+                       bool notify)
+{
+    (void)x; (void)y; (void)w; (void)h; (void)label; (void)color;
+    (void)min; (void)max; (void)step; (void)value; (void)origin;
+    (void)sensitivity; (void)notify;
+    return -1;
+}
+
+int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
+{
+    (void)kind; (void)x; (void)y; (void)w; (void)h;
+    return -1;
+}
+
+bool ui_layout_commit(void)
+{
+    return false;
+}
+
+void ui_layout_delete(int slot)
+{
+    (void)slot;
+}
+
+bool ui_layout_pad_state(int slot, int id)
+{
+    (void)slot; (void)id;
+    return false;
+}
+
+void ui_layout_set_label(int slot, int id, const char *label)
+{
+    (void)slot; (void)id; (void)label;
+}
+
+void ui_layout_set_color(int slot, int id, uint16_t color)
+{
+    (void)slot; (void)id; (void)color;
+}
+
+float ui_layout_knob_value(int slot, int id)
+{
+    (void)slot; (void)id;
+    return 0.0f;
+}
+
+bool ui_layout_knob_set_value(int slot, int id, float value)
+{
+    (void)slot; (void)id; (void)value;
+    return false;
+}
+
+bool ui_layout_knob_reset(int slot, int id)
+{
+    (void)slot; (void)id;
+    return false;
+}

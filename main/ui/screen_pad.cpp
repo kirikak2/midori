@@ -1,6 +1,7 @@
 #include "sdkconfig.h"
 #include "screen_pad.h"
 #include "ui_strip.h"
+#include "ui_widgets.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -120,70 +121,14 @@ void ScreenPads::drawPad(int index)
     const pad_config_t* pad = ui_pad_get_config(index);
     if (!pad) return;
 
-    // Determine colors
-    uint16_t bgColor;
-    uint16_t textColor = UI_COLOR_WHITE;
-    uint16_t borderColor = UI_COLOR_WHITE;
-
+    // Show the pad number for an unassigned pad
+    char numStr[8];
+    const char* label = pad->label;
     if (!pad->assigned) {
-        // Unassigned pad - gray
-        bgColor = UI_COLOR_DARKGRAY;
-        textColor = UI_COLOR_GRAY;
-    } else {
-        bgColor = pad->color;
-
-        // Brighten if pressed or toggle ON
-        bool highlighted = false;
-        if (pad->type == PAD_TYPE_TOGGLE && pad->state) {
-            highlighted = true;
-        } else if ((pad->type == PAD_TYPE_MOMENTARY || pad->type == PAD_TYPE_TRIGGER) && pad->state) {
-            highlighted = true;
-        }
-
-        if (highlighted) {
-            bgColor = ui_lighten_color(bgColor);
-            borderColor = UI_COLOR_YELLOW;
-        }
-    }
-
-    // Draw pad background
-    ui_gfx().fillRoundRect(x, y, w, h, 6, bgColor);
-    ui_gfx().drawRoundRect(x, y, w, h, 6, borderColor);
-
-    // Draw label
-    ui_gfx().setTextSize(PAD_TEXT_SIZE);
-    ui_gfx().setTextColor(textColor, bgColor);
-
-    const char* label = pad->assigned ? pad->label : "";
-    if (!pad->assigned) {
-        // Show pad number for unassigned
-        char numStr[8];
         snprintf(numStr, sizeof(numStr), "Pad %d", index + 1);
         label = numStr;
-
-        int textW = strlen(label) * 6 * PAD_TEXT_SIZE;
-        int textH = 8 * PAD_TEXT_SIZE;
-        ui_gfx().setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
-        ui_gfx().print(label);
-    } else {
-        int textW = strlen(label) * 6 * PAD_TEXT_SIZE;
-        int textH = 8 * PAD_TEXT_SIZE;
-        ui_gfx().setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
-        ui_gfx().print(label);
-
-        // Show type indicator in corner for assigned pads
-        const char* typeStr = nullptr;
-        switch (pad->type) {
-            case PAD_TYPE_TRIGGER:   typeStr = "T"; break;
-            case PAD_TYPE_MOMENTARY: typeStr = "M"; break;
-            case PAD_TYPE_TOGGLE:    typeStr = pad->state ? "ON" : "OFF"; break;
-        }
-        if (typeStr) {
-            ui_gfx().setTextColor(UI_COLOR_GRAY, bgColor);
-            ui_gfx().setCursor(x + 4 * PAD_TEXT_SIZE, y + 4 * PAD_TEXT_SIZE);
-            ui_gfx().print(typeStr);
-        }
     }
+    ui_pad_paint(&ui_gfx(), 0, 0, x, y, w, h, pad, label, PAD_TEXT_SIZE);
 }
 
 void ScreenPads::drawAllPads()

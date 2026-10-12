@@ -41,6 +41,13 @@ typedef struct {
     float xypad_bend;      /* Meaningful when the slot's x_mode is :note */
     float xypad_x;         /* Meaningful when the slot's x_mode is :cc */
     float xypad_y;
+    uint8_t widget_layout; /* For layout widget events: layout slot */
+    uint8_t widget_id;     /* ...widget index within the layout */
+    uint8_t widget_kind;   /* ...0 pad / 1 knob */
+    uint8_t widget_phase;  /* ...0 press / 1 release / 2 change */
+    bool widget_state;     /* ...pad state */
+    bool widget_final;     /* ...knob: last change of a drag */
+    float widget_value;    /* ...knob value */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -54,6 +61,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_KNOB_CHANGE   7
 #define PICORUBY_UI_EVENT_KNOB_BANK     8
 #define PICORUBY_UI_EVENT_XYPAD_TOUCH   9
+#define PICORUBY_UI_EVENT_WIDGET       10
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -104,6 +112,29 @@ bool picoruby_ui_request_step(int dir);
 int  picoruby_ui_requested_screen(int *arg);
 void picoruby_ui_menu_set_hidden(uint32_t hidden);
 uint32_t picoruby_ui_menu_get_hidden(void);
+
+/* Screen facts for the layout DSL: width, height, content x / y / w / h,
+ * large-layout flag (0/1), default grid gap. */
+void picoruby_ui_display(int out[8]);
+
+/* Layouts (docs/UI_LAYOUT_DSL.md). Defined by begin, add_*, commit; the add
+ * functions return the widget id or -1. Rectangles are screen pixels. */
+bool  picoruby_ui_layout_begin(int slot, const char *title);
+int   picoruby_ui_layout_add_pad(int x, int y, int w, int h, const char *label,
+                                 int color, int type);
+int   picoruby_ui_layout_add_knob(int x, int y, int w, int h, const char *label,
+                                  int color, float min, float max, float step,
+                                  float value, int origin, float sensitivity,
+                                  bool notify);
+int   picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h);
+bool  picoruby_ui_layout_commit(void);
+void  picoruby_ui_layout_delete(int slot);
+bool  picoruby_ui_layout_pad_state(int slot, int id);
+void  picoruby_ui_layout_set_label(int slot, int id, const char *label);
+void  picoruby_ui_layout_set_color(int slot, int id, int color);
+float picoruby_ui_layout_knob_value(int slot, int id);
+bool  picoruby_ui_layout_knob_set_value(int slot, int id, float value);
+bool  picoruby_ui_layout_knob_reset(int slot, int id);
 
 /* A script ended (called from picoruby_esp32_midi_cleanup). Any task. */
 void picoruby_ui_cleanup(void);

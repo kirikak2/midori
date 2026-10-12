@@ -1,6 +1,14 @@
 # UI レイアウト DSL（設計ドラフト）
 
-- 状態: **ドラフト（仕様検討中）** / 2026-10-12（主要な論点は 9 章のとおり決定済み）
+- 状態: **段階 1〜3 を実装済み**（2026-10-12。Sequencer は未実装）。ビルドのみで**実機は未確認**。
+  設計からの差分は 10 章
+- 実装: [mrbgems/picoruby-ui/mrblib/ui_layout.rb](../mrbgems/picoruby-ui/mrblib/ui_layout.rb)（グリッド解決・DSL）/
+  [main/ui/ui_layout.cpp](../main/ui/ui_layout.cpp)（レイアウトの保持）/
+  [main/ui/screen_layout.cpp](../main/ui/screen_layout.cpp)（画面）/
+  [main/ui/ui_widgets.cpp](../main/ui/ui_widgets.cpp)（pad / knob の描画。Pads / Knobs 画面と共有）
+- テスト: [mrbgems/picoruby-ui/test/layout_test.rb](../mrbgems/picoruby-ui/test/layout_test.rb)
+  （`ruby test/layout_test.rb`、または `cat mrblib/ui_layout.rb test/layout_test.rb | mruby`）
+- サンプル: [examples/layout.rb](../examples/layout.rb)
 - 対象: `UI.pad` / `UI.knob` / `UI::XYPad` / `UI::Tombola`、および今後追加する Sequencer など
   UI モジュールが提供する部品
 - 関連: [UI_NAVIGATION.md](UI_NAVIGATION.md)（ホームメニュー。レイアウトはそのタイルとして載る）/
@@ -299,7 +307,8 @@ knob は値）。knob のバンクはレイアウトには持ち込まない（�
 ```ruby
 cutoff = knob col: 3, label: "Cutoff" do |v| ... end
 cutoff.value             # => 64.0
-cutoff.value = 100       # ブロックも呼ぶ（UI.knob_set と同じ。notify: false で表示のみ）
+cutoff.value = 100       # ブロックも呼ぶ（UI.knob_set と同じ）
+cutoff.set_value(100, notify: false)   # 表示だけ
 cutoff.label = "LPF"
 cutoff.color = :yellow
 
@@ -310,9 +319,11 @@ kick.state               # => true / false
 | ハンドル | 主なメソッド |
 |---|---|
 | `UI::Layout::Pad` | `state` / `label=` / `color=` |
-| `UI::Layout::Knob` | `value` / `value=(v, notify: true)` / `reset` / `send` / `label=` / `color=` |
+| `UI::Layout::Knob` | `value` / `value=` / `set_value(v, notify: true)` / `reset` / `send_value` / `label=` / `color=` |
 | `xypad` | 既存の `UI::XYPad` インスタンスそのもの（`slot` / `hold=` / `on_touch`） |
 | `tombola` | 既存の `UI::Tombola` インスタンスそのもの |
+
+`layout.widgets` は定義順のハンドルの配列。
 
 `layout.send_all` は全ノブのブロックを現在値で呼ぶ（`UI.knob_send_all` 相当）。
 定義しただけでは送らないのは Knobs 画面と同じ。
@@ -500,3 +511,35 @@ seq.pattern(1, "x...x...x...x...")
 ### 未決事項
 
 現時点で無し。
+
+## 10. 実装メモ（設計からの差分・補足）
+
+- **検証のタイミング**: 4.7 の違反は「ブロックを抜けたとき」ではなく、その部品を置いた時点で
+  `ArgumentError` になる。どちらにしても例外が出たレイアウトは C 側へ何も送らず、
+  同じ title の既存レイアウトもそのまま残る
+- **Knob の値の設定**: Ruby のセッターはキーワード引数を取れないので、`value=(v, notify:)` ではなく
+  `value = v`（ブロックも呼ぶ）と `set_value(v, notify: false)`（表示だけ）に分けた。
+  `send`（Object#send と衝突）は `send_value` にした
+- **XYPad / Tombola のインスタンス**: `xypad` / `tombola` は既定で `UI::XYPad.new` /
+  `UI::Tombola.new` を呼ぶ。どちらもモデルが 1 つしかないので、2 つのレイアウトにそれぞれ
+  `xypad` を書くと**後から定義した方の設定で上書きされる**。設定を保ったまま置くには
+  `xypad pad: my_pad` / `tombola tombola: my_tombola` で既存のインスタンスを渡す
+- **ビューの借用**: レイアウトが表示されている間、XYPad / Tombola の画面オブジェクトの描画・
+  タッチ領域を部品のセルに狭め（`setArea()`）、離れるときに全画面へ戻す（`resetArea()`）。
+  モデルも描画コードも 1 つのまま。Tombola のプレイエリアはセルに収まる最大の正方形
+- **`ui_strip::paint()` のクリップ**: 全画面合成中（`compose()`）の `paint()` は、帯に加えて
+  自分の矩形にもクリップするようにした。XYPad の波紋などが隣の部品へはみ出さないため
+- **レイアウトの保持**: 1 レイアウト（最大 32 部品）は約 2.5KB で、commit 時にヒープへ確保する。
+  再帰ミューテックスで守り、UI タスクの描画・タッチ処理と Ruby の setter が排他になる
+- **スクリプト終了**: `picoruby_esp32_midi_cleanup()` → `picoruby_ui_cleanup()` は世代番号を
+  進めるだけ（MIDI クロックの esp_timer タスクからも呼ばれるため、待たない）。古い世代の
+  レイアウトはその時点で存在しない扱いになり、UI タスクが次の周回で解放する
+- **イベント**: レイアウトの pad / knob は `UI_EVENT_WIDGET`（Ruby では `:widget`）。
+  XYPad / Tombola は従来の `:xypad_touch` / `:tombola_hit` のまま
+- **ナビバー中央**: レイアウト画面では何も置かない（ノブの再送は `layout.send_all`）
+- **見た目の自動決定**（D9）: pad の文字サイズはラベルが幅に収まり、高さの 1/3 以下になる最大値
+  （1〜3）。knob はセルの高さで文字サイズ（170px 以上 3 / 110px 以上 2 / それ未満 1）、
+  ラベルの上の空きにリングを置き、値の 5 文字が内径に収まるまで文字を小さくする
+  （`ui_knob_geom_for()`）
+- **Pads / Knobs 画面**: 描画を `ui_widgets.cpp` の共通関数に移した（8 章の段階 2）。
+  寸法はそれぞれ従来のボード別定数のまま渡しているので見た目は変わらない想定（実機未確認）
