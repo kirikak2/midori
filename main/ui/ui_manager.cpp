@@ -81,20 +81,15 @@ esp_err_t UIManager::init()
     M5.Lcd.setTextScroll(false);
     M5.Lcd.setScrollRect(0, 0, M5.Lcd.width(), M5.Lcd.height());
 
-    // Clear screen
-    M5.Lcd.fillScreen(UI_COLOR_BLACK);
-
-    // Enter the first screen
+    // Enter the first screen. The first update() paints it, replacing the
+    // boot console in one go.
     m_currentIndex = UI_SCREEN_MAIN;
     if (m_screens[m_currentIndex]) {
         m_screens[m_currentIndex]->enter();
     }
 
-    drawStatusBar();
-    drawNavBar();
-
     m_initialized = true;
-    m_needsRedraw = false;
+    m_needsRedraw = true;
 
     return ESP_OK;
 }
@@ -161,20 +156,31 @@ void UIManager::update()
     // another screen.
     ui_tombola_tick();
 
-    // Update current screen
-    if (m_screens[m_currentIndex]) {
+    // Update current screen. Not when a full repaint is pending (a screen
+    // was just switched to, say): update() draws its incremental changes
+    // straight to the panel, over whatever is still showing, and the repaint
+    // below covers all of it anyway.
+    if (m_screens[m_currentIndex] && !m_needsRedraw) {
         m_screens[m_currentIndex]->update();
     }
 
-    // Redraw if needed
+    // Full repaint: the whole screen is composed off-screen through the
+    // shared strip and replaced band by band, so the panel never shows it
+    // cleared or half-drawn (screens no longer draw in enter()). Without the
+    // strip it is drawn straight to the panel.
     if (m_needsRedraw) {
-        M5.Lcd.startWrite();
-        drawStatusBar();
-        if (m_screens[m_currentIndex]) {
-            m_screens[m_currentIndex]->draw();
+        Screen* screen = m_screens[m_currentIndex];
+        auto paintAll = [&]() {
+            drawStatusBar();
+            ui_clear_content_area();
+            if (screen) screen->draw();
+            drawNavBar();
+        };
+        if (!ui_strip::compose(0, UI_SCREEN_HEIGHT, paintAll)) {
+            M5.Lcd.startWrite();
+            paintAll();
+            M5.Lcd.endWrite();
         }
-        drawNavBar();
-        M5.Lcd.endWrite();
         m_needsRedraw = false;
     }
 

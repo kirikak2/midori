@@ -265,7 +265,7 @@ void ScreenXYPad::fallbackEraseSlot(int index)
 {
     DrawnSlot& d = m_drawnFallback[index];
     if (!d.shown) return;
-    M5.Lcd.fillRect(d.eraseX, d.eraseY, d.eraseW, d.eraseH, UI_COLOR_BLACK);
+    ui_gfx().fillRect(d.eraseX, d.eraseY, d.eraseW, d.eraseH, UI_COLOR_BLACK);
     d.shown = false;
 }
 
@@ -295,14 +295,14 @@ void ScreenXYPad::fallbackPaintSlot(int index, int x, int y)
     int labelY = y - (GLYPH_H * LABEL_TEXT_SIZE) / 2;
 
     if (slot->latched) {
-        M5.Lcd.drawCircle(x, y, DOT_RADIUS, color);
+        ui_gfx().drawCircle(x, y, DOT_RADIUS, color);
     } else {
-        M5.Lcd.fillCircle(x, y, DOT_RADIUS, color);
+        ui_gfx().fillCircle(x, y, DOT_RADIUS, color);
     }
-    M5.Lcd.setTextSize(LABEL_TEXT_SIZE);
-    M5.Lcd.setTextColor(color, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(labelX, labelY);
-    M5.Lcd.print(label);
+    ui_gfx().setTextSize(LABEL_TEXT_SIZE);
+    ui_gfx().setTextColor(color, UI_COLOR_BLACK);
+    ui_gfx().setCursor(labelX, labelY);
+    ui_gfx().print(label);
 
     // Bounding box covers the dot and wherever the label ended up, whichever
     // side it is on.
@@ -328,12 +328,8 @@ void ScreenXYPad::fallbackRefresh(int index, int x, int y)
 void ScreenXYPad::enter()
 {
     m_isActive = true;
-    ui_clear_content_area();
-    memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
-    // Force one paint even if nothing is animating, e.g. a slot latched via
-    // Hold from a previous visit should still show its dot immediately.
-    m_hadContent = true;
-    paintFrame(esp_timer_get_time());
+    // UIManager repaints the whole screen right after this (draw()), which
+    // also shows a slot latched via Hold on a previous visit.
 }
 
 void ScreenXYPad::leave()

@@ -161,9 +161,6 @@ void ScreenMain::enter()
     m_lastDrawnBpm = -1;  // Force full redraw
     m_lastSyncButtonState = -1;  // Force sync button redraw
     m_lastDrawnExternalBpmSource = 0xFF;  // Force source buttons redraw
-
-    ui_clear_content_area();
-    draw();
 }
 
 void ScreenMain::leave()
@@ -214,7 +211,7 @@ void ScreenMain::update()
     }
 
     if (needsFullRedraw) {
-        draw();
+        ui_strip::repaint_content([&]() { draw(); });
         m_needsRedraw = false;
     } else {
         // Top area renders off-screen through the shared strip, so no outer
@@ -235,6 +232,9 @@ void ScreenMain::update()
 
 void ScreenMain::draw()
 {
+    // A full repaint paints everything: drawSyncButton() skips an unchanged
+    // state, which would leave all but the first band of a compose without it.
+    m_lastSyncButtonState = -1;
     drawTopArea();
     drawSyncButton();
     drawBarBeat();
@@ -337,7 +337,7 @@ void ScreenMain::drawTopArea()
     };
 
     if (!ui_strip::paint(0, TOP_AREA_Y, UI_SCREEN_WIDTH, TOP_AREA_HEIGHT, UI_COLOR_BLACK, render)) {
-        render(&M5.Lcd, 0, 0);
+        render(&ui_gfx(), 0, 0);
     }
 
     m_lastDrawnBpm = bpm;
@@ -387,17 +387,17 @@ void ScreenMain::drawSyncButton()
     }
 
     // Draw button
-    M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, bgColor);
-    M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 4, UI_COLOR_WHITE);
+    ui_gfx().fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, bgColor);
+    ui_gfx().drawRoundRect(btn.x, btn.y, btn.w, btn.h, 4, UI_COLOR_WHITE);
 
     // Draw label
-    M5.Lcd.setTextSize(1);
-    M5.Lcd.setTextColor(textColor, bgColor);
+    ui_gfx().setTextSize(1);
+    ui_gfx().setTextColor(textColor, bgColor);
 
     const char* label = syncMode ? "SYNC" : "Sync";
     int textW = strlen(label) * 6;
-    M5.Lcd.setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
-    M5.Lcd.print(label);
+    ui_gfx().setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
+    ui_gfx().print(label);
 }
 
 void ScreenMain::drawBarBeat()
@@ -407,15 +407,15 @@ void ScreenMain::drawBarBeat()
     uint8_t beat = ui.getBeat();
 
     // Draw bar/beat (background color overwrites old content)
-    M5.Lcd.setTextSize(BAR_BEAT_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setTextSize(BAR_BEAT_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
 
     char barBeatStr[32];
     snprintf(barBeatStr, sizeof(barBeatStr), "Bar: %3lu  Beat: %d", (unsigned long)bar, beat);
 
     int barBeatWidth = strlen(barBeatStr) * 6 * BAR_BEAT_TEXT_SIZE;
-    M5.Lcd.setCursor((UI_SCREEN_WIDTH - barBeatWidth) / 2, BAR_BEAT_Y);
-    M5.Lcd.print(barBeatStr);
+    ui_gfx().setCursor((UI_SCREEN_WIDTH - barBeatWidth) / 2, BAR_BEAT_Y);
+    ui_gfx().print(barBeatStr);
 
     m_lastDrawnBar = bar;
     m_lastDrawnBeat = beat;
@@ -429,16 +429,16 @@ void ScreenMain::drawBeatProgress()
     int progressX = (UI_SCREEN_WIDTH - PROGRESS_W) / 2;
 
     // Draw progress bar background
-    M5.Lcd.fillRect(progressX, PROGRESS_Y, PROGRESS_W, PROGRESS_H, UI_COLOR_DARKGRAY);
+    ui_gfx().fillRect(progressX, PROGRESS_Y, PROGRESS_W, PROGRESS_H, UI_COLOR_DARKGRAY);
 
     // Draw progress bar fill
     int fillWidth = (progress * PROGRESS_W) / 24;
     if (fillWidth > 0) {
-        M5.Lcd.fillRect(progressX, PROGRESS_Y, fillWidth, PROGRESS_H, UI_COLOR_GREEN);
+        ui_gfx().fillRect(progressX, PROGRESS_Y, fillWidth, PROGRESS_H, UI_COLOR_GREEN);
     }
 
     // Draw border
-    M5.Lcd.drawRect(progressX, PROGRESS_Y, PROGRESS_W, PROGRESS_H, UI_COLOR_WHITE);
+    ui_gfx().drawRect(progressX, PROGRESS_Y, PROGRESS_W, PROGRESS_H, UI_COLOR_WHITE);
 
     m_lastDrawnProgress = progress;
 }

@@ -1,5 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_knob.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -136,7 +137,7 @@ float ScreenKnobs::originAngle(const knob_config_t* k)
 void ScreenKnobs::paintSpan(int cx, int cy, float from, float to, uint16_t color)
 {
     if (to - from < MIN_ARC_DEG) return;
-    M5.Lcd.fillArc(cx, cy, UI_KNOB_R_IN, UI_KNOB_R_OUT, from, to, color);
+    ui_gfx().fillArc(cx, cy, UI_KNOB_R_IN, UI_KNOB_R_OUT, from, to, color);
 }
 
 // --- Drawing ---------------------------------------------------------------
@@ -160,11 +161,11 @@ void ScreenKnobs::drawValueText(int index, const knob_config_t* k)
 
     // Clear the whole field rather than relying on the text's own background:
     // the string is centred, so a shorter one would leave the old ends behind.
-    M5.Lcd.fillRect(cx - fieldW / 2, cy - th / 2, fieldW, th, UI_COLOR_BLACK);
-    M5.Lcd.setTextSize(UI_KNOB_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(cx - textW / 2, cy - th / 2);
-    M5.Lcd.print(buf);
+    ui_gfx().fillRect(cx - fieldW / 2, cy - th / 2, fieldW, th, UI_COLOR_BLACK);
+    ui_gfx().setTextSize(UI_KNOB_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setCursor(cx - textW / 2, cy - th / 2);
+    ui_gfx().print(buf);
 }
 
 void ScreenKnobs::drawKnob(int index, bool grabbed)
@@ -179,7 +180,7 @@ void ScreenKnobs::drawKnob(int index, bool grabbed)
     const knob_config_t* k = ui_knob_get_config(ui_knob_get_bank(), index);
     bool assigned = (k && k->assigned);
 
-    M5.Lcd.fillRect(x, y, w, h, UI_COLOR_BLACK);
+    ui_gfx().fillRect(x, y, w, h, UI_COLOR_BLACK);
 
     if (!assigned) {
         paintSpan(cx, cy, ANGLE_START, ANGLE_END, UI_COLOR_DARKGRAY);
@@ -207,10 +208,10 @@ void ScreenKnobs::drawKnob(int index, bool grabbed)
     if (maxChars > 0 && (int)strlen(label) > maxChars) label[maxChars] = '\0';
 
     int labelW = (int)strlen(label) * GLYPH_W * UI_KNOB_TEXT_SIZE;
-    M5.Lcd.setTextSize(UI_KNOB_TEXT_SIZE);
-    M5.Lcd.setTextColor(assigned ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(x + (w - labelW) / 2, y + UI_KNOB_LABEL_Y);
-    M5.Lcd.print(label);
+    ui_gfx().setTextSize(UI_KNOB_TEXT_SIZE);
+    ui_gfx().setTextColor(assigned ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_BLACK);
+    ui_gfx().setCursor(x + (w - labelW) / 2, y + UI_KNOB_LABEL_Y);
+    ui_gfx().print(label);
 
     if (grabbed) drawGrabRing(index, true);
 
@@ -226,7 +227,7 @@ void ScreenKnobs::drawGrabRing(int index, bool on)
 {
     int cx, cy;
     ringCenter(index, cx, cy);
-    M5.Lcd.drawCircle(cx, cy, UI_KNOB_R_OUT + 2,
+    ui_gfx().drawCircle(cx, cy, UI_KNOB_R_OUT + 2,
                       on ? (uint16_t)UI_COLOR_YELLOW : (uint16_t)UI_COLOR_BLACK);
 }
 
@@ -288,15 +289,15 @@ void ScreenKnobs::drawBankStrip()
         else if (inUse)    fg = UI_COLOR_WHITE;
         else               fg = UI_COLOR_DARKGRAY;
 
-        M5.Lcd.fillRoundRect(x, y, w, h, 4, bg);
-        M5.Lcd.drawRoundRect(x, y, w, h, 4, UI_COLOR_GRAY);
+        ui_gfx().fillRoundRect(x, y, w, h, 4, bg);
+        ui_gfx().drawRoundRect(x, y, w, h, 4, UI_COLOR_GRAY);
 
         char letter[2] = { (char)('A' + b), '\0' };
-        M5.Lcd.setTextSize(BANK_TEXT_SIZE);
-        M5.Lcd.setTextColor(fg, bg);
-        M5.Lcd.setCursor(x + (w - GLYPH_W * BANK_TEXT_SIZE) / 2,
+        ui_gfx().setTextSize(BANK_TEXT_SIZE);
+        ui_gfx().setTextColor(fg, bg);
+        ui_gfx().setCursor(x + (w - GLYPH_W * BANK_TEXT_SIZE) / 2,
                          y + (h - GLYPH_H * BANK_TEXT_SIZE) / 2);
-        M5.Lcd.print(letter);
+        ui_gfx().print(letter);
     }
 
     m_drawnBanksInUse = banksInUseMask();
@@ -338,8 +339,6 @@ void ScreenKnobs::enter()
 {
     m_isActive = true;
     releaseAllTouches();
-    ui_clear_content_area();
-    drawAll();
 }
 
 void ScreenKnobs::leave()
@@ -363,8 +362,7 @@ void ScreenKnobs::update()
     // A script can switch banks from the PicoRuby task; the repaint has to
     // happen here, where the LCD may be touched.
     if (m_drawnBank != ui_knob_get_bank()) {
-        ui_clear_content_area();
-        drawAll();
+        ui_strip::repaint_content([&]() { drawAll(); });
         return;
     }
 

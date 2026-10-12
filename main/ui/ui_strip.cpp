@@ -21,6 +21,7 @@ void* g_buf = nullptr;
 size_t g_bytes = 0;
 bool g_tried = false;
 LGFX_Sprite* g_sprite = nullptr;
+LovyanGFX* g_target = nullptr;   // The band while compose() runs
 
 void* alloc_internal(int lines)
 {
@@ -90,6 +91,47 @@ LGFX_Sprite* shape(int w, int h)
     g_sprite->setTextPadding(0);
     g_sprite->setCursor(0, 0);
     return g_sprite;
+}
+
+LGFX_Sprite* begin_band(int y, int h)
+{
+    // Point the sprite's row 0 at y rows before the strip, so screen row y is
+    // the strip's first row. Rows above y have no memory behind them; the
+    // clip rectangle keeps every drawing call out of them (LovyanGFX clips
+    // all primitives, text and fills against it).
+    uint8_t* origin = static_cast<uint8_t*>(g_buf) - (size_t)y * UI_SCREEN_WIDTH * 2;
+    g_sprite->setBuffer(origin, UI_SCREEN_WIDTH, y + h, 16);
+    g_sprite->setClipRect(0, y, UI_SCREEN_WIDTH, h);
+
+    // Same text state the code would have found on M5.Lcd.
+    g_sprite->setFont(M5.Lcd.getFont());
+    g_sprite->setTextStyle(M5.Lcd.getTextStyle());
+    g_sprite->setTextWrap(true, false);
+    g_sprite->setCursor(0, 0);
+
+    g_sprite->fillRect(0, y, UI_SCREEN_WIDTH, h, UI_COLOR_BLACK);
+    g_target = g_sprite;
+    return g_sprite;
+}
+
+void end_band(void)
+{
+    // Hand the text state back, as if the band had been drawn on M5.Lcd:
+    // incremental drawing after a full repaint used to inherit whatever the
+    // repaint left set there.
+    M5.Lcd.setFont(g_sprite->getFont());
+    M5.Lcd.setTextStyle(g_sprite->getTextStyle());
+    g_target = nullptr;
+}
+
+LovyanGFX& gfx(void)
+{
+    return g_target ? *g_target : static_cast<LovyanGFX&>(M5.Lcd);
+}
+
+bool composing(void)
+{
+    return g_target != nullptr;
 }
 
 void push(LGFX_Sprite* sprite, int x, int y)

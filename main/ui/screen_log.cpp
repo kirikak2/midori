@@ -75,9 +75,6 @@ void ScreenLog::enter()
 {
     m_isActive = true;
     m_scrollOffset = 0;  // Reset to bottom (newest)
-
-    ui_clear_content_area();
-    draw();
 }
 
 void ScreenLog::leave()
@@ -151,14 +148,14 @@ void ScreenLog::drawLogLines()
 
     if (!painted) {
         // Fallback: direct LCD rendering
-        M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-        M5.Lcd.setTextSize(LOG_TEXT_SIZE);
+        ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+        ui_gfx().setTextSize(LOG_TEXT_SIZE);
 
         int y = UI_CONTENT_Y + 5;
         for (int i = 0; i < VISIBLE_LINES; i++) {
-            M5.Lcd.fillRect(LOG_LEFT_MARGIN, y, UI_SCREEN_WIDTH - LOG_LEFT_MARGIN, LOG_LINE_HEIGHT, UI_COLOR_BLACK);
-            M5.Lcd.setCursor(LOG_LEFT_MARGIN, y);
-            M5.Lcd.print(snapshot[i]);
+            ui_gfx().fillRect(LOG_LEFT_MARGIN, y, UI_SCREEN_WIDTH - LOG_LEFT_MARGIN, LOG_LINE_HEIGHT, UI_COLOR_BLACK);
+            ui_gfx().setCursor(LOG_LEFT_MARGIN, y);
+            ui_gfx().print(snapshot[i]);
             y += LOG_LINE_HEIGHT;
         }
     }

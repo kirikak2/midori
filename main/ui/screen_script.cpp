@@ -1,5 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_script.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -120,7 +121,7 @@ void ScreenScripts::enter()
 
     syncRunningState();
 
-    draw();
+    // UIManager repaints the whole screen right after this.
     m_needsRedraw = false;
 }
 
@@ -155,7 +156,7 @@ void ScreenScripts::update()
     syncRunningState();
 
     if (m_needsRedraw) {
-        draw();
+        ui_strip::repaint_content([&]() { drawScriptList(); });
         m_needsRedraw = false;
     }
 }
@@ -216,11 +217,11 @@ void ScreenScripts::drawScriptList()
 
     // If no scripts, show message
     if (m_scriptCount == 0) {
-        M5.Lcd.setTextSize(ITEM_TEXT_SIZE);
-        M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+        ui_gfx().setTextSize(ITEM_TEXT_SIZE);
+        ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
         int textWidth = strlen("No scripts found on SD card") * 6 * ITEM_TEXT_SIZE;
-        M5.Lcd.setCursor((UI_SCREEN_WIDTH - textWidth) / 2, LIST_START_Y + 100);
-        M5.Lcd.print("No scripts found on SD card");
+        ui_gfx().setCursor((UI_SCREEN_WIDTH - textWidth) / 2, LIST_START_Y + 100);
+        ui_gfx().print("No scripts found on SD card");
     }
 
     // Scroll indicator on the right edge when overflowing
@@ -241,7 +242,7 @@ void ScreenScripts::drawScrollIndicator()
     int trackH = visible * ITEM_HEIGHT;
 
     // Track background
-    M5.Lcd.fillRect(trackX, trackY, trackW, trackH, UI_COLOR_DARKGRAY);
+    ui_gfx().fillRect(trackX, trackY, trackW, trackH, UI_COLOR_DARKGRAY);
 
     // Thumb proportional to visible/total
     int thumbH = (trackH * visible) / m_scriptCount;
@@ -251,7 +252,7 @@ void ScreenScripts::drawScrollIndicator()
     if (maxOff > 0) {
         thumbY += ((trackH - thumbH) * m_scrollOffset) / maxOff;
     }
-    M5.Lcd.fillRect(trackX, thumbY, trackW, thumbH, UI_COLOR_WHITE);
+    ui_gfx().fillRect(trackX, thumbY, trackW, thumbH, UI_COLOR_WHITE);
 }
 
 // [ Refresh ] [ Stop ], centered as a pair in the bottom row
@@ -313,32 +314,32 @@ void ScreenScripts::drawScriptItem(int index, int y)
     }
 
     // Draw background
-    M5.Lcd.fillRect(x, y, w, h, bgColor);
+    ui_gfx().fillRect(x, y, w, h, bgColor);
 
     // Draw running indicator and filename
-    M5.Lcd.setTextSize(ITEM_TEXT_SIZE);
+    ui_gfx().setTextSize(ITEM_TEXT_SIZE);
     int textHeight = 8 * ITEM_TEXT_SIZE;
     int textY = y + (h - textHeight) / 2;
 
     if (isRunning) {
-        M5.Lcd.setTextColor(UI_COLOR_GREEN, bgColor);
-        M5.Lcd.setCursor(x + 4 * ITEM_TEXT_SIZE, textY);
-        M5.Lcd.print(">");
+        ui_gfx().setTextColor(UI_COLOR_GREEN, bgColor);
+        ui_gfx().setCursor(x + 4 * ITEM_TEXT_SIZE, textY);
+        ui_gfx().print(">");
     }
 
     // Draw filename
-    M5.Lcd.setTextColor(isRunning ? UI_COLOR_GREEN : UI_COLOR_WHITE, bgColor);
-    M5.Lcd.setCursor(x + 16 * ITEM_TEXT_SIZE, textY);
-    M5.Lcd.print(filename);
+    ui_gfx().setTextColor(isRunning ? UI_COLOR_GREEN : UI_COLOR_WHITE, bgColor);
+    ui_gfx().setCursor(x + 16 * ITEM_TEXT_SIZE, textY);
+    ui_gfx().print(filename);
 
     // Draw [Running] badge if running
     if (isRunning) {
         int badgeWidth = 55 * ITEM_TEXT_SIZE;
         int badgeX = UI_SCREEN_WIDTH - LIST_MARGIN - badgeWidth;
-        M5.Lcd.fillRoundRect(badgeX, y + 2, badgeWidth, h - 4, 3, UI_COLOR_GREEN);
-        M5.Lcd.setTextColor(UI_COLOR_BLACK, UI_COLOR_GREEN);
-        M5.Lcd.setCursor(badgeX + 4 * ITEM_TEXT_SIZE, textY);
-        M5.Lcd.print("Running");
+        ui_gfx().fillRoundRect(badgeX, y + 2, badgeWidth, h - 4, 3, UI_COLOR_GREEN);
+        ui_gfx().setTextColor(UI_COLOR_BLACK, UI_COLOR_GREEN);
+        ui_gfx().setCursor(badgeX + 4 * ITEM_TEXT_SIZE, textY);
+        ui_gfx().print("Running");
     }
 }
 

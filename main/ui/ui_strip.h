@@ -54,10 +54,45 @@ int rows_for(int w);
 // with (ox, oy) the screen position of the strip's top-left pixel -- draw at
 // screen coordinates minus that. The band is then copied to the panel.
 //
+// Inside compose() the rectangle is drawn straight into the band being
+// composed (it already takes screen coordinates), with (ox, oy) = (0, 0).
+//
 // @return false if there is no strip; nothing was drawn and the caller should
 //         draw straight to M5.Lcd instead.
 template <typename F>
 bool paint(int x, int y, int w, int h, uint16_t bg, F&& draw);
+
+// Composes full-width screen rows [y, y + h) off-screen, band by band, so a
+// full repaint (a screen switch, a redraw request) never shows the panel a
+// half-drawn frame. For each band, draw() is called with gfx() pointing at the
+// band: code that draws through ui_gfx() at plain screen coordinates lands in
+// it unchanged -- the band is a full-height canvas whose buffer is shifted so
+// only its own rows are backed, and clipped to exactly those rows. Each band
+// starts out black and is copied to the panel once draw() returns.
+//
+// draw() runs once per band, so it must paint the same picture every time it
+// is called (no "skip if unchanged" caches on that path).
+//
+// @return false if there is no strip (or compose() is already running);
+//         nothing was drawn and the caller should draw straight to the panel.
+template <typename F>
+bool compose(int y, int h, F&& draw);
+
+// Repaints the content area (between the status bar and the nav bar) the way
+// compose() repaints the screen: cleared and redrawn off-screen, then replaced
+// band by band. For a screen's own full repaint from update() -- a list that
+// scrolled, a bank that changed -- which would otherwise clear the area on the
+// panel and redraw it in view. draw() follows the same rules as compose()'s.
+// Without the strip it clears and draws straight on the panel.
+template <typename F>
+void repaint_content(F&& draw);
+
+// Where UI drawing goes: the band being composed while compose() runs,
+// M5.Lcd otherwise. Only the UI task draws, so this needs no locking.
+LovyanGFX& gfx(void);
+
+// True while compose() is running.
+bool composing(void);
 
 // --- Internals used by paint() -------------------------------------------
 
@@ -69,9 +104,23 @@ LGFX_Sprite* shape(int w, int h);
 // one (ui_fb.h), else pushSprite().
 void push(LGFX_Sprite* sprite, int x, int y);
 
+// Starts a compose() band covering screen rows [y, y + h): the shared sprite
+// as a full-width, (y + h)-tall canvas backed only for those rows, clipped to
+// them and filled black, with M5.Lcd's text state. gfx() returns it until
+// end_band().
+LGFX_Sprite* begin_band(int y, int h);
+void end_band(void);
+
 template <typename F>
 bool paint(int x, int y, int w, int h, uint16_t bg, F&& draw)
 {
+    if (composing()) {
+        LovyanGFX& g = gfx();
+        g.fillRect(x, y, w, h, bg);
+        draw(&g, 0, 0);
+        return true;
+    }
+
     int rows = rows_for(w);
     if (rows <= 0) return false;
 
@@ -85,7 +134,39 @@ bool paint(int x, int y, int w, int h, uint16_t bg, F&& draw)
     return true;
 }
 
+template <typename F>
+bool compose(int y, int h, F&& draw)
+{
+    int rows = rows_for(UI_SCREEN_WIDTH);
+    if (rows <= 0 || composing()) return false;
+
+    for (int top = 0; top < h; top += rows) {
+        int bandH = (h - top < rows) ? (h - top) : rows;
+        begin_band(y + top, bandH);
+        draw();
+        end_band();
+        push(shape(UI_SCREEN_WIDTH, bandH), 0, y + top);
+    }
+    return true;
+}
+
+template <typename F>
+void repaint_content(F&& draw)
+{
+    auto all = [&]() {
+        ui_clear_content_area();
+        draw();
+    };
+    if (!compose(UI_CONTENT_Y, UI_CONTENT_HEIGHT, all)) all();
+}
+
 }  // namespace ui_strip
+
+// What UI code draws on: write ui_gfx().fillRect(...) where it used to write
+// M5.Lcd.fillRect(...), so the same code serves both direct updates and
+// ui_strip::compose(). Settings that belong to the panel itself (brightness)
+// still go to M5.Lcd.
+inline LovyanGFX& ui_gfx(void) { return ui_strip::gfx(); }
 
 #endif // __cplusplus
 

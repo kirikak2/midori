@@ -1,6 +1,7 @@
 #include "ui_common.h"
 #include "ui_manager.h"
 #include "screen_log.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -23,17 +24,17 @@ void ui_draw_status_bar(const char* title)
     portENTER_CRITICAL(&s_ui_mutex);
 
     // Draw status bar background
-    M5.Lcd.fillRect(0, 0, UI_SCREEN_WIDTH, UI_STATUS_BAR_HEIGHT, UI_COLOR_NAVY);
+    ui_gfx().fillRect(0, 0, UI_SCREEN_WIDTH, UI_STATUS_BAR_HEIGHT, UI_COLOR_NAVY);
 
     // Draw title
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_NAVY);
-    M5.Lcd.setTextSize(1);
-    M5.Lcd.setCursor(4, 4);
-    M5.Lcd.print(title);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_NAVY);
+    ui_gfx().setTextSize(1);
+    ui_gfx().setCursor(4, 4);
+    ui_gfx().print(title);
 
     // Draw MIDI indicator
     uint16_t indicator_color = s_midi_connected ? UI_COLOR_GREEN : UI_COLOR_DARKGRAY;
-    M5.Lcd.fillCircle(UI_SCREEN_WIDTH - 14, UI_STATUS_BAR_HEIGHT / 2, 6, indicator_color);
+    ui_gfx().fillCircle(UI_SCREEN_WIDTH - 14, UI_STATUS_BAR_HEIGHT / 2, 6, indicator_color);
 
     portEXIT_CRITICAL(&s_ui_mutex);
 }
@@ -45,29 +46,29 @@ void ui_draw_nav_bar(const char* center_label, bool show_arrows)
     int nav_y = UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT;
 
     // Draw navigation bar background
-    M5.Lcd.fillRect(0, nav_y, UI_SCREEN_WIDTH, UI_NAV_BAR_HEIGHT, UI_COLOR_DARKGRAY);
+    ui_gfx().fillRect(0, nav_y, UI_SCREEN_WIDTH, UI_NAV_BAR_HEIGHT, UI_COLOR_DARKGRAY);
 
     // Draw border at top
-    M5.Lcd.drawLine(0, nav_y, UI_SCREEN_WIDTH, nav_y, UI_COLOR_GRAY);
+    ui_gfx().drawLine(0, nav_y, UI_SCREEN_WIDTH, nav_y, UI_COLOR_GRAY);
 
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
-    M5.Lcd.setTextSize(2);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
+    ui_gfx().setTextSize(2);
 
     if (show_arrows) {
         // Draw left arrow
-        M5.Lcd.setCursor(20, nav_y + 12);
-        M5.Lcd.print("<");
+        ui_gfx().setCursor(20, nav_y + 12);
+        ui_gfx().print("<");
 
         // Draw right arrow
-        M5.Lcd.setCursor(UI_SCREEN_WIDTH - 30, nav_y + 12);
-        M5.Lcd.print(">");
+        ui_gfx().setCursor(UI_SCREEN_WIDTH - 30, nav_y + 12);
+        ui_gfx().print(">");
     }
 
     // Draw center label
     int label_width = strlen(center_label) * 12;  // Approximate width at text size 2
     int label_x = (UI_SCREEN_WIDTH - label_width) / 2;
-    M5.Lcd.setCursor(label_x, nav_y + 12);
-    M5.Lcd.print(center_label);
+    ui_gfx().setCursor(label_x, nav_y + 12);
+    ui_gfx().print(center_label);
 
     portEXIT_CRITICAL(&s_ui_mutex);
 }
@@ -75,36 +76,36 @@ void ui_draw_nav_bar(const char* center_label, bool show_arrows)
 void ui_draw_button(int x, int y, int w, int h, const char* label, uint16_t bg_color, uint16_t text_color, bool pressed)
 {
     portENTER_CRITICAL(&s_ui_mutex);
-    M5.Lcd.startWrite();
+    ui_gfx().startWrite();
 
     // Adjust color if pressed
     uint16_t draw_color = pressed ? ui_lighten_color(bg_color) : bg_color;
 
     // Draw button background
-    M5.Lcd.fillRoundRect(x, y, w, h, 4, draw_color);
+    ui_gfx().fillRoundRect(x, y, w, h, 4, draw_color);
 
     // Draw border
-    M5.Lcd.drawRoundRect(x, y, w, h, 4, UI_COLOR_WHITE);
+    ui_gfx().drawRoundRect(x, y, w, h, 4, UI_COLOR_WHITE);
 
     // Draw label centered
-    M5.Lcd.setTextColor(text_color, draw_color);
-    M5.Lcd.setTextSize(1);
+    ui_gfx().setTextColor(text_color, draw_color);
+    ui_gfx().setTextSize(1);
 
     int text_width = strlen(label) * 6;  // Approximate width at text size 1
     int text_x = x + (w - text_width) / 2;
     int text_y = y + (h - 8) / 2;
 
-    M5.Lcd.setCursor(text_x, text_y);
-    M5.Lcd.print(label);
+    ui_gfx().setCursor(text_x, text_y);
+    ui_gfx().print(label);
 
-    M5.Lcd.endWrite();
+    ui_gfx().endWrite();
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
 void ui_clear_content_area(void)
 {
     portENTER_CRITICAL(&s_ui_mutex);
-    M5.Lcd.fillRect(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT, UI_COLOR_BLACK);
+    ui_gfx().fillRect(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT, UI_COLOR_BLACK);
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
@@ -112,7 +113,9 @@ void ui_set_midi_indicator(bool connected)
 {
     if (s_midi_connected != connected) {
         s_midi_connected = connected;
-        // Redraw just the indicator
+        // Redraw just the indicator. Straight on the panel, not ui_gfx(): this
+        // is a C API any task may call, and it must never land in a band that
+        // the UI task is composing.
         portENTER_CRITICAL(&s_ui_mutex);
         uint16_t color = connected ? UI_COLOR_GREEN : UI_COLOR_DARKGRAY;
         M5.Lcd.fillCircle(UI_SCREEN_WIDTH - 14, UI_STATUS_BAR_HEIGHT / 2, 6, color);

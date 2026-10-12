@@ -1,5 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_pad.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -51,9 +52,8 @@ void ScreenPads::enter()
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
         m_touchToPad[i] = -1;
     }
-    ui_clear_content_area();
-    draw();
-    // Everything was just painted, so any pending per-pad requests are stale.
+    // UIManager repaints the whole screen right after this, so any pending
+    // per-pad requests are stale.
     ui_pad_take_dirty();
 }
 
@@ -75,7 +75,7 @@ void ScreenPads::update()
     if (!m_isActive) return;
 
     if (m_needsRedraw) {
-        draw();
+        ui_strip::repaint_content([&]() { draw(); });
         m_needsRedraw = false;
         ui_pad_take_dirty();
         return;
@@ -147,12 +147,12 @@ void ScreenPads::drawPad(int index)
     }
 
     // Draw pad background
-    M5.Lcd.fillRoundRect(x, y, w, h, 6, bgColor);
-    M5.Lcd.drawRoundRect(x, y, w, h, 6, borderColor);
+    ui_gfx().fillRoundRect(x, y, w, h, 6, bgColor);
+    ui_gfx().drawRoundRect(x, y, w, h, 6, borderColor);
 
     // Draw label
-    M5.Lcd.setTextSize(PAD_TEXT_SIZE);
-    M5.Lcd.setTextColor(textColor, bgColor);
+    ui_gfx().setTextSize(PAD_TEXT_SIZE);
+    ui_gfx().setTextColor(textColor, bgColor);
 
     const char* label = pad->assigned ? pad->label : "";
     if (!pad->assigned) {
@@ -163,13 +163,13 @@ void ScreenPads::drawPad(int index)
 
         int textW = strlen(label) * 6 * PAD_TEXT_SIZE;
         int textH = 8 * PAD_TEXT_SIZE;
-        M5.Lcd.setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
-        M5.Lcd.print(label);
+        ui_gfx().setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
+        ui_gfx().print(label);
     } else {
         int textW = strlen(label) * 6 * PAD_TEXT_SIZE;
         int textH = 8 * PAD_TEXT_SIZE;
-        M5.Lcd.setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
-        M5.Lcd.print(label);
+        ui_gfx().setCursor(x + (w - textW) / 2, y + (h - textH) / 2);
+        ui_gfx().print(label);
 
         // Show type indicator in corner for assigned pads
         const char* typeStr = nullptr;
@@ -179,9 +179,9 @@ void ScreenPads::drawPad(int index)
             case PAD_TYPE_TOGGLE:    typeStr = pad->state ? "ON" : "OFF"; break;
         }
         if (typeStr) {
-            M5.Lcd.setTextColor(UI_COLOR_GRAY, bgColor);
-            M5.Lcd.setCursor(x + 4 * PAD_TEXT_SIZE, y + 4 * PAD_TEXT_SIZE);
-            M5.Lcd.print(typeStr);
+            ui_gfx().setTextColor(UI_COLOR_GRAY, bgColor);
+            ui_gfx().setCursor(x + 4 * PAD_TEXT_SIZE, y + 4 * PAD_TEXT_SIZE);
+            ui_gfx().print(typeStr);
         }
     }
 }

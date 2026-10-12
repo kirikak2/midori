@@ -1,5 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_midi_info.h"
+#include "ui_strip.h"
 #include "usb_midi_host.h"
 #include <M5Unified.h>
 #include <cstring>
@@ -44,8 +45,6 @@ ScreenMidiInfo::ScreenMidiInfo()
 void ScreenMidiInfo::enter()
 {
     m_isActive = true;
-    ui_clear_content_area();
-    draw();
 }
 
 void ScreenMidiInfo::leave()
@@ -61,7 +60,7 @@ void ScreenMidiInfo::update()
     // For now, redraw periodically could be added
 
     if (m_needsRedraw) {
-        draw();
+        ui_strip::repaint_content([&]() { draw(); });
         m_needsRedraw = false;
     }
 }
@@ -85,20 +84,20 @@ void ScreenMidiInfo::drawDeviceCard(int y, const char* icon, const char* type,
     int x = CARD_MARGIN;
 
     // Draw card background
-    M5.Lcd.fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
-    M5.Lcd.drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
+    ui_gfx().fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
+    ui_gfx().drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
 
     // Draw icon and type
-    M5.Lcd.setTextSize(CARD_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
-    M5.Lcd.setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
-    M5.Lcd.print(icon);
-    M5.Lcd.print(" ");
-    M5.Lcd.print(type);
+    ui_gfx().setTextSize(CARD_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
+    ui_gfx().print(icon);
+    ui_gfx().print(" ");
+    ui_gfx().print(type);
 
     // Draw device name
-    M5.Lcd.setTextColor(UI_COLOR_CYAN, UI_COLOR_DARKGRAY);
-    M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_CYAN, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
 
     // Truncate name if too long
     char truncName[32];
@@ -110,23 +109,23 @@ void ScreenMidiInfo::drawDeviceCard(int y, const char* icon, const char* type,
         truncName[29] = '.';
         truncName[30] = '\0';
     }
-    M5.Lcd.print(truncName);
+    ui_gfx().print(truncName);
 
     // Draw IN/OUT status
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
-    M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-    M5.Lcd.print("IN ");
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+    ui_gfx().print("IN ");
 
     // IN indicator
     uint16_t inColor = inConnected ? UI_COLOR_GREEN : UI_COLOR_GRAY;
-    M5.Lcd.fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, inColor);
+    ui_gfx().fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, inColor);
 
-    M5.Lcd.setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-    M5.Lcd.print("OUT ");
+    ui_gfx().setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+    ui_gfx().print("OUT ");
 
     // OUT indicator
     uint16_t outColor = outConnected ? UI_COLOR_GREEN : UI_COLOR_GRAY;
-    M5.Lcd.fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, outColor);
+    ui_gfx().fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, outColor);
 }
 
 void ScreenMidiInfo::drawUsbMidiCard()
@@ -146,23 +145,23 @@ void ScreenMidiInfo::drawUsbMidiCard()
     } else {
         // Draw disconnected card
         int x = CARD_MARGIN;
-        M5.Lcd.fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
-        M5.Lcd.drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
+        ui_gfx().fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
+        ui_gfx().drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
 
-        M5.Lcd.setTextSize(CARD_TEXT_SIZE);
-        M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
-        M5.Lcd.setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
-        M5.Lcd.print("USB USB-MIDI");
+        ui_gfx().setTextSize(CARD_TEXT_SIZE);
+        ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+        ui_gfx().setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
+        ui_gfx().print("USB USB-MIDI");
 
-        M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
-        M5.Lcd.print("Not connected");
+        ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
+        ui_gfx().print("Not connected");
 
-        M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-        M5.Lcd.print("IN ");
-        M5.Lcd.fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
-        M5.Lcd.setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-        M5.Lcd.print("OUT ");
-        M5.Lcd.fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
+        ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+        ui_gfx().print("IN ");
+        ui_gfx().fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
+        ui_gfx().setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+        ui_gfx().print("OUT ");
+        ui_gfx().fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
     }
 }
 
@@ -172,23 +171,23 @@ void ScreenMidiInfo::drawDinMidiCard()
     int x = CARD_MARGIN;
 
     // DIN-MIDI (SAM2695) - placeholder for future
-    M5.Lcd.fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
-    M5.Lcd.drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
+    ui_gfx().fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
+    ui_gfx().drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
 
-    M5.Lcd.setTextSize(CARD_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
-    M5.Lcd.setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
-    M5.Lcd.print("DIN DIN-MIDI");
+    ui_gfx().setTextSize(CARD_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
+    ui_gfx().print("DIN DIN-MIDI");
 
-    M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
-    M5.Lcd.print("(Not implemented)");
+    ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
+    ui_gfx().print("(Not implemented)");
 
-    M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-    M5.Lcd.print("IN ");
-    M5.Lcd.fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
-    M5.Lcd.setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-    M5.Lcd.print("OUT ");
-    M5.Lcd.fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
+    ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+    ui_gfx().print("IN ");
+    ui_gfx().fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
+    ui_gfx().setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+    ui_gfx().print("OUT ");
+    ui_gfx().fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
 }
 
 void ScreenMidiInfo::drawBleMidiCard()
@@ -197,23 +196,23 @@ void ScreenMidiInfo::drawBleMidiCard()
     int x = CARD_MARGIN;
 
     // BLE-MIDI - placeholder for future
-    M5.Lcd.fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
-    M5.Lcd.drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
+    ui_gfx().fillRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_DARKGRAY);
+    ui_gfx().drawRoundRect(x, y, CARD_WIDTH, CARD_HEIGHT, 4, UI_COLOR_GRAY);
 
-    M5.Lcd.setTextSize(CARD_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
-    M5.Lcd.setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
-    M5.Lcd.print("BLE BLE-MIDI");
+    ui_gfx().setTextSize(CARD_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(x + 6 * CARD_TEXT_SIZE, y + 6 * CARD_TEXT_SIZE);
+    ui_gfx().print("BLE BLE-MIDI");
 
-    M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
-    M5.Lcd.print("(Not implemented)");
+    ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 22 * CARD_TEXT_SIZE);
+    ui_gfx().print("(Not implemented)");
 
-    M5.Lcd.setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-    M5.Lcd.print("IN ");
-    M5.Lcd.fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
-    M5.Lcd.setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
-    M5.Lcd.print("OUT ");
-    M5.Lcd.fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
+    ui_gfx().setCursor(x + 12 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+    ui_gfx().print("IN ");
+    ui_gfx().fillCircle(x + 38 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
+    ui_gfx().setCursor(x + 60 * CARD_TEXT_SIZE, y + 38 * CARD_TEXT_SIZE);
+    ui_gfx().print("OUT ");
+    ui_gfx().fillCircle(x + 92 * CARD_TEXT_SIZE, y + 41 * CARD_TEXT_SIZE, INDICATOR_RADIUS, UI_COLOR_GRAY);
 }
 
 void ScreenMidiInfo::onTouch(int touchId, int x, int y, bool pressed)

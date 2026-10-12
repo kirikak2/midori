@@ -796,9 +796,6 @@ void ScreenTombola::enter()
 {
     m_isActive = true;
     m_hasDrawnFrame = false;
-
-    ui_clear_content_area();
-    draw();
 }
 
 void ScreenTombola::leave()
@@ -1070,14 +1067,14 @@ void ScreenTombola::paintFrame(bool fullRepaint)
     // Fallback: no strip, so erase the previous frame's marks on the panel
     // and draw over them. It flickers.
     bool clear = fullRepaint || !m_hasDrawnFrame;
-    M5.Lcd.startWrite();
+    ui_gfx().startWrite();
     if (clear) {
-        M5.Lcd.fillRect(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK);
+        ui_gfx().fillRect(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK);
     } else {
-        eraseFrame(&M5.Lcd, 0, 0);
+        eraseFrame(&ui_gfx(), 0, 0);
     }
-    renderFrame(&M5.Lcd, 0, 0, frame);
-    M5.Lcd.endWrite();
+    renderFrame(&ui_gfx(), 0, 0, frame);
+    ui_gfx().endWrite();
 }
 
 // True when anything the frame shows differs from what was last drawn.

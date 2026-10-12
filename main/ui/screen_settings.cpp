@@ -1,5 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_settings.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -53,8 +54,6 @@ ScreenSettings::ScreenSettings()
 void ScreenSettings::enter()
 {
     m_isActive = true;
-    ui_clear_content_area();
-    draw();
 }
 
 void ScreenSettings::leave()
@@ -67,7 +66,7 @@ void ScreenSettings::update()
     if (!m_isActive) return;
 
     if (m_needsRedraw) {
-        draw();
+        ui_strip::repaint_content([&]() { draw(); });
         m_needsRedraw = false;
     }
 }
@@ -87,30 +86,30 @@ void ScreenSettings::drawBleMidiSection()
     int h = BLE_SECTION_HEIGHT;
 
     // Draw section frame
-    M5.Lcd.drawRoundRect(x, y, w, h, 4, UI_COLOR_GRAY);
+    ui_gfx().drawRoundRect(x, y, w, h, 4, UI_COLOR_GRAY);
 
     // Draw section title
-    M5.Lcd.setTextSize(SECTION_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(x + 6 * SECTION_TEXT_SIZE, y + 6 * SECTION_TEXT_SIZE);
-    M5.Lcd.print("BLE-MIDI");
+    ui_gfx().setTextSize(SECTION_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setCursor(x + 6 * SECTION_TEXT_SIZE, y + 6 * SECTION_TEXT_SIZE);
+    ui_gfx().print("BLE-MIDI");
 
     // Draw status
-    M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(x + 12 * SECTION_TEXT_SIZE, y + 24 * SECTION_TEXT_SIZE);
-    M5.Lcd.print("Status: Not implemented");
+    ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+    ui_gfx().setCursor(x + 12 * SECTION_TEXT_SIZE, y + 24 * SECTION_TEXT_SIZE);
+    ui_gfx().print("Status: Not implemented");
 
     // Draw placeholder device list area
     int listY = y + 40 * SECTION_TEXT_SIZE;
     int listH = h - 50 * SECTION_TEXT_SIZE;
-    M5.Lcd.fillRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_DARKGRAY);
-    M5.Lcd.drawRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_GRAY);
+    ui_gfx().fillRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_DARKGRAY);
+    ui_gfx().drawRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_GRAY);
 
     // Placeholder message
-    M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+    ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
     int msgWidth = strlen("(BLE scanning not available)") * 6 * SECTION_TEXT_SIZE;
-    M5.Lcd.setCursor(x + (w - msgWidth) / 2, listY + listH / 2 - 4 * SECTION_TEXT_SIZE);
-    M5.Lcd.print("(BLE scanning not available)");
+    ui_gfx().setCursor(x + (w - msgWidth) / 2, listY + listH / 2 - 4 * SECTION_TEXT_SIZE);
+    ui_gfx().print("(BLE scanning not available)");
 }
 
 void ScreenSettings::drawBacklightSlider()
@@ -118,37 +117,37 @@ void ScreenSettings::drawBacklightSlider()
     int y = BACKLIGHT_Y;
 
     // Draw label
-    M5.Lcd.setTextSize(SECTION_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setTextSize(SECTION_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
     int labelY = y + (BACKLIGHT_SLIDER_H - 8 * SECTION_TEXT_SIZE) / 2;
-    M5.Lcd.setCursor(BACKLIGHT_LABEL_X, labelY);
-    M5.Lcd.print("Backlight:");
+    ui_gfx().setCursor(BACKLIGHT_LABEL_X, labelY);
+    ui_gfx().print("Backlight:");
 
     // Draw slider background
-    M5.Lcd.fillRect(BACKLIGHT_SLIDER_X, y, BACKLIGHT_SLIDER_W, BACKLIGHT_SLIDER_H, UI_COLOR_DARKGRAY);
-    M5.Lcd.drawRect(BACKLIGHT_SLIDER_X, y, BACKLIGHT_SLIDER_W, BACKLIGHT_SLIDER_H, UI_COLOR_GRAY);
+    ui_gfx().fillRect(BACKLIGHT_SLIDER_X, y, BACKLIGHT_SLIDER_W, BACKLIGHT_SLIDER_H, UI_COLOR_DARKGRAY);
+    ui_gfx().drawRect(BACKLIGHT_SLIDER_X, y, BACKLIGHT_SLIDER_W, BACKLIGHT_SLIDER_H, UI_COLOR_GRAY);
 
     // Draw slider fill
     int fillW = (m_backlight * BACKLIGHT_SLIDER_W) / 100;
     if (fillW > 0) {
-        M5.Lcd.fillRect(BACKLIGHT_SLIDER_X, y, fillW, BACKLIGHT_SLIDER_H, UI_COLOR_GREEN);
+        ui_gfx().fillRect(BACKLIGHT_SLIDER_X, y, fillW, BACKLIGHT_SLIDER_H, UI_COLOR_GREEN);
     }
 
     // Draw percentage
     char pctStr[8];
     snprintf(pctStr, sizeof(pctStr), "%d%%", m_backlight);
-    M5.Lcd.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W + 8 * SECTION_TEXT_SIZE, labelY);
-    M5.Lcd.print(pctStr);
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setCursor(BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W + 8 * SECTION_TEXT_SIZE, labelY);
+    ui_gfx().print(pctStr);
 }
 
 void ScreenSettings::drawVersionInfo()
 {
-    M5.Lcd.setTextSize(SECTION_TEXT_SIZE);
-    M5.Lcd.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-    M5.Lcd.setCursor(BACKLIGHT_LABEL_X, VERSION_Y);
-    M5.Lcd.print("Version: ");
-    M5.Lcd.print(FIRMWARE_VERSION);
+    ui_gfx().setTextSize(SECTION_TEXT_SIZE);
+    ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+    ui_gfx().setCursor(BACKLIGHT_LABEL_X, VERSION_Y);
+    ui_gfx().print("Version: ");
+    ui_gfx().print(FIRMWARE_VERSION);
 }
 
 bool ScreenSettings::hitTestBacklight(int x, int y)
@@ -176,9 +175,9 @@ void ScreenSettings::handleBacklightTouch(int x)
         M5.Lcd.setBrightness(brightness);
 
         // Redraw slider (requires manual transaction for partial redraw)
-        M5.Lcd.startWrite();
+        ui_gfx().startWrite();
         drawBacklightSlider();
-        M5.Lcd.endWrite();
+        ui_gfx().endWrite();
     }
 }
 
@@ -216,9 +215,9 @@ void ScreenSettings::setBacklight(uint8_t level)
 
     if (m_isActive) {
         // Partial redraw needs its own transaction
-        M5.Lcd.startWrite();
+        ui_gfx().startWrite();
         drawBacklightSlider();
-        M5.Lcd.endWrite();
+        ui_gfx().endWrite();
     }
 }
 
