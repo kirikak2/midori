@@ -27,7 +27,7 @@ namespace crowpanel {
 esp_err_t display_init(void);
 
 // The installed panel, or nullptr before display_init() succeeds. Used by
-// ui_ppa to find the framebuffer the MIPI-DSI controller scans out.
+// ui_fb to find the framebuffer the MIPI-DSI controller scans out.
 lgfx::Panel_DSI* dsi_panel(void);
 
 // Feeds M5.Touch from the panel's touch controller. Call once per UI tick;

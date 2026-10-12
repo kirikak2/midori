@@ -1,13 +1,11 @@
 #include "sdkconfig.h"
 #include "screen_xypad.h"
-#include "ui_ppa.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
 #include "esp_log.h"
 #include "esp_timer.h"
-
-static const char* TAG = "SCREEN_XYPAD";
 
 // Global instance
 static ScreenXYPad s_screenXYPad;
@@ -59,7 +57,6 @@ static uint16_t fadeColor(uint16_t color, float t)
 
 ScreenXYPad::ScreenXYPad()
     : m_isActive(false)
-    , m_sprite(nullptr)
     , m_lastDrawUs(0)
     , m_hadContent(false)
 {
@@ -94,36 +91,6 @@ void ScreenXYPad::noteName(uint8_t note, char* buf, int bufSize)
                                      "F#", "G", "G#", "A", "A#", "B" };
     int octave = (int)(note / 12) - 1;
     snprintf(buf, bufSize, "%s%d", NAMES[note % 12], octave);
-}
-
-// --- Sprite lifecycle --------------------------------------------------
-
-void ScreenXYPad::allocateSprite()
-{
-    if (m_sprite) return;
-
-    int cx, cy, cw, ch;
-    contentRect(cx, cy, cw, ch);
-
-    m_sprite = new LGFX_Sprite(&M5.Lcd);
-    m_sprite->setColorDepth(16);
-    m_sprite->setPsram(false);
-    void* result = m_sprite->createSprite(cw, ch);
-    if (!result) {
-        ESP_LOGW(TAG, "Content-area sprite alloc in internal RAM failed (%dx%d), trying PSRAM",
-                 cw, ch);
-        m_sprite->setPsram(true);
-        result = m_sprite->createSprite(cw, ch);
-    }
-    if (!result) {
-        // Not fatal: paintFrame() falls back to plain, non-animated direct
-        // draw when m_sprite is null.
-        ESP_LOGE(TAG, "Failed to create XYPad sprite, falling back to direct draw");
-        delete m_sprite;
-        m_sprite = nullptr;
-    } else {
-        ESP_LOGI(TAG, "XYPad sprite created: %dx%d", cw, ch);
-    }
 }
 
 // --- Animation state -----------------------------------------------------
@@ -249,7 +216,7 @@ void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int contentW, int64_
         }
 
         // Flip the label to the dot's left when it would otherwise run past
-        // the right edge, instead of letting it print off the sprite/panel
+        // the right edge, instead of letting it print off the strip/panel
         // and (depending on the GFX driver's wrap behaviour) reappear at the
         // left edge -- what looked like a stuck afterimage there before.
         int textW = (int)strlen(label) * GLYPH_W * LABEL_TEXT_SIZE;
@@ -272,20 +239,15 @@ void ScreenXYPad::paintFrame(int64_t now)
     int cx, cy, cw, ch;
     contentRect(cx, cy, cw, ch);
 
-    if (m_sprite) {
-        m_sprite->fillScreen(UI_COLOR_BLACK);
-        renderFrame(m_sprite, cx, cy, cw, now);
-        // Tab5 can hand the blit to the P4's pixel accelerator; everywhere
-        // else (and if it is unavailable) this falls back to pushSprite's
-        // per-line memcpy. UIManager::update() calls M5.Lcd.display() once
-        // after every screen's work for this tick, so this does not need to.
-        if (!ui_ppa::blit(m_sprite, cx, cy)) {
-            m_sprite->pushSprite(cx, cy);
-        }
+    // Composed off-screen through the shared strip, band by band. `now` is
+    // fixed for the whole frame, so every band animates to the same instant.
+    if (ui_strip::paint(cx, cy, cw, ch, UI_COLOR_BLACK, [&](LovyanGFX* g, int ox, int oy) {
+            renderFrame(g, ox, oy, cw, now);
+        })) {
         return;
     }
 
-    // Fallback: sprite unavailable, so no ripple/trail -- just the dot and
+    // Fallback: strip unavailable, so no ripple/trail -- just the dot and
     // label, incrementally erased and redrawn like the very first version of
     // this screen.
     for (int s = 0; s < UI_XYPAD_MAX_TOUCHES; s++) {
@@ -366,7 +328,6 @@ void ScreenXYPad::fallbackRefresh(int index, int x, int y)
 void ScreenXYPad::enter()
 {
     m_isActive = true;
-    allocateSprite();
     ui_clear_content_area();
     memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
     // Force one paint even if nothing is animating, e.g. a slot latched via
@@ -378,10 +339,9 @@ void ScreenXYPad::enter()
 void ScreenXYPad::leave()
 {
     m_isActive = false;
-    // Sprite kept -- re-entering this screen is common and the allocation is
-    // the expensive part (same reasoning as Tombola). Trails/ripples simply
-    // stop being painted; touches cannot arrive here while another screen is
-    // active, so there is nothing left to animate anyway.
+    // Trails/ripples simply stop being painted; touches cannot arrive here
+    // while another screen is active, so there is nothing left to animate
+    // anyway.
 }
 
 void ScreenXYPad::update()

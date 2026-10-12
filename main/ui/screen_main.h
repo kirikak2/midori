@@ -10,7 +10,6 @@
 class ScreenMain : public Screen {
 public:
     ScreenMain();
-    ~ScreenMain() override;
 
     void enter() override;
     void leave() override;
@@ -45,11 +44,6 @@ private:
     Button m_buttons[BTN_COUNT];
     bool m_isActive;
     bool m_needsRedraw;
-
-    // Sprite covering the area above the Sync button (BPM adjust buttons,
-    // BPM display, source-select buttons, external BPM text). Drawn off-screen
-    // and pushed in a single pushSprite to avoid tearing on the Tab5 DSI panel.
-    LGFX_Sprite* m_topSprite;
 
     // TAP tempo state
     uint32_t m_tapTimes[UI_TAP_TEMPO_SAMPLES];

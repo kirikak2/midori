@@ -7,6 +7,8 @@
 
 #include <M5Unified.h>
 
+struct TombolaFrame;
+
 // Physics-driven sequencer: balls bounce inside a rotating polygon and every
 // wall collision fires a note. The model (state + stepping + sounding) lives
 // in screen_tombola.cpp behind the ui_tombola_* C API declared in ui_common.h,
@@ -30,13 +32,12 @@ public:
 private:
     bool m_isActive;
 
-    // Off-screen buffer covering the whole play area. Every frame is composed
-    // here and pushed in one pushSprite, so the polygon and the balls never
-    // appear half-erased (drawing straight to the panel flickers badly at
-    // 30-60fps because each line and circle is erased before it is redrawn).
-    LGFX_Sprite* m_sprite;
-
-    // Fallback state, used only when the sprite could not be allocated: the
+    // Frames are composed off-screen through the shared strip (ui_strip.h),
+    // so the polygon and the balls never appear half-erased (drawing straight
+    // to the panel flickers badly at 30-60fps because each line and circle is
+    // erased before it is redrawn).
+    //
+    // Fallback state, used only when the strip could not be allocated: the
     // previous frame's pixels, so it can be erased before the next is drawn.
     struct DrawnBall {
         bool active;
@@ -83,9 +84,11 @@ private:
                       int& px, int& py);
     void drawPolygon(LovyanGFX* g, int cx, int cy, float radius, float angle,
                      int sides, uint16_t color);
+    // Copies what the frame shows out of the model, under its lock.
+    void snapshotFrame(TombolaFrame& f);
     // Composes one frame into g. ox/oy is g's origin in screen coordinates
-    // (the sprite's top-left, or 0,0 when drawing straight to the panel).
-    void renderFrame(LovyanGFX* g, int ox, int oy);
+    // (the strip band's top-left, or 0,0 when drawing straight to the panel).
+    void renderFrame(LovyanGFX* g, int ox, int oy, const TombolaFrame& f);
     void eraseFrame(LovyanGFX* g, int ox, int oy);
     void paintFrame(bool fullRepaint);
     bool frameChanged();

@@ -1,6 +1,6 @@
 #include "sdkconfig.h"
 #include "screen_tombola.h"
-#include "ui_ppa.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include <cmath>
 #include <cstring>
@@ -15,8 +15,6 @@
 extern "C" {
 #include "midi.h"
 }
-
-static const char* TAG = "SCREEN_TOMBOLA";
 
 // Global instance
 static ScreenTombola s_screenTombola;
@@ -74,10 +72,9 @@ static constexpr int64_t DRAW_INTERVAL_US = 50000;  // ~20fps
 static constexpr int HUD_TEXT_SIZE = 1;
 #endif
 
-// The play area: the largest square that fits the content area, centred. Both
-// the sprite and the polygon are sized from this, so the buffer never has to
-// be reallocated when the radius parameter changes.
-// Tab5: 620x620 (~768KB @16bpp) / CoreS3: 180x180 (~65KB).
+// The play area: the largest square that fits the content area, centred. The
+// repainted rectangle and the polygon are sized from this.
+// Tab5: 620x620 / CoreS3: 180x180.
 static constexpr int BOX_SIZE =
     (UI_SCREEN_WIDTH < UI_CONTENT_HEIGHT) ? UI_SCREEN_WIDTH : UI_CONTENT_HEIGHT;
 static constexpr int BOX_X = (UI_SCREEN_WIDTH - BOX_SIZE) / 2;
@@ -765,7 +762,6 @@ extern "C" int ui_tombola_ball_count(void)
 
 ScreenTombola::ScreenTombola()
     : m_isActive(false)
-    , m_sprite(nullptr)
     , m_drawnSides(0)
     , m_drawnAngle(0.0f)
     , m_drawnRadius(0.0f)
@@ -801,30 +797,6 @@ void ScreenTombola::enter()
     m_isActive = true;
     m_hasDrawnFrame = false;
 
-    // Lazy-create the play-area sprite. Prefer internal RAM for speed; fall
-    // back to PSRAM (Tab5's 620x620 buffer is ~768KB, far beyond internal RAM).
-    if (!m_sprite) {
-        m_sprite = new LGFX_Sprite(&M5.Lcd);
-        m_sprite->setColorDepth(16);
-        m_sprite->setPsram(false);
-        void* result = m_sprite->createSprite(BOX_SIZE, BOX_SIZE);
-        if (!result) {
-            ESP_LOGW(TAG, "Play-area sprite alloc in internal RAM failed (%dx%d), trying PSRAM",
-                     BOX_SIZE, BOX_SIZE);
-            m_sprite->setPsram(true);
-            result = m_sprite->createSprite(BOX_SIZE, BOX_SIZE);
-        }
-        if (!result) {
-            // Not fatal: renderFrame() can draw straight to the panel, and
-            // update() then erases the previous frame first. It flickers.
-            ESP_LOGE(TAG, "Failed to create play-area sprite, falling back to direct draw");
-            delete m_sprite;
-            m_sprite = nullptr;
-        } else {
-            ESP_LOGI(TAG, "Play-area sprite created: %dx%d", BOX_SIZE, BOX_SIZE);
-        }
-    }
-
     ui_clear_content_area();
     draw();
 }
@@ -839,8 +811,7 @@ void ScreenTombola::leave()
     }
     // The sequencer keeps running on purpose: ui_tombola_tick() is driven from
     // ui_update(), so a patch does not fall silent while the user looks at the
-    // Log or MIDI Info screen. The sprite is kept too -- re-entering this
-    // screen is common and the allocation is the expensive part.
+    // Log or MIDI Info screen.
 }
 
 void ScreenTombola::onNavCenter()
@@ -972,34 +943,50 @@ void ScreenTombola::drawPolygon(LovyanGFX* g, int cx, int cy, float radius, floa
     }
 }
 
-void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy)
-{
+// Everything one frame shows, copied out of the model once per frame. The
+// strip renders a frame band by band, and every band must see the same
+// positions or a ball crossing a band edge would come out sheared.
+struct TombolaFrame {
+    Ball balls[UI_TOMBOLA_MAX_BALLS];
     int cx, cy;
     float radius;
-    geometry(cx, cy, radius);
-    cx -= ox;
-    cy -= oy;
-
-    // Snapshot under the lock, then draw: the pixel pushing must not hold up
-    // the PicoRuby task's setters.
-    Ball balls[UI_TOMBOLA_MAX_BALLS];
-    int sides, ballCount = 0;
+    int sides;
     float angle, ballSize, rotationRpm, gravity, bounce;
     int flashSide;
+    bool running;
+};
 
+void ScreenTombola::snapshotFrame(TombolaFrame& f)
+{
+    // Snapshot under the lock, then draw: the pixel pushing must not hold up
+    // the PicoRuby task's setters.
     modelLock();
-    memcpy(balls, g_model.balls, sizeof(balls));
-    sides = clampInt(g_model.sides, UI_TOMBOLA_MIN_SIDES, UI_TOMBOLA_MAX_SIDES);
-    angle = g_model.angle;
-    ballSize = g_model.ballSize;
-    rotationRpm = g_model.rotationRpm;
-    gravity = g_model.gravity;
-    bounce = g_model.bounce;
-    flashSide = (esp_timer_get_time() < g_model.flashUntilUs) ? g_model.flashSide : -1;
+    geometry(f.cx, f.cy, f.radius);
+    memcpy(f.balls, g_model.balls, sizeof(f.balls));
+    f.sides = clampInt(g_model.sides, UI_TOMBOLA_MIN_SIDES, UI_TOMBOLA_MAX_SIDES);
+    f.angle = g_model.angle;
+    f.ballSize = g_model.ballSize;
+    f.rotationRpm = g_model.rotationRpm;
+    f.gravity = g_model.gravity;
+    f.bounce = g_model.bounce;
+    f.flashSide = (esp_timer_get_time() < g_model.flashUntilUs) ? g_model.flashSide : -1;
     modelUnlock();
+    f.running = ui_tombola_running();
+}
+
+void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy, const TombolaFrame& f)
+{
+    int cx = f.cx - ox;
+    int cy = f.cy - oy;
+    float radius = f.radius;
+    const Ball* balls = f.balls;
+    int sides = f.sides;
+    float angle = f.angle;
+    int flashSide = f.flashSide;
+    int ballCount = 0;
 
     drawPolygon(g, cx, cy, radius, angle, sides,
-                ui_tombola_running() ? UI_COLOR_CYAN : UI_COLOR_DARKGRAY);
+                f.running ? UI_COLOR_CYAN : UI_COLOR_DARKGRAY);
 
     // Highlight the side that was just hit
     if (flashSide >= 0 && flashSide < sides) {
@@ -1009,7 +996,7 @@ void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy)
         g->drawLine(x0, y0, x1, y1, UI_COLOR_WHITE);
     }
 
-    int ballR = (int)(ballSize * radius);
+    int ballR = (int)(f.ballSize * radius);
     if (ballR < 2) ballR = 2;
 
     for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
@@ -1033,7 +1020,7 @@ void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy)
     // play area so it is part of the same buffer and cannot flicker on its own.
     char hud[48];
     snprintf(hud, sizeof(hud), "N%d %.0frpm G%.2f B%.2f x%d",
-             sides, (double)rotationRpm, (double)gravity, (double)bounce, ballCount);
+             sides, (double)f.rotationRpm, (double)f.gravity, (double)f.bounce, ballCount);
 
     int hudX = BOX_X + 4 - ox;
     int hudY = BOX_Y + 4 - oy;
@@ -1049,9 +1036,8 @@ void ScreenTombola::renderFrame(LovyanGFX* g, int ox, int oy)
     m_hasDrawnFrame = true;
 }
 
-// Paints the previous frame's marks black. Used on both paths -- inside the
-// sprite it replaces a full-buffer fillScreen, which on Tab5 is 768KB of
-// writes that only a few hundred pixels actually needed.
+// Paints the previous frame's marks black. Only the direct-draw fallback needs
+// it; through the strip every band starts out black.
 void ScreenTombola::eraseFrame(LovyanGFX* g, int ox, int oy)
 {
     if (!m_hasDrawnFrame) return;
@@ -1071,31 +1057,26 @@ void ScreenTombola::eraseFrame(LovyanGFX* g, int ox, int oy)
 
 void ScreenTombola::paintFrame(bool fullRepaint)
 {
-    bool clear = fullRepaint || !m_hasDrawnFrame;
+    TombolaFrame frame;
+    snapshotFrame(frame);
 
-    if (m_sprite) {
-        if (clear) {
-            m_sprite->fillScreen(UI_COLOR_BLACK);
-        } else {
-            eraseFrame(m_sprite, BOX_X, BOX_Y);
-        }
-        renderFrame(m_sprite, BOX_X, BOX_Y);
-        // Tab5 can hand the blit to the P4's pixel accelerator; everywhere
-        // else (and if it is unavailable) this falls back to the per-line
-        // memcpy inside pushSprite.
-        if (!ui_ppa::blit(m_sprite, BOX_X, BOX_Y)) {
-            m_sprite->pushSprite(BOX_X, BOX_Y);
-        }
+    // Through the shared strip every band starts black, so there is nothing
+    // to erase: the whole play area is recomposed each frame.
+    if (ui_strip::paint(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK,
+                        [&](LovyanGFX* g, int ox, int oy) { renderFrame(g, ox, oy, frame); })) {
         return;
     }
 
+    // Fallback: no strip, so erase the previous frame's marks on the panel
+    // and draw over them. It flickers.
+    bool clear = fullRepaint || !m_hasDrawnFrame;
     M5.Lcd.startWrite();
     if (clear) {
         M5.Lcd.fillRect(BOX_X, BOX_Y, BOX_SIZE, BOX_SIZE, UI_COLOR_BLACK);
     } else {
         eraseFrame(&M5.Lcd, 0, 0);
     }
-    renderFrame(&M5.Lcd, 0, 0);
+    renderFrame(&M5.Lcd, 0, 0, frame);
     M5.Lcd.endWrite();
 }
 

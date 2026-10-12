@@ -11,8 +11,8 @@
 // independently configured "slot" (see the ui_xypad_* API in ui_common.h and
 // docs/XYPAD.md). This class turns touches into ui_xypad_touch_* calls and
 // composites the result -- an expanding ripple on touchdown, a fading trail
-// behind a moving finger, and the current dot/label -- into an offscreen
-// sprite every frame. Same technique Tombola uses for its play area
+// behind a moving finger, and the current dot/label -- off-screen through the
+// shared strip (ui_strip.h) every frame. Same technique Tombola uses for its play area
 // (see screen_tombola.h/.cpp): the model only knows values, not pixels or
 // timing, so all of this animation state lives here.
 class ScreenXYPad : public Screen {
@@ -30,7 +30,6 @@ public:
 
 private:
     bool m_isActive;
-    LGFX_Sprite* m_sprite;
     int64_t m_lastDrawUs;
     bool m_hadContent;   // Whether the previous frame painted anything -- lets
                           // update() paint exactly one more (empty) frame when
@@ -60,7 +59,6 @@ private:
     static constexpr int RIPPLE_MAX = 8;
     Ripple m_ripples[RIPPLE_MAX];
 
-    void allocateSprite();
     void contentRect(int& x, int& y, int& w, int& h);
     uint16_t slotColor(int index);
     void noteName(uint8_t note, char* buf, int bufSize);
@@ -73,7 +71,7 @@ private:
     void renderFrame(LovyanGFX* g, int ox, int oy, int contentW, int64_t now);
     void paintFrame(int64_t now);
 
-    // Degraded fallback used only if the sprite could not be allocated: the
+    // Degraded fallback used only if the strip could not be allocated: the
     // plain dot+label from before, no ripple/trail (precise incremental erase
     // for many independently fading shapes is not practical without a
     // buffer). Still gets the edge-of-screen label placement fix.

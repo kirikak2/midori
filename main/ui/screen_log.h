@@ -49,7 +49,6 @@ private:
     int m_scrollOffset; // Scroll position (0 = bottom/newest)
     bool m_needsRedraw;
     bool m_isActive;
-    LGFX_Sprite* m_sprite;  // Full content area sprite for double-buffered rendering
 
     void drawLogLines();
     int getDisplayLine(int displayIndex);

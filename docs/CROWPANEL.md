@@ -115,11 +115,12 @@ SLPOUT + 120ms。DISPON (0x29) はベンダドライバも送っていないの�
 [CLAUDE.md の「Tab5 の描画はキャッシュに残る」](../CLAUDE.md) がそのまま当てはまる。
 `UIManager::update()` の末尾で `M5.Lcd.display()` を呼んでいるので通常は意識不要。
 
-### PPA（ピクセルアクセラレータ）
+### フレームバッファへの直接転送
 
-`ui_ppa` は Tombola のスプライト転送に P4 の PPA を使う。パネルが `Panel_DSI` か
-どうかを型で問い合わせる手段が LovyanGFX に無いので、ボードごとに答える形にした
-（CrowPanel は `crowpanel::dsi_panel()` を返す）。
+`ui_fb` は共有ストリップ（`ui_strip`）の帯をフレームバッファへ CPU で直接コピーする
+（回転をストライドに畳み込んだコピー。`pushSprite` の 1 画素ずつの回転コピーを避ける）。
+パネルが `Panel_DSI` かどうかを型で問い合わせる手段が LovyanGFX に無いので、ボードごとに
+答える形にした（CrowPanel は `crowpanel::dsi_panel()` を返す）。
 
 ## タッチ (GT911)
 

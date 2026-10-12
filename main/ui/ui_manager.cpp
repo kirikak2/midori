@@ -8,6 +8,7 @@
 #include "screen_tombola.h"
 #include "screen_knob.h"
 #include "screen_xypad.h"
+#include "ui_strip.h"
 #include <M5Unified.h>
 #include "esp_log.h"
 
@@ -64,6 +65,10 @@ esp_err_t UIManager::init()
     }
 
     ESP_LOGI(TAG, "Initializing UI Manager");
+
+    // Before anything else claims internal RAM: the screens' off-screen
+    // buffer only fits there if it is taken while the heap is still whole.
+    ui_strip::init();
 
     // Initialize screens (placeholders for now)
     initScreens();
