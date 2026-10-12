@@ -274,6 +274,78 @@ MIDI.bpm_loop(120, output: device) do |clock|
 end
 ```
 
+### UI layouts (UI.layout)
+
+Put pads, knobs, the XY pad and the Tombola on one screen, placed on a grid
+by column and row (CoreS3 / Tab5 / CrowPanel):
+
+```ruby
+perform = UI.layout("Perform", cols: 4, rows: 3) do
+  areas <<~GRID
+    xy xy xy k1
+    xy xy xy k2
+    p  p  p  p
+  GRID
+
+  xypad area: :xy, scale: [48, 50, 52, 55, 57, 60], y_cc: 74, device: dev
+
+  knob area: :k1, label: "Cutoff", color: :cyan, value: 64 do |v|
+    dev.control_change(74, v.to_i)
+  end
+  knob area: :k2, label: "Reso", color: :magenta do |v|
+    dev.control_change(71, v.to_i)
+  end
+
+  grid area: :p, cols: 4 do              # split an area into a grid of its own
+    [36, 38, 42, 46].each_with_index do |note, i|
+      pad col: i, label: "N#{note}", color: :orange do
+        dev.trigger(note, 120, duration: 100)
+      end
+    end
+  end
+end
+
+perform.send_all   # push the knobs' initial values (defining them sends nothing)
+perform.show
+
+loop do
+  UI.process       # runs the pad / knob blocks
+  sleep_ms 5
+end
+```
+
+- **Placing widgets**: columns and rows are 0-based. `col: 1, row: 2` is one cell,
+  `col: 0..2, row: 0..1` spans several (`0...3` works too). `area: :name` uses a
+  region drawn with `areas`, where `.` marks an empty cell.
+- **Sizing the grid**: `cols: 4` makes four equal columns, `cols: [3, 1]` sizes
+  them by weight, and `cols: [UI.px(60), 1, 1]` gives the first a fixed width.
+  The same goes for `rows:`. `gap:` and `padding:` default to a per-board value.
+- **Widgets**: `pad`, `knob`, `xypad` and `tombola` take the same keywords
+  as `UI.pad`, `UI.knob`, `UI::XYPad.new` and `UI::Tombola.new`. `grid` nests
+  another grid. Write the blocks with `do ... end`, because `label: "x" { }`
+  does not parse.
+- **Handles**: each widget returns a handle you can change later.
+  `knob.value = 100` (calls the block) / `knob.set_value(100, notify: false)` /
+  `pad.state` / `label=` / `color=`. Add `id: :cutoff` to fetch it again with
+  `layout[:cutoff]`. `xypad` and `tombola` return the `UI::XYPad` /
+  `UI::Tombola` instance.
+- **Pages**: you can define up to four layouts. Each one gets a tile on the Home
+  screen and can be shown with `layout.show` or `UI.show(layout)`, for example
+  from a `MIDI::Input` handler. Defining the same title again replaces that
+  layout and resets its values. The layouts go away when the script ends.
+- **Limits**: a layout holds up to 32 widgets, with at most one `xypad` and one
+  `tombola`. Widgets may not overlap, and a cell outside the grid raises
+  `ArgumentError`. A widget too small to touch comfortably is still placed but
+  logs a warning.
+- **Fitting each board**: weights scale with the screen. For larger changes,
+  check `UI.display[:large]` and pick a different grid in plain Ruby.
+
+The grid math lives in Ruby and has host tests
+(`mrbgems/picoruby-ui/test/layout_test.rb`). Layouts are new and have not yet
+been tried on hardware. See [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) for
+the full design and [examples/layout.rb](examples/layout.rb) for a complete
+script.
+
 ### Examples
 
 Ready-to-run scripts are in [examples/](examples/):
@@ -285,6 +357,7 @@ Ready-to-run scripts are in [examples/](examples/):
 | [xypad.rb](examples/xypad.rb) | Multi-finger XY pad |
 | [tombola.rb](examples/tombola.rb) | Bouncing-ball sequencer |
 | [layout.rb](examples/layout.rb) | XY pad, knobs and pads on one screen; switching screens from MIDI |
+| [tombola_layout.rb](examples/tombola_layout.rb) | The Tombola with its knobs and pads on one screen |
 | [amy_fm.rb](examples/amy_fm.rb) / [amy_synth.rb](examples/amy_synth.rb) | Play the built-in synth from pads, XY pad, knobs and a USB keyboard |
 | [bach_air.rb](examples/bach_air.rb) | MML playback |
 | [midi_monitor.rb](examples/midi_monitor.rb) | Log every incoming MIDI message |
