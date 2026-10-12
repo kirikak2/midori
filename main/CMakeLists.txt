@@ -47,6 +47,8 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/screen_tombola.cpp"
         "ui/screen_knob.cpp"
         "ui/screen_xypad.cpp"
+        "ui/screen_home.cpp"
+        "ui/ui_layout.cpp"
     )
 endif()
 

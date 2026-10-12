@@ -18,6 +18,7 @@ public:
     void onNavCenter() override;
     const char* getTitle() override;
     const char* getNavCenterLabel() override;
+    void getTileStatus(char* buf, int len) override;
 
     // Set current running script
     void setCurrentScript(const char* filename);

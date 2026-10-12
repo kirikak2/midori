@@ -8,6 +8,7 @@
 #include "screen_tombola.h"
 #include "screen_knob.h"
 #include "screen_xypad.h"
+#include "screen_home.h"
 #include "ui_strip.h"
 #include <M5Unified.h>
 #include "esp_log.h"
@@ -27,6 +28,13 @@ UIManager& UIManager::getInstance()
 
 UIManager::UIManager()
     : m_currentIndex(0)
+    , m_currentArg(-1)
+    , m_previousIndex(-1)
+    , m_previousArg(-1)
+    , m_menuHidden(0)
+    , m_requestMux(portMUX_INITIALIZER_UNLOCKED)
+    , m_pendingIndex(-1)
+    , m_pendingArg(-1)
     , m_initialized(false)
     , m_needsRedraw(true)
     , m_internalBpm(UI_BPM_DEFAULT)
@@ -83,7 +91,7 @@ esp_err_t UIManager::init()
 
     // Enter the first screen. The first update() paints it, replacing the
     // boot console in one go.
-    m_currentIndex = UI_SCREEN_MAIN;
+    m_currentIndex = UI_SCREEN_HOME;
     if (m_screens[m_currentIndex]) {
         m_screens[m_currentIndex]->enter();
     }
@@ -106,6 +114,7 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_TOMBOLA] = &getScreenTombola();
     m_screens[UI_SCREEN_KNOBS] = &getScreenKnobs();
     m_screens[UI_SCREEN_XYPAD] = &getScreenXYPad();
+    m_screens[UI_SCREEN_HOME] = &getScreenHome();
 }
 
 void UIManager::update()
@@ -147,6 +156,10 @@ void UIManager::update()
 
         lastBpmUpdate = now;
     }
+
+    // Switches requested from other tasks (UI.show) happen here, on the task
+    // that owns the screens, before this pass touches or draws anything.
+    applyPendingRequest();
 
     // Handle touch input
     handleTouch();
@@ -240,9 +253,9 @@ void UIManager::handleTouch()
                 // Navigation bar - only handle on first touch point (touchId 0)
                 if (touchId == 0) {
                     if (x < UI_NAV_ZONE_LEFT_END) {
-                        prevScreen();
+                        goHome();
                     } else if (x >= UI_NAV_ZONE_RIGHT_START) {
-                        nextScreen();
+                        goBack();
                     } else {
                         if (m_screens[m_currentIndex]) {
                             m_screens[m_currentIndex]->onNavCenter();
@@ -299,61 +312,241 @@ void UIManager::drawNavBar()
     if (!centerLabel) {
         centerLabel = m_screens[m_currentIndex] ? m_screens[m_currentIndex]->getTitle() : "";
     }
-    ui_draw_nav_bar(centerLabel, true);
+    ui_draw_nav_bar(centerLabel, m_currentIndex != UI_SCREEN_HOME, canGoBack());
 }
 
-void UIManager::nextScreen()
+// --- Navigation --------------------------------------------------------------
+
+// The Home menu, in display order. UI_SCREEN_LAYOUT stands for every live
+// layout, each of which becomes an item of its own.
+static const struct { ui_screen_index_t screen; uint8_t group; } MENU_ORDER[] = {
+    { UI_SCREEN_PADS,      MENU_GROUP_PERFORM },
+    { UI_SCREEN_KNOBS,     MENU_GROUP_PERFORM },
+    { UI_SCREEN_XYPAD,     MENU_GROUP_PERFORM },
+    { UI_SCREEN_TOMBOLA,   MENU_GROUP_PERFORM },
+    { UI_SCREEN_LAYOUT,    MENU_GROUP_PERFORM },
+    { UI_SCREEN_MAIN,      MENU_GROUP_STATE },
+    { UI_SCREEN_MIDI_INFO, MENU_GROUP_STATE },
+    { UI_SCREEN_SCRIPTS,   MENU_GROUP_SYSTEM },
+    { UI_SCREEN_LOGS,      MENU_GROUP_SYSTEM },
+    { UI_SCREEN_SETTINGS,  MENU_GROUP_SYSTEM },
+};
+
+// Screens a script may never hide: without them there is no way back to the
+// menu, or to stopping the script that hid everything.
+static constexpr uint32_t MENU_ALWAYS_VISIBLE =
+    (1u << UI_SCREEN_HOME) | (1u << UI_SCREEN_SCRIPTS);
+
+bool UIManager::isAvailable(ui_screen_index_t index, int arg) const
 {
-    int nextIndex = (m_currentIndex + 1) % UI_SCREEN_COUNT;
-
-    if (m_screens[m_currentIndex]) {
-        m_screens[m_currentIndex]->leave();
+    if (index < 0 || index >= UI_SCREEN_COUNT) return false;
+    if (!m_screens[index]) return false;
+    if ((m_menuHidden & ~MENU_ALWAYS_VISIBLE) & (1u << index)) return false;
+    if (index == UI_SCREEN_LAYOUT) {
+        // -1 means "the layout last shown"; it still has to exist
+        if (arg < 0) arg = ui_layout_last_shown();
+        return ui_layout_exists(arg);
     }
-
-    m_currentIndex = nextIndex;
-
-    if (m_screens[m_currentIndex]) {
-        m_screens[m_currentIndex]->enter();
-    }
-
-    m_needsRedraw = true;
-    ESP_LOGD(TAG, "Switched to screen %d", m_currentIndex);
+    return true;
 }
 
-void UIManager::prevScreen()
+int UIManager::buildMenu(MenuItem* out, int max) const
 {
-    int prevIndex = (m_currentIndex - 1 + UI_SCREEN_COUNT) % UI_SCREEN_COUNT;
-
-    if (m_screens[m_currentIndex]) {
-        m_screens[m_currentIndex]->leave();
+    int n = 0;
+    for (const auto& e : MENU_ORDER) {
+        if (e.screen == UI_SCREEN_LAYOUT) {
+            for (int slot = 0; slot < UI_LAYOUT_MAX_LAYOUTS; slot++) {
+                if (n >= max) return n;
+                if (!isAvailable(UI_SCREEN_LAYOUT, slot)) continue;
+                out[n++] = { UI_SCREEN_LAYOUT, slot, e.group };
+            }
+            continue;
+        }
+        if (n >= max) return n;
+        if (!isAvailable(e.screen, -1)) continue;
+        out[n++] = { e.screen, -1, e.group };
     }
-
-    m_currentIndex = prevIndex;
-
-    if (m_screens[m_currentIndex]) {
-        m_screens[m_currentIndex]->enter();
-    }
-
-    m_needsRedraw = true;
-    ESP_LOGD(TAG, "Switched to screen %d", m_currentIndex);
+    return n;
 }
 
-void UIManager::setScreen(ui_screen_index_t index)
+void UIManager::setMenuHidden(uint32_t hidden)
 {
-    if (index >= UI_SCREEN_COUNT || index == m_currentIndex) {
+    m_menuHidden = hidden & ~MENU_ALWAYS_VISIBLE;
+    // The tiles and the Back button may have changed
+    if (m_currentIndex == UI_SCREEN_HOME || m_previousIndex >= 0) {
+        m_needsRedraw = true;
+    }
+}
+
+uint32_t UIManager::getMenuHidden() const
+{
+    return m_menuHidden;
+}
+
+void UIManager::setScreen(ui_screen_index_t index, int arg, ui_screen_source_t source)
+{
+    if (index < 0 || index >= UI_SCREEN_COUNT || !m_screens[index]) {
         return;
     }
+    if (index == UI_SCREEN_LAYOUT && arg < 0) {
+        arg = ui_layout_last_shown();
+    }
+
+    // Already there: only the argument (a Knobs bank) can still change. A
+    // different layout is a different page, so that does switch for real.
+    if (index == m_currentIndex &&
+        !(index == UI_SCREEN_LAYOUT && arg != m_currentArg)) {
+        if (arg >= 0) m_screens[index]->onShowArg(arg);
+        return;
+    }
+
+    int from = m_currentIndex;
+    int fromArg = m_currentArg;
 
     if (m_screens[m_currentIndex]) {
         m_screens[m_currentIndex]->leave();
     }
 
     m_currentIndex = index;
+    m_currentArg = (index == UI_SCREEN_LAYOUT) ? arg : -1;
+    if (arg >= 0) {
+        m_screens[m_currentIndex]->onShowArg(arg);
+    }
+    m_screens[m_currentIndex]->enter();
 
-    if (m_screens[m_currentIndex]) {
-        m_screens[m_currentIndex]->enter();
+    // Back skips Home: going A -> Home -> B leaves Back pointing at A, so it
+    // flips between the two screens actually in use.
+    if (from != UI_SCREEN_HOME) {
+        m_previousIndex = from;
+        m_previousArg = fromArg;
     }
 
+    m_needsRedraw = true;
+
+    ui_event_t event;
+    event.type = UI_EVENT_SCREEN_CHANGE;
+    event.data.screen.index = (uint8_t)index;
+    event.data.screen.from = (uint8_t)from;
+    event.data.screen.source = (uint8_t)source;
+    event.data.screen.layout = (int8_t)m_currentArg;
+    ui_event_push(&event);
+
+    ESP_LOGD(TAG, "Switched to screen %d (arg %d)", m_currentIndex, arg);
+}
+
+void UIManager::goHome()
+{
+    setScreen(UI_SCREEN_HOME, -1, UI_SCREEN_SOURCE_TOUCH);
+}
+
+bool UIManager::canGoBack() const
+{
+    int prev = m_previousIndex;
+    if (prev < 0) return false;
+    if (prev == m_currentIndex && m_previousArg == m_currentArg) return false;
+    return isAvailable((ui_screen_index_t)prev, m_previousArg);
+}
+
+void UIManager::goBack()
+{
+    if (!canGoBack()) return;
+    setScreen((ui_screen_index_t)m_previousIndex, m_previousArg, UI_SCREEN_SOURCE_TOUCH);
+}
+
+bool UIManager::resolveStep(int dir, ui_screen_index_t& index, int& arg) const
+{
+    MenuItem items[MENU_MAX_ITEMS];
+    int n = buildMenu(items, MENU_MAX_ITEMS);
+    if (n == 0) return false;
+
+    int pos = -1;
+    for (int i = 0; i < n; i++) {
+        if (items[i].screen == m_currentIndex &&
+            (items[i].screen != UI_SCREEN_LAYOUT || items[i].arg == m_currentArg)) {
+            pos = i;
+            break;
+        }
+    }
+
+    int next;
+    if (pos < 0) {
+        // On Home (or a screen that just got hidden): start from either end
+        next = (dir > 0) ? 0 : n - 1;
+    } else {
+        next = (pos + (dir > 0 ? 1 : n - 1)) % n;
+    }
+    index = items[next].screen;
+    arg = items[next].arg;
+    return true;
+}
+
+bool UIManager::requestScreen(ui_screen_index_t index, int arg)
+{
+    if (!isAvailable(index, arg)) return false;
+
+    portENTER_CRITICAL(&m_requestMux);
+    m_pendingIndex = index;
+    m_pendingArg = arg;
+    portEXIT_CRITICAL(&m_requestMux);
+    return true;
+}
+
+bool UIManager::requestBack()
+{
+    // Resolved now, against what is on screen now, so UI.screen can report
+    // the destination before the UI task gets round to it.
+    if (!canGoBack()) return false;
+    return requestScreen((ui_screen_index_t)m_previousIndex, m_previousArg);
+}
+
+bool UIManager::requestStep(int dir)
+{
+    ui_screen_index_t index;
+    int arg;
+    if (!resolveStep(dir, index, arg)) return false;
+    return requestScreen(index, arg);
+}
+
+ui_screen_index_t UIManager::getRequestedScreen(int* arg) const
+{
+    portENTER_CRITICAL(const_cast<portMUX_TYPE*>(&m_requestMux));
+    int index = m_pendingIndex;
+    int pendingArg = m_pendingArg;
+    portEXIT_CRITICAL(const_cast<portMUX_TYPE*>(&m_requestMux));
+
+    if (index < 0) {
+        index = m_currentIndex;
+        pendingArg = m_currentArg;
+    } else if (index == UI_SCREEN_LAYOUT && pendingArg < 0) {
+        pendingArg = ui_layout_last_shown();
+    }
+    if (arg) *arg = (index == UI_SCREEN_LAYOUT) ? pendingArg : -1;
+    return (ui_screen_index_t)index;
+}
+
+void UIManager::applyPendingRequest()
+{
+    portENTER_CRITICAL(&m_requestMux);
+    int index = m_pendingIndex;
+    int arg = m_pendingArg;
+    m_pendingIndex = -1;
+    portEXIT_CRITICAL(&m_requestMux);
+
+    if (index >= 0) {
+        setScreen((ui_screen_index_t)index, arg, UI_SCREEN_SOURCE_SCRIPT);
+    }
+
+    // The layout on screen was deleted (or its script ended): fall back to the
+    // menu rather than showing a page nothing answers to any more.
+    if (m_currentIndex == UI_SCREEN_LAYOUT && !ui_layout_exists(m_currentArg)) {
+        setScreen(UI_SCREEN_HOME, -1, UI_SCREEN_SOURCE_SYSTEM);
+    }
+}
+
+void UIManager::scriptCleanup()
+{
+    m_menuHidden = 0;
+    ui_layout_cleanup();
     m_needsRedraw = true;
 }
 
@@ -362,9 +555,20 @@ ui_screen_index_t UIManager::getCurrentScreenIndex() const
     return static_cast<ui_screen_index_t>(m_currentIndex);
 }
 
+int UIManager::getCurrentArg() const
+{
+    return m_currentArg;
+}
+
 Screen* UIManager::getCurrentScreen()
 {
     return m_screens[m_currentIndex];
+}
+
+Screen* UIManager::getScreen(ui_screen_index_t index)
+{
+    if (index < 0 || index >= UI_SCREEN_COUNT) return nullptr;
+    return m_screens[index];
 }
 
 void UIManager::setBpm(float bpm)
@@ -601,7 +805,42 @@ void ui_set_beat_progress(uint8_t progress)
 
 void ui_set_screen(ui_screen_index_t index)
 {
-    UIManager::getInstance().setScreen(index);
+    UIManager::getInstance().requestScreen(index, -1);
+}
+
+bool ui_request_screen(ui_screen_index_t index, int arg)
+{
+    return UIManager::getInstance().requestScreen(index, arg);
+}
+
+bool ui_request_back(void)
+{
+    return UIManager::getInstance().requestBack();
+}
+
+bool ui_request_step(int dir)
+{
+    return UIManager::getInstance().requestStep(dir);
+}
+
+int ui_get_requested_screen(int* arg)
+{
+    return (int)UIManager::getInstance().getRequestedScreen(arg);
+}
+
+void ui_menu_set_hidden(uint32_t hidden)
+{
+    UIManager::getInstance().setMenuHidden(hidden);
+}
+
+uint32_t ui_menu_get_hidden(void)
+{
+    return UIManager::getInstance().getMenuHidden();
+}
+
+void ui_script_cleanup(void)
+{
+    UIManager::getInstance().scriptCleanup();
 }
 
 ui_screen_index_t ui_get_current_screen(void)

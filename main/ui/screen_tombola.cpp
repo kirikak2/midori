@@ -792,6 +792,11 @@ const char* ScreenTombola::getNavCenterLabel()
     return ui_tombola_running() ? "Stop" : "Start";
 }
 
+void ScreenTombola::getTileStatus(char* buf, int len)
+{
+    snprintf(buf, len, "%s", ui_tombola_running() ? "Playing" : "");
+}
+
 void ScreenTombola::enter()
 {
     m_isActive = true;

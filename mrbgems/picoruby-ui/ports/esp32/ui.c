@@ -22,6 +22,9 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->pad_state = false;
     event->sync_mode = false;
     event->screen = 0;
+    event->screen_from = 0;
+    event->screen_source = 0;
+    event->screen_layout = -1;
     event->hit_ball = 0;
     event->hit_side = 0;
     event->hit_note = 0;
@@ -60,7 +63,10 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             break;
         case UI_EVENT_SCREEN_CHANGE:
             event->type = PICORUBY_UI_EVENT_SCREEN_CHANGE;
-            event->screen = ui_evt.data.screen;
+            event->screen = ui_evt.data.screen.index;
+            event->screen_from = ui_evt.data.screen.from;
+            event->screen_source = ui_evt.data.screen.source;
+            event->screen_layout = ui_evt.data.screen.layout;
             break;
         case UI_EVENT_TOMBOLA_HIT:
             event->type = PICORUBY_UI_EVENT_TOMBOLA_HIT;
@@ -258,6 +264,50 @@ void picoruby_ui_set_screen(int index)
 int picoruby_ui_current_screen(void)
 {
     return (int)ui_get_current_screen();
+}
+
+extern bool ui_request_screen(ui_screen_index_t index, int arg);
+extern bool ui_request_back(void);
+extern bool ui_request_step(int dir);
+extern int  ui_get_requested_screen(int *arg);
+extern void ui_menu_set_hidden(uint32_t hidden);
+extern uint32_t ui_menu_get_hidden(void);
+extern void ui_script_cleanup(void);
+
+bool picoruby_ui_request_screen(int index, int arg)
+{
+    if (index < 0 || index >= UI_SCREEN_COUNT) return false;
+    return ui_request_screen((ui_screen_index_t)index, arg);
+}
+
+bool picoruby_ui_request_back(void)
+{
+    return ui_request_back();
+}
+
+bool picoruby_ui_request_step(int dir)
+{
+    return ui_request_step(dir);
+}
+
+int picoruby_ui_requested_screen(int *arg)
+{
+    return ui_get_requested_screen(arg);
+}
+
+void picoruby_ui_menu_set_hidden(uint32_t hidden)
+{
+    ui_menu_set_hidden(hidden);
+}
+
+uint32_t picoruby_ui_menu_get_hidden(void)
+{
+    return ui_menu_get_hidden();
+}
+
+void picoruby_ui_cleanup(void)
+{
+    ui_script_cleanup();
 }
 
 /* Tombola sequencer */

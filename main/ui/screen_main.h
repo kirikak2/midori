@@ -19,6 +19,7 @@ public:
     void onNavCenter() override;
     const char* getTitle() override;
     const char* getNavCenterLabel() override;
+    void getTileStatus(char* buf, int len) override;
 
 private:
     // Button IDs

@@ -3,6 +3,7 @@
 
 #include "ui_common.h"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 
 #ifdef __cplusplus
 
@@ -44,7 +45,33 @@ public:
 
     // Get center nav button label (if any)
     virtual const char* getNavCenterLabel() { return nullptr; }
+
+    // Screen-specific argument of a switch to this screen (UI.show(:knobs,
+    // bank: 2) -> the bank). Called before enter(), and on its own when the
+    // screen is already showing. -1 is never passed.
+    virtual void onShowArg(int arg) { (void)arg; }
+
+    // One short line of state for this screen's Home tile ("120 BPM",
+    // "Bank A"). Empty for none. Called on the UI task.
+    virtual void getTileStatus(char* buf, int len) { if (len > 0) buf[0] = '\0'; }
 };
+
+// One entry of the Home menu: a screen, plus which layout for UI_SCREEN_LAYOUT
+// (each script-defined layout is a tile of its own).
+struct MenuItem {
+    ui_screen_index_t screen;
+    int arg;          // Layout slot, or -1
+    uint8_t group;    // MENU_GROUP_*
+};
+
+enum {
+    MENU_GROUP_PERFORM = 0,
+    MENU_GROUP_STATE,
+    MENU_GROUP_SYSTEM,
+};
+
+// Upper bound of the menu: the fixed screens plus every layout slot
+static constexpr int MENU_MAX_ITEMS = 16;
 
 // UIManager singleton class
 class UIManager {
@@ -57,12 +84,35 @@ public:
     // Main update loop (call from app main loop)
     void update();
 
-    // Screen navigation
-    void nextScreen();
-    void prevScreen();
-    void setScreen(ui_screen_index_t index);
+    // Screen navigation. Everything that actually switches runs on the UI
+    // task: other tasks go through requestScreen(), which update() applies.
+    void setScreen(ui_screen_index_t index, int arg = -1,
+                   ui_screen_source_t source = UI_SCREEN_SOURCE_TOUCH);
+    void goHome();
+    void goBack();
     ui_screen_index_t getCurrentScreenIndex() const;
+    int getCurrentArg() const;   // Layout slot while on UI_SCREEN_LAYOUT, else -1
     Screen* getCurrentScreen();
+    Screen* getScreen(ui_screen_index_t index);
+
+    // Any task. False (and nothing queued) when the screen does not exist or
+    // is hidden from the menu.
+    bool requestScreen(ui_screen_index_t index, int arg);
+    // Any task. Resolve Back / the menu-order neighbour now and queue it.
+    bool requestBack();
+    bool requestStep(int dir);
+    // The screen a pending request will switch to, else the current one.
+    ui_screen_index_t getRequestedScreen(int* arg) const;
+
+    // Home menu. hidden is a bitmask of ui_screen_index_t; Home and Scripts
+    // can never be hidden.
+    void setMenuHidden(uint32_t hidden);
+    uint32_t getMenuHidden() const;
+    bool isAvailable(ui_screen_index_t index, int arg) const;
+    int buildMenu(MenuItem* out, int max) const;   // Visible items, menu order
+
+    // Script ended: put the menu back to its defaults. Any task.
+    void scriptCleanup();
 
     // BPM management
     void setBpm(float bpm);
@@ -103,9 +153,24 @@ private:
     void drawStatusBar();
     void drawNavBar();
     void initScreens();
+    void applyPendingRequest();
+    bool resolveStep(int dir, ui_screen_index_t& index, int& arg) const;
+    bool canGoBack() const;
 
     Screen* m_screens[UI_SCREEN_COUNT];
     int m_currentIndex;
+    int m_currentArg;       // Layout slot shown while on UI_SCREEN_LAYOUT
+    // Where Back goes: the last screen left for anything but Home, so Back
+    // flips between the two most recent screens.
+    volatile int m_previousIndex;
+    volatile int m_previousArg;
+    volatile uint32_t m_menuHidden;
+
+    // Switch requested from another task, applied at the top of update().
+    // One slot: a newer request replaces one not yet applied.
+    portMUX_TYPE m_requestMux;
+    volatile int m_pendingIndex;   // -1 when none
+    volatile int m_pendingArg;
     bool m_initialized;
     bool m_needsRedraw;
 
@@ -161,9 +226,18 @@ void ui_set_bpm_change_callback(bpm_change_cb_t cb);
 void ui_set_bar_beat(uint32_t bar, uint8_t beat);
 void ui_set_beat_progress(uint8_t progress);
 
-// Screen control
+// Screen control. ui_set_screen and ui_request_screen queue the switch for
+// the UI task and may be called from any task.
 void ui_set_screen(ui_screen_index_t index);
 ui_screen_index_t ui_get_current_screen(void);
+bool ui_request_screen(ui_screen_index_t index, int arg);
+bool ui_request_back(void);
+bool ui_request_step(int dir);           // +1 next / -1 previous, in menu order
+int  ui_get_requested_screen(int* arg);  // Pending target, else the current one
+void ui_menu_set_hidden(uint32_t hidden);
+uint32_t ui_menu_get_hidden(void);
+// A script ended: menu back to defaults, its layouts dropped. Any task.
+void ui_script_cleanup(void);
 
 // Pad callback
 void ui_set_pad_event_callback(pad_event_cb_t cb);

@@ -196,6 +196,19 @@ void ScreenScripts::syncRunningState()
     }
 }
 
+// Read from the supervisor directly: syncRunningState() only runs while this
+// screen is showing, and the tile is looked at from Home.
+void ScreenScripts::getTileStatus(char* buf, int len)
+{
+    const char* path = supervisor_get_current_script();
+    if (path == nullptr || path[0] == '\0') {
+        if (len > 0) buf[0] = '\0';
+        return;
+    }
+    const char* slash = strrchr(path, '/');
+    snprintf(buf, len, "%s", slash ? slash + 1 : path);
+}
+
 void ScreenScripts::draw()
 {
     ui_clear_content_area();

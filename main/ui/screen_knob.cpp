@@ -515,3 +515,20 @@ const char* ScreenKnobs::getNavCenterLabel()
 {
     return "Send";
 }
+
+// UI.show(:knobs, bank: n). Only the bank changes here; update() notices and
+// repaints the grid, and the status bar follows on the next full redraw.
+void ScreenKnobs::onShowArg(int arg)
+{
+    if (arg < 0 || arg >= UI_KNOB_BANKS) return;
+    if (arg != ui_knob_get_bank()) {
+        releaseAllTouches();
+        ui_knob_set_bank((uint8_t)arg);
+        ui_request_redraw();
+    }
+}
+
+void ScreenKnobs::getTileStatus(char* buf, int len)
+{
+    snprintf(buf, len, "Bank %c", 'A' + ui_knob_get_bank());
+}

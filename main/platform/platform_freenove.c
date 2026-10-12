@@ -179,6 +179,43 @@ ui_screen_index_t ui_get_current_screen(void)
     return UI_SCREEN_MAIN;
 }
 
+bool ui_request_screen(ui_screen_index_t index, int arg)
+{
+    (void)index; (void)arg;
+    return false;
+}
+
+bool ui_request_back(void)
+{
+    return false;
+}
+
+bool ui_request_step(int dir)
+{
+    (void)dir;
+    return false;
+}
+
+int ui_get_requested_screen(int *arg)
+{
+    if (arg) *arg = -1;
+    return -1;
+}
+
+void ui_menu_set_hidden(uint32_t hidden)
+{
+    (void)hidden;
+}
+
+uint32_t ui_menu_get_hidden(void)
+{
+    return 0;
+}
+
+void ui_script_cleanup(void)
+{
+}
+
 // Tombola stubs - the sequencer lives in ui/screen_tombola.cpp, which is only
 // built for the M5Stack boards. Scripts that touch UI::Tombola on Freenove get
 // a silent no-op rather than a link error.

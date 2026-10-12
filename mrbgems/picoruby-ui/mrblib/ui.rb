@@ -62,6 +62,7 @@ module UI
 
   # Screen indices (must match ui_common.h ui_screen_index_t order)
   SCREEN_MAIN      = 0
+  SCREEN_TEMPO     = 0   # The Main screen, renamed; SCREEN_MAIN stays
   SCREEN_PADS      = 1
   SCREEN_MIDI_INFO = 2
   SCREEN_LOGS      = 3
@@ -70,10 +71,165 @@ module UI
   SCREEN_TOMBOLA   = 6
   SCREEN_KNOBS     = 7
   SCREEN_XYPAD     = 8
+  SCREEN_LAYOUT    = 9
+  SCREEN_HOME      = 10
 
-  # Switch the active screen (0-based; see SCREEN_* constants)
+  # === Navigation (docs/UI_NAVIGATION.md) ===
+  #
+  # Screens are named by Symbol. Every switch is a request the UI task applies
+  # on its next pass, so these return at once and are safe to call from a
+  # MIDI::Input handler. They return false, and do nothing, for a screen that
+  # does not exist on this board or that UI.menu hid.
+
+  SCREENS = {
+    home: SCREEN_HOME, tempo: SCREEN_TEMPO, main: SCREEN_MAIN,
+    pads: SCREEN_PADS, knobs: SCREEN_KNOBS, xypad: SCREEN_XYPAD,
+    tombola: SCREEN_TOMBOLA, layout: SCREEN_LAYOUT,
+    midi_info: SCREEN_MIDI_INFO, scripts: SCREEN_SCRIPTS,
+    logs: SCREEN_LOGS, settings: SCREEN_SETTINGS
+  }
+
+  # Index -> Symbol. Screen 0 reads back as :tempo, its current name.
+  SCREEN_NAMES = [:tempo, :pads, :midi_info, :logs, :scripts, :settings,
+                  :tombola, :knobs, :xypad, :layout, :home]
+
+  # Internal: Symbol / SCREEN_* -> index, or nil
+  def self.screen_index(screen)
+    return screen if screen.is_a?(Integer) && screen >= 0 && screen < SCREEN_NAMES.size
+    SCREENS[screen]
+  end
+
+  def self.screen_name(index)
+    SCREEN_NAMES[index]
+  end
+
+  # Switch screens.
+  #
+  #   UI.show(:knobs)
+  #   UI.show(:knobs, bank: 2)
+  #   UI.show(layout)          # a UI::Layout
+  #
+  # @param screen [Symbol, Integer, UI::Layout]
+  # @return [Boolean] whether the switch was queued
+  def self.show(screen, **opts)
+    if screen.respond_to?(:layout_slot)
+      check_show_opts(:layout, opts)
+      slot = screen.layout_slot
+      return false unless slot
+      return _request_screen(SCREEN_LAYOUT, slot)
+    end
+
+    index = screen_index(screen)
+    raise ArgumentError, "unknown screen: #{screen.inspect}" unless index
+    name = SCREEN_NAMES[index]
+    check_show_opts(name, opts)
+
+    arg = -1
+    if name == :knobs && opts[:bank]
+      bank = opts[:bank].to_i
+      return false if bank < 1 || bank > _knob_banks
+      arg = bank - 1
+    end
+    _request_screen(index, arg)
+  end
+
+  # Internal: keywords UI.show accepts per screen. An unknown one is a typo,
+  # so it raises rather than being ignored.
+  def self.check_show_opts(name, opts)
+    allowed = (name == :knobs) ? [:bank] : []
+    opts.each_key do |k|
+      unless allowed.include?(k)
+        raise ArgumentError, "unknown keyword for #{name}: #{k}"
+      end
+    end
+  end
+
+  # The current screen as a Symbol -- or, right after a UI.show, the screen
+  # it is switching to.
+  def self.screen
+    index = _requested_screen[0]
+    index >= 0 ? SCREEN_NAMES[index] : nil
+  end
+
+  # Same as the nav bar's Home / Back
+  def self.home
+    show(:home)
+  end
+
+  def self.back
+    _nav(:back)
+  end
+
+  # Neighbours in Home's menu order (visible screens only, Home itself skipped)
+  def self.next_screen
+    _nav(:next)
+  end
+
+  def self.prev_screen
+    _nav(:prev)
+  end
+
+  # Shorthands, one per screen
+  def self.tempo;     show(:tempo);     end
+  def self.main;      show(:main);      end
+  def self.pads;      show(:pads);      end
+  def self.xypad;     show(:xypad);     end
+  def self.tombola;   show(:tombola);   end
+  def self.midi_info; show(:midi_info); end
+  def self.scripts;   show(:scripts);   end
+  def self.logs;      show(:logs);      end
+  def self.settings;  show(:settings);  end
+
+  # The layout screen (the one last shown). UI.layout defines layouts.
+  def self.layout_screen
+    show(:layout)
+  end
+
+  # Choose what Home offers.
+  #
+  #   UI.menu(hide: [:settings, :midi_info])
+  #   UI.menu(only: [:xypad, :knobs, :layout, :tempo])
+  #   UI.menu(reset: true)
+  #
+  # Hidden screens leave Home and next_screen / prev_screen, and UI.show
+  # refuses them. :home and :scripts cannot be hidden. Reset when the script
+  # ends.
+  def self.menu(hide: nil, only: nil, reset: false)
+    if reset
+      _menu_set_hidden(0)
+      return nil
+    end
+
+    mask = 0
+    if only
+      keep = (only + [:home, :scripts]).map { |sc| menu_index(sc) }
+      SCREEN_NAMES.each_with_index do |_, i|
+        mask |= (1 << i) unless keep.include?(i)
+      end
+    end
+    if hide
+      hide.each do |sc|
+        i = menu_index(sc)
+        if i == SCREEN_HOME || i == SCREEN_SCRIPTS
+          raise ArgumentError, "#{sc} cannot be hidden"
+        end
+        mask |= (1 << i)
+      end
+    end
+    _menu_set_hidden(mask)
+    nil
+  end
+
+  def self.menu_index(screen)
+    index = screen_index(screen)
+    raise ArgumentError, "unknown screen: #{screen.inspect}" unless index
+    index
+  end
+
+  # Switch the active screen (0-based; see SCREEN_* constants).
+  # Kept for older scripts; UI.show is the same with names.
   def self.set_screen(index)
-    _set_screen(index)
+    _request_screen(index, -1)
   end
 
   # Currently active screen index
@@ -90,7 +246,13 @@ module UI
   # Pop next UI event from queue
   # @return [Hash, nil] Event hash or nil if no events
   def self.pop_event
-    _pop_event
+    event = _pop_event
+    if event && event[:type] == :screen_change
+      # Screens travel as numbers; scripts see the same Symbols UI.show takes
+      event[:screen] = SCREEN_NAMES[event[:screen]]
+      event[:from] = SCREEN_NAMES[event[:from]]
+    end
+    event
   end
 
   # Process UI events using registered handlers
@@ -529,9 +691,9 @@ module UI
     $ui_knob_callbacks = {}
   end
 
-  # Bring the Knobs screen to the front
-  def self.knobs
-    set_screen(SCREEN_KNOBS)
+  # Bring the Knobs screen to the front, optionally on a given bank (1-4)
+  def self.knobs(bank: nil)
+    bank ? show(:knobs, bank: bank) : show(:knobs)
   end
 
   # Tombola - physics driven sequencer
@@ -873,7 +1035,7 @@ module UI
 
     # Bring the Tombola screen to the front
     def show
-      UI.set_screen(UI::SCREEN_TOMBOLA)
+      UI.show(:tombola)
     end
   end
 
@@ -1015,7 +1177,7 @@ module UI
 
     # Bring the XYPad screen to the front
     def show
-      UI.set_screen(UI::SCREEN_XYPAD)
+      UI.show(:xypad)
     end
 
     # Internal: applies the built-in MIDI handler for one slot's touch event,

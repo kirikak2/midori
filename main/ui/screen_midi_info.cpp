@@ -229,3 +229,8 @@ const char* ScreenMidiInfo::getTitle()
 {
     return "MIDI Devices";
 }
+
+void ScreenMidiInfo::getTileStatus(char* buf, int len)
+{
+    snprintf(buf, len, "%s", ui_get_midi_indicator() ? "Connected" : "");
+}

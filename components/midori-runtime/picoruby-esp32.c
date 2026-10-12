@@ -13,6 +13,7 @@
 #include "midi_transport.h"  // MIDI_transport_send (picoruby-midi)
 #include "midi_route.h"      // MIDI_route_clear (picoruby-midi)
 #include "amy_gem.h"         // AMY_GEM_reset (picoruby-amy)
+#include "ui.h"              // picoruby_ui_cleanup (picoruby-ui)
 
 static const char *TAG = "PICORUBY";
 
@@ -154,6 +155,10 @@ picoruby_esp32_midi_cleanup(void)
   // from whatever this one left. Its audio task keeps running. No-op when
   // AMY is not running or not built in.
   AMY_GEM_reset();
+
+  // Menu customisation (UI.menu) and layouts (UI.layout) belong to the
+  // script too. Their callbacks lived in its VM, so the pages would be dead.
+  picoruby_ui_cleanup();
 
   ESP_LOGI(TAG, "MIDI cleanup completed");
 }

@@ -164,7 +164,7 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         9
+#define UI_SCREEN_COUNT         11
 
 // Screen indices
 // New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
@@ -179,7 +179,16 @@ typedef enum {
     UI_SCREEN_TOMBOLA,
     UI_SCREEN_KNOBS,
     UI_SCREEN_XYPAD,
+    UI_SCREEN_LAYOUT,     // Script-defined layouts (docs/UI_LAYOUT_DSL.md)
+    UI_SCREEN_HOME,       // Tile menu every other screen is reached from
 } ui_screen_index_t;
+
+// What caused a screen switch, reported with UI_EVENT_SCREEN_CHANGE
+typedef enum {
+    UI_SCREEN_SOURCE_TOUCH = 0,   // Home tile, Home / Back on the nav bar
+    UI_SCREEN_SOURCE_SCRIPT,      // UI.show and friends
+    UI_SCREEN_SOURCE_SYSTEM,      // The firmware itself (a layout went away)
+} ui_screen_source_t;
 
 // BPM configuration
 #define UI_BPM_MIN         20.0f
@@ -369,7 +378,12 @@ typedef struct {
             bool state;
         } pad;
         bool sync_mode;      // For UI_EVENT_SYNC_MODE
-        uint8_t screen;      // For UI_EVENT_SCREEN_CHANGE
+        struct {
+            uint8_t index;   // For UI_EVENT_SCREEN_CHANGE (ui_screen_index_t)
+            uint8_t from;
+            uint8_t source;  // ui_screen_source_t
+            int8_t  layout;  // Layout slot when index is UI_SCREEN_LAYOUT, else -1
+        } screen;
         struct {
             uint8_t ball;    // For UI_EVENT_TOMBOLA_HIT
             uint8_t side;
@@ -400,7 +414,9 @@ extern pad_config_t g_pads[UI_PAD_COUNT];
 
 // Drawing functions
 void ui_draw_status_bar(const char* title);
-void ui_draw_nav_bar(const char* center_label, bool show_arrows);
+// home_enabled / back_enabled grey the two side buttons out when they would
+// do nothing (Home while already on Home, Back with nowhere to go back to).
+void ui_draw_nav_bar(const char* center_label, bool home_enabled, bool back_enabled);
 void ui_draw_button(int x, int y, int w, int h, const char* label, uint16_t bg_color, uint16_t text_color, bool pressed);
 void ui_clear_content_area(void);
 
@@ -538,6 +554,18 @@ const xypad_slot_t* ui_xypad_get_slot(uint8_t index);
 int ui_xypad_touch_down(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
 int ui_xypad_touch_move(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
 int ui_xypad_touch_up(int touch_id);
+
+// --- Layouts ----------------------------------------------------------------
+// Script-defined screens of pads, knobs, XYPad... placed on a grid by Ruby
+// (docs/UI_LAYOUT_DSL.md). Up to UI_LAYOUT_MAX_LAYOUTS live at once, each a
+// Home tile, all shown through UI_SCREEN_LAYOUT. Implemented in ui_layout.cpp.
+#define UI_LAYOUT_MAX_LAYOUTS  4
+
+bool ui_layout_exists(int slot);
+int  ui_layout_last_shown(void);                 // -1 before any was shown
+void ui_layout_title(int slot, char* buf, int len);
+// The script that defined them is gone: drop every layout. Any task.
+void ui_layout_cleanup(void);
 
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);

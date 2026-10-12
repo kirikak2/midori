@@ -16,6 +16,7 @@ public:
     void draw() override;
     void onTouch(int touchId, int x, int y, bool pressed) override;
     const char* getTitle() override;
+    void getTileStatus(char* buf, int len) override;
 
 private:
     bool m_isActive;

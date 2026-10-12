@@ -583,7 +583,14 @@ void ScreenMain::processTapTempo()
 
 const char* ScreenMain::getTitle()
 {
-    return "Main";
+    // Named for what it does now that Home is the starting point. The class,
+    // UI_SCREEN_MAIN and Ruby's :main keep the old name for compatibility.
+    return "Tempo";
+}
+
+void ScreenMain::getTileStatus(char* buf, int len)
+{
+    snprintf(buf, len, "%.0f BPM", (double)UIManager::getInstance().getBpm());
 }
 
 const char* ScreenMain::getNavCenterLabel()

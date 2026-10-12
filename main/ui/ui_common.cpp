@@ -39,11 +39,13 @@ void ui_draw_status_bar(const char* title)
     portEXIT_CRITICAL(&s_ui_mutex);
 }
 
-void ui_draw_nav_bar(const char* center_label, bool show_arrows)
+void ui_draw_nav_bar(const char* center_label, bool home_enabled, bool back_enabled)
 {
     portENTER_CRITICAL(&s_ui_mutex);
 
     int nav_y = UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT;
+    // Vertically centred at text size 2 (16px glyphs), whatever the bar height
+    int text_y = nav_y + (UI_NAV_BAR_HEIGHT - 16) / 2;
 
     // Draw navigation bar background
     ui_gfx().fillRect(0, nav_y, UI_SCREEN_WIDTH, UI_NAV_BAR_HEIGHT, UI_COLOR_DARKGRAY);
@@ -51,23 +53,23 @@ void ui_draw_nav_bar(const char* center_label, bool show_arrows)
     // Draw border at top
     ui_gfx().drawLine(0, nav_y, UI_SCREEN_WIDTH, nav_y, UI_COLOR_GRAY);
 
-    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
     ui_gfx().setTextSize(2);
 
-    if (show_arrows) {
-        // Draw left arrow
-        ui_gfx().setCursor(20, nav_y + 12);
-        ui_gfx().print("<");
+    // Home (left zone) and Back (right zone). Greyed out rather than hidden
+    // when they would do nothing, so the zones never seem to move.
+    ui_gfx().setTextColor(home_enabled ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(20, text_y);
+    ui_gfx().print("Home");
 
-        // Draw right arrow
-        ui_gfx().setCursor(UI_SCREEN_WIDTH - 30, nav_y + 12);
-        ui_gfx().print(">");
-    }
+    ui_gfx().setTextColor(back_enabled ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+    ui_gfx().setCursor(UI_SCREEN_WIDTH - 20 - 4 * 12, text_y);
+    ui_gfx().print("Back");
 
     // Draw center label
+    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
     int label_width = strlen(center_label) * 12;  // Approximate width at text size 2
     int label_x = (UI_SCREEN_WIDTH - label_width) / 2;
-    ui_gfx().setCursor(label_x, nav_y + 12);
+    ui_gfx().setCursor(label_x, text_y);
     ui_gfx().print(center_label);
 
     portEXIT_CRITICAL(&s_ui_mutex);

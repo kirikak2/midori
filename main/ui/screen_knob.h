@@ -24,6 +24,8 @@ public:
     void onNavCenter() override;
     const char* getTitle() override;
     const char* getNavCenterLabel() override;
+    void onShowArg(int arg) override;
+    void getTileStatus(char* buf, int len) override;
 
 private:
     bool m_isActive;

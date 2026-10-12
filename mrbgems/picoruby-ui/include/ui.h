@@ -22,7 +22,10 @@ typedef struct {
     uint8_t pad_index;   /* For pad events */
     bool pad_state;      /* For pad events */
     bool sync_mode;      /* For sync mode events */
-    uint8_t screen;      /* For screen change events */
+    uint8_t screen;      /* For screen change events: the new screen */
+    uint8_t screen_from;   /* ...the screen left */
+    uint8_t screen_source; /* ...0 touch / 1 script / 2 system */
+    int8_t  screen_layout; /* ...layout slot when screen is the layout screen, else -1 */
     uint8_t hit_ball;    /* For tombola hit events */
     uint8_t hit_side;    /* For tombola hit events */
     uint8_t hit_note;    /* For tombola hit events */
@@ -89,9 +92,21 @@ int   picoruby_ui_knob_banks(void);
 int   picoruby_ui_knob_get_bank(void);
 void  picoruby_ui_knob_set_bank(int bank);
 
-/* Screen switching (diagnostic + control) */
+/* Screen switching. Requests are applied by the UI task; the request
+ * functions return false (and queue nothing) for a screen that does not
+ * exist or is hidden from the menu. arg is screen-specific (the Knobs bank,
+ * the layout slot), -1 for none. */
 void picoruby_ui_set_screen(int index);
 int  picoruby_ui_current_screen(void);
+bool picoruby_ui_request_screen(int index, int arg);
+bool picoruby_ui_request_back(void);
+bool picoruby_ui_request_step(int dir);
+int  picoruby_ui_requested_screen(int *arg);
+void picoruby_ui_menu_set_hidden(uint32_t hidden);
+uint32_t picoruby_ui_menu_get_hidden(void);
+
+/* A script ended (called from picoruby_esp32_midi_cleanup). Any task. */
+void picoruby_ui_cleanup(void);
 
 /* Tombola sequencer.
  * Parameters are string-keyed so this bridge stays fixed in size as the

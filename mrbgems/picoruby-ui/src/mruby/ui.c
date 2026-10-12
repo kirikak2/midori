@@ -126,9 +126,21 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
         case PICORUBY_UI_EVENT_SYNC_MODE:
             HSET(enabled, mrb_bool_value(event.sync_mode));
             break;
-        case PICORUBY_UI_EVENT_SCREEN_CHANGE:
+        case PICORUBY_UI_EVENT_SCREEN_CHANGE: {
+            /* Screen numbers here; UI.pop_event turns them into Symbols. */
+            mrb_sym source;
+            switch (event.screen_source) {
+                case 0:  source = MRB_SYM(touch);  break;
+                case 1:  source = MRB_SYM(script); break;
+                default: source = MRB_SYM(system); break;
+            }
             HSET(screen, mrb_fixnum_value(event.screen));
+            HSET(from, mrb_fixnum_value(event.screen_from));
+            HSET(source, mrb_symbol_value(source));
+            HSET(layout, event.screen_layout >= 0 ? mrb_fixnum_value(event.screen_layout)
+                                                  : mrb_nil_value());
             break;
+        }
         case PICORUBY_UI_EVENT_TOMBOLA_HIT:
             HSET(ball, mrb_fixnum_value(event.hit_ball));
             HSET(side, mrb_fixnum_value(event.hit_side));
@@ -222,6 +234,56 @@ static mrb_value
 mrb_ui_current_screen(mrb_state *mrb, mrb_value self)
 {
     return mrb_fixnum_value(picoruby_ui_current_screen());
+}
+
+/* UI._request_screen(index, arg) -> true / false */
+static mrb_value
+mrb_ui_request_screen(mrb_state *mrb, mrb_value self)
+{
+    mrb_value index, arg;
+    mrb_get_args(mrb, "oo", &index, &arg);
+    if (!mrb_integer_p(index)) return mrb_false_value();
+    int a = mrb_integer_p(arg) ? (int)mrb_integer(arg) : -1;
+    return mrb_bool_value(picoruby_ui_request_screen((int)mrb_integer(index), a));
+}
+
+/* UI._nav(:back | :next | :prev) -> true / false */
+static mrb_value
+mrb_ui_nav(mrb_state *mrb, mrb_value self)
+{
+    mrb_sym dir;
+    mrb_get_args(mrb, "n", &dir);
+    if (dir == MRB_SYM(back)) return mrb_bool_value(picoruby_ui_request_back());
+    if (dir == MRB_SYM(next)) return mrb_bool_value(picoruby_ui_request_step(1));
+    if (dir == MRB_SYM(prev)) return mrb_bool_value(picoruby_ui_request_step(-1));
+    return mrb_false_value();
+}
+
+/* UI._requested_screen -> [index, arg] (a pending switch's target, else the
+ * current screen; arg is the layout slot or -1) */
+static mrb_value
+mrb_ui_requested_screen(mrb_state *mrb, mrb_value self)
+{
+    int arg = -1;
+    int index = picoruby_ui_requested_screen(&arg);
+    mrb_value pair[2] = { mrb_fixnum_value(index), mrb_fixnum_value(arg) };
+    return mrb_ary_new_from_values(mrb, 2, pair);
+}
+
+/* UI._menu_set_hidden(mask) / UI._menu_hidden */
+static mrb_value
+mrb_ui_menu_set_hidden(mrb_state *mrb, mrb_value self)
+{
+    mrb_int mask;
+    mrb_get_args(mrb, "i", &mask);
+    picoruby_ui_menu_set_hidden((uint32_t)mask);
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ui_menu_hidden(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value((mrb_int)picoruby_ui_menu_get_hidden());
 }
 
 /* ------------------------------------------------------------------------
@@ -675,6 +737,11 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_log,              mrb_ui_log,              MRB_ARGS_REQ(1));
     DEF(_set_screen,       mrb_ui_set_screen,       MRB_ARGS_REQ(1));
     DEF(_current_screen,   mrb_ui_current_screen,   MRB_ARGS_NONE());
+    DEF(_request_screen,   mrb_ui_request_screen,   MRB_ARGS_REQ(2));
+    DEF(_nav,              mrb_ui_nav,              MRB_ARGS_REQ(1));
+    DEF(_requested_screen, mrb_ui_requested_screen, MRB_ARGS_NONE());
+    DEF(_menu_set_hidden,  mrb_ui_menu_set_hidden,  MRB_ARGS_REQ(1));
+    DEF(_menu_hidden,      mrb_ui_menu_hidden,      MRB_ARGS_NONE());
 
     /* Pads */
     DEF(_pad_set,          mrb_ui_pad_set,          MRB_ARGS_REQ(4));
