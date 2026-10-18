@@ -79,6 +79,8 @@
  * hal.h, which drags in the Ruby VM headers.
  */
 extern bool picorb_hal_stdin_push(uint8_t ch);
+/* Same file: pops one byte, or HAL_GETCHAR_NODATA (-1) when empty. */
+extern int picorb_hal_getchar(void);
 /* picoruby-io-console/ports/esp32/io-console.c */
 extern void io_raw_bang(bool nonblock);
 
@@ -248,6 +250,22 @@ int console_input_write_raw(const uint8_t *data, size_t len)
 }
 
 /*
+ * Throw away whatever is sitting in PicoRuby's stdin ring buffer. Nobody
+ * drains it while the Ruby side is in the UI loop, so bytes that reached
+ * it outside a session (the tail of a PicoModem exchange that ended
+ * early, leftovers from irb) stay there indefinitely. PicoModem.session
+ * reads the oldest byte first, gives up when it is not an STX, and leaves
+ * the real frame behind as fresh garbage for the next attempt - once one
+ * stray byte is in, every later transfer times out.
+ */
+static void console_stdin_discard(void)
+{
+    int guard = 4096;               /* well above PICORB_STDIN_BUFFER_SIZE */
+    while (guard-- > 0 && picorb_hal_getchar() >= 0) {
+    }
+}
+
+/*
  * Runs in the console task, on the STX byte itself. Everything the Ruby
  * side needs must be in place before the ACK goes out, because the host
  * starts sending frames as soon as it sees it.
@@ -265,6 +283,10 @@ static void console_modem_enter(void)
      * and in cooked mode picorb_hal_stdin_push() eats 0x03 and 0x1A as
      * signals, which are perfectly ordinary payload bytes. */
     io_raw_bang(true);
+
+    /* Before the ACK: from here on the buffer holds this session's frames
+     * and nothing else. */
+    console_stdin_discard();
 
 #if !CONFIG_USB_MIDI_CONSOLE_ON_CDC
     console_set_rx_endings(ESP_LINE_ENDINGS_LF);
@@ -322,6 +344,9 @@ void console_input_irb_enter(void)
         return;
     }
     ESP_LOGI(TAG, "irb: console handed over to the Ruby side");
+    /* Called from the irb task, the buffer's only reader: stale bytes
+     * would otherwise show up as the first keystrokes of the session. */
+    console_stdin_discard();
     s_mode = CONSOLE_MODE_IRB;
 }
 
@@ -624,6 +649,16 @@ void console_input_start(void)
      * way, so without this hook every keystroke is discarded. */
     if (USB_MIDI_DEVICE_set_cdc_rx_callback(console_cdc_rx_cb, NULL) == 0) {
         s_cdc_mode = true;
+        /* tinyusb_console_init() pointed stdin at the CDC as well, and
+         * picoruby-machine's stdin_reader task polls it with fgetc() from
+         * whichever core it lands on. Whenever it beats the gem's RX
+         * handler to a packet, those bytes skip the console task and go
+         * straight into PicoRuby's stdin buffer: lost keystrokes in line
+         * mode, stray bytes ahead of the next PicoModem frame. The hook
+         * above sees every byte, so nobody else needs stdin. */
+        if (freopen("/dev/null", "r", stdin) == NULL) {
+            ESP_LOGW(TAG, "Failed to detach stdin from the CDC");
+        }
     } else {
         ESP_LOGW(TAG, "CDC RX hook unavailable, falling back to stdin polling");
         vStreamBufferDelete(s_rx_stream);
