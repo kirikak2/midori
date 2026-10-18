@@ -934,6 +934,12 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
   （`SYNTH_FLAGS_NO_NOTE_WARNINGS`）を立て、esp_timer から届く自動ノートオフで
   AMY が警告を出さないようにしている。いずれも CDC コンソールへの他コアからの書き込みを
   避けるための予防
+- **マスターボリュームは Settings 画面**（スピーカー / ヘッドホン、NVS に保存。2026-10-12）。
+  Tab5 はヘッドホンジャックがスピーカーアンプと同じ ES8388 出力にぶら下がっているので、
+  出力音量（reg 46〜49）を挿入中（0x43 エキスパンダ P7 = HP_DET）はヘッドホンの値にし、
+  スピーカーは SPK_EN だけで切る（**コーデック出力を切るとイヤホンも鳴らなくなる**）。
+  CrowPanel はスピーカーのみで、gem の `AMY_GEM_set_output_gain()` でサンプルを減衰させる。
+  詳細は docs/AMY_SYNTH.md の「マスターボリュームとヘッドホン」
 - Tab5 の MCLK は 128 × fs（ES8388 reg24 = 0x00 と対）。片方だけ変えるとピッチが 2 倍ずれる
 - スクリプト停止時に `picoruby_esp32_midi_cleanup()` が `AMY_GEM_reset()` を呼び、
   synth・パッチ・CC マッピングを消す（オーディオは止めない）

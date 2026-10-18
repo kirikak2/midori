@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "board_audio.h"
 #include "lcd_console.h"
 #include "ui_manager.h"
 #include "ui_common.h"
@@ -88,6 +89,9 @@ extern "C" void platform_deinit(void)
 extern "C" void platform_update(void)
 {
     M5.update();
+
+    // Headphone jack: mutes the speaker while plugged in (Tab5)
+    board_audio_update();
 
     // Update UI if initialized
     if (s_ui_initialized) {

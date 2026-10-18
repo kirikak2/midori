@@ -4,6 +4,7 @@
 // the log routing -- but the hardware underneath is not an M5Stack, so the
 // display is built by hand in crowpanel_display.cpp instead of by M5.begin().
 #include "platform.h"
+#include "board_audio.h"
 #include "crowpanel_display.hpp"
 #include "lcd_console.h"
 #include "ui_manager.h"
@@ -82,6 +83,9 @@ extern "C" void platform_update(void)
     // The touch refresh is all this board needs out of M5.update(); the rest
     // of it polls buttons, a PMIC and an RTC that M5.begin() never set up.
     crowpanel::touch_update();
+
+    // Headphone jack: mutes the speaker while plugged in (Tab5)
+    board_audio_update();
 
     if (s_ui_initialized) {
         ui_update();

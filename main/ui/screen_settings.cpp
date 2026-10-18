@@ -1,6 +1,7 @@
 #include "sdkconfig.h"
 #include "screen_settings.h"
 #include "ui_strip.h"
+#include "board_audio.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -27,7 +28,8 @@ static constexpr int BACKLIGHT_LABEL_X = SECTION_MARGIN + 20;
 static constexpr int BACKLIGHT_SLIDER_X = 250;
 static constexpr int BACKLIGHT_SLIDER_W = 500;
 static constexpr int BACKLIGHT_SLIDER_H = 40;
-static constexpr int VERSION_Y = BACKLIGHT_Y + 80;
+static constexpr int SLIDER_ROW_PITCH = 60;
+static constexpr int VERSION_GAP = 80;
 #else
 static constexpr int SECTION_TEXT_SIZE = 1;
 static constexpr int SECTION_START_Y = UI_CONTENT_Y + 5;
@@ -38,7 +40,8 @@ static constexpr int BACKLIGHT_LABEL_X = SECTION_MARGIN;
 static constexpr int BACKLIGHT_SLIDER_X = 100;
 static constexpr int BACKLIGHT_SLIDER_W = 180;
 static constexpr int BACKLIGHT_SLIDER_H = 20;
-static constexpr int VERSION_Y = BACKLIGHT_Y + 35;
+static constexpr int SLIDER_ROW_PITCH = 28;
+static constexpr int VERSION_GAP = 35;
 #endif
 
 // Firmware version
@@ -48,22 +51,36 @@ ScreenSettings::ScreenSettings()
     : m_isActive(false)
     , m_needsRedraw(false)
     , m_backlight(80)  // Default 80%
+    , m_dragSlider(-1)
+    , m_dragTouchId(-1)
+    , m_hpInserted(false)
 {
 }
 
 void ScreenSettings::enter()
 {
     m_isActive = true;
+    m_dragSlider = -1;
+    m_hpInserted = board_audio_headphone_inserted();
 }
 
 void ScreenSettings::leave()
 {
     m_isActive = false;
+    m_dragSlider = -1;
+    board_audio_save();
 }
 
 void ScreenSettings::update()
 {
     if (!m_isActive) return;
+
+    // Plugging headphones in mutes the speaker: show it on the speaker row
+    bool hp = board_audio_headphone_inserted();
+    if (hp != m_hpInserted) {
+        m_hpInserted = hp;
+        if (sliderVisible(SLIDER_SPEAKER)) drawSliderPartial(SLIDER_SPEAKER);
+    }
 
     if (m_needsRedraw) {
         ui_strip::repaint_content([&]() { draw(); });
@@ -73,8 +90,11 @@ void ScreenSettings::update()
 
 void ScreenSettings::draw()
 {
+    m_hpInserted = board_audio_headphone_inserted();
     drawBleMidiSection();
-    drawBacklightSlider();
+    for (int id = 0; id < SLIDER_COUNT; id++) {
+        if (sliderVisible(id)) drawSlider(id);
+    }
     drawVersionInfo();
 }
 
@@ -112,80 +132,152 @@ void ScreenSettings::drawBleMidiSection()
     ui_gfx().print("(BLE scanning not available)");
 }
 
-void ScreenSettings::drawBacklightSlider()
+bool ScreenSettings::sliderVisible(int id) const
 {
+    switch (id) {
+    case SLIDER_BACKLIGHT: return true;
+    case SLIDER_SPEAKER:   return board_audio_has_output(BOARD_AUDIO_SPEAKER);
+    case SLIDER_HEADPHONE: return board_audio_has_output(BOARD_AUDIO_HEADPHONE);
+    default:               return false;
+    }
+}
+
+int ScreenSettings::sliderY(int id) const
+{
+    // Rows are packed: a hidden slider takes no space
     int y = BACKLIGHT_Y;
+    for (int i = 0; i < id; i++) {
+        if (sliderVisible(i)) y += SLIDER_ROW_PITCH;
+    }
+    return y;
+}
+
+void ScreenSettings::drawSlider(int id)
+{
+    int y = sliderY(id);
+    const char* label = "Backlight:";
+    uint8_t value = m_backlight;
+    uint16_t fill = UI_COLOR_GREEN;
+    bool muted = false;
+
+    if (id == SLIDER_SPEAKER) {
+        label = "Speaker:";
+        value = board_audio_get_volume(BOARD_AUDIO_SPEAKER);
+        fill = UI_COLOR_CYAN;
+        muted = m_hpInserted;
+    } else if (id == SLIDER_HEADPHONE) {
+        label = "Headphones:";
+        value = board_audio_get_volume(BOARD_AUDIO_HEADPHONE);
+        fill = UI_COLOR_CYAN;
+    }
+    if (muted) fill = UI_COLOR_GRAY;
 
     // Draw label
     ui_gfx().setTextSize(SECTION_TEXT_SIZE);
     ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
     int labelY = y + (BACKLIGHT_SLIDER_H - 8 * SECTION_TEXT_SIZE) / 2;
     ui_gfx().setCursor(BACKLIGHT_LABEL_X, labelY);
-    ui_gfx().print("Backlight:");
+    ui_gfx().print(label);
 
     // Draw slider background
     ui_gfx().fillRect(BACKLIGHT_SLIDER_X, y, BACKLIGHT_SLIDER_W, BACKLIGHT_SLIDER_H, UI_COLOR_DARKGRAY);
     ui_gfx().drawRect(BACKLIGHT_SLIDER_X, y, BACKLIGHT_SLIDER_W, BACKLIGHT_SLIDER_H, UI_COLOR_GRAY);
 
     // Draw slider fill
-    int fillW = (m_backlight * BACKLIGHT_SLIDER_W) / 100;
+    int fillW = (value * BACKLIGHT_SLIDER_W) / 100;
     if (fillW > 0) {
-        ui_gfx().fillRect(BACKLIGHT_SLIDER_X, y, fillW, BACKLIGHT_SLIDER_H, UI_COLOR_GREEN);
+        ui_gfx().fillRect(BACKLIGHT_SLIDER_X, y, fillW, BACKLIGHT_SLIDER_H, fill);
     }
 
-    // Draw percentage
-    char pctStr[8];
-    snprintf(pctStr, sizeof(pctStr), "%d%%", m_backlight);
-    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-    ui_gfx().setCursor(BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W + 8 * SECTION_TEXT_SIZE, labelY);
+    // Draw percentage (clear the old text first: "100%" -> "99%" is shorter)
+    int textX = BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W + 8 * SECTION_TEXT_SIZE;
+    ui_gfx().fillRect(textX, labelY, UI_SCREEN_WIDTH - textX, 8 * SECTION_TEXT_SIZE, UI_COLOR_BLACK);
+    char pctStr[16];
+    snprintf(pctStr, sizeof(pctStr), muted ? "%d%% muted" : "%d%%", value);
+    ui_gfx().setTextColor(muted ? UI_COLOR_GRAY : UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setCursor(textX, labelY);
     ui_gfx().print(pctStr);
+}
+
+void ScreenSettings::drawSliderPartial(int id)
+{
+    // Partial redraw needs its own transaction
+    ui_gfx().startWrite();
+    drawSlider(id);
+    ui_gfx().endWrite();
 }
 
 void ScreenSettings::drawVersionInfo()
 {
+    int y = BACKLIGHT_Y;
+    for (int id = 1; id < SLIDER_COUNT; id++) {
+        if (sliderVisible(id)) y += SLIDER_ROW_PITCH;
+    }
     ui_gfx().setTextSize(SECTION_TEXT_SIZE);
     ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-    ui_gfx().setCursor(BACKLIGHT_LABEL_X, VERSION_Y);
+    ui_gfx().setCursor(BACKLIGHT_LABEL_X, y + VERSION_GAP);
     ui_gfx().print("Version: ");
     ui_gfx().print(FIRMWARE_VERSION);
 }
 
-bool ScreenSettings::hitTestBacklight(int x, int y)
+int ScreenSettings::hitTestSlider(int x, int y) const
 {
-    return (x >= BACKLIGHT_SLIDER_X &&
-            x < BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W &&
-            y >= BACKLIGHT_Y &&
-            y < BACKLIGHT_Y + BACKLIGHT_SLIDER_H);
+    if (x < BACKLIGHT_SLIDER_X || x >= BACKLIGHT_SLIDER_X + BACKLIGHT_SLIDER_W) return -1;
+    for (int id = 0; id < SLIDER_COUNT; id++) {
+        if (!sliderVisible(id)) continue;
+        int sy = sliderY(id);
+        if (y >= sy && y < sy + BACKLIGHT_SLIDER_H) return id;
+    }
+    return -1;
 }
 
-void ScreenSettings::handleBacklightTouch(int x)
+void ScreenSettings::handleSliderTouch(int id, int x)
 {
-    // Calculate new backlight value
+    // Calculate new value
     int relX = x - BACKLIGHT_SLIDER_X;
     if (relX < 0) relX = 0;
     if (relX > BACKLIGHT_SLIDER_W) relX = BACKLIGHT_SLIDER_W;
 
     uint8_t newLevel = (relX * 100) / BACKLIGHT_SLIDER_W;
 
-    if (newLevel != m_backlight) {
+    if (id == SLIDER_BACKLIGHT) {
+        if (newLevel == m_backlight) return;
         m_backlight = newLevel;
 
         // Apply backlight
         int brightness = (m_backlight * 255) / 100;
         M5.Lcd.setBrightness(brightness);
-
-        // Redraw slider (requires manual transaction for partial redraw)
-        ui_gfx().startWrite();
-        drawBacklightSlider();
-        ui_gfx().endWrite();
+    } else {
+        board_audio_output_t out = (id == SLIDER_SPEAKER) ? BOARD_AUDIO_SPEAKER : BOARD_AUDIO_HEADPHONE;
+        if (newLevel == board_audio_get_volume(out)) return;
+        board_audio_set_volume(out, newLevel);   // applied to the codec / gain at once
     }
+
+    drawSliderPartial(id);
 }
 
 void ScreenSettings::onTouch(int touchId, int x, int y, bool pressed)
 {
-    (void)touchId;  // Single touch for slider
-    if (pressed && hitTestBacklight(x, y)) {
-        handleBacklightTouch(x);
+    if (pressed) {
+        if (m_dragSlider >= 0) return;  // one finger per slider drag
+        int id = hitTestSlider(x, y);
+        if (id < 0) return;
+        m_dragSlider = id;
+        m_dragTouchId = touchId;
+        handleSliderTouch(id, x);
+    } else if (touchId == m_dragTouchId && m_dragSlider >= 0) {
+        // Volumes are kept in NVS; write once the finger lifts
+        if (m_dragSlider != SLIDER_BACKLIGHT) board_audio_save();
+        m_dragSlider = -1;
+        m_dragTouchId = -1;
+    }
+}
+
+void ScreenSettings::onTouchMove(int touchId, int x, int y)
+{
+    (void)y;    // keep following the slider the touch started on
+    if (touchId == m_dragTouchId && m_dragSlider >= 0) {
+        handleSliderTouch(m_dragSlider, x);
     }
 }
 
@@ -214,10 +306,7 @@ void ScreenSettings::setBacklight(uint8_t level)
     M5.Lcd.setBrightness(brightness);
 
     if (m_isActive) {
-        // Partial redraw needs its own transaction
-        ui_gfx().startWrite();
-        drawBacklightSlider();
-        ui_gfx().endWrite();
+        drawSliderPartial(SLIDER_BACKLIGHT);
     }
 }
 

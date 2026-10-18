@@ -61,7 +61,7 @@ endif()
 # USB Host bring-up now lives inside picoruby-usb_midi_host (Phase 5a-2),
 # so main only needs the legacy 'driver' component for whatever else it
 # might pull in.
-set(PRIV_REQUIRES_LIST driver esp_tinyusb)
+set(PRIV_REQUIRES_LIST driver esp_tinyusb nvs_flash)
 
 idf_component_register(
     SRCS ${SRCS}
