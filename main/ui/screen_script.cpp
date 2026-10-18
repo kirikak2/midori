@@ -4,6 +4,7 @@
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include "esp_log.h"
 
 extern "C" {
@@ -49,7 +50,9 @@ static constexpr int LIST_AREA_HEIGHT =
     - BUTTON_HEIGHT - BUTTON_MARGIN - LIST_BOTTOM_PADDING;
 
 ScreenScripts::ScreenScripts()
-    : m_scriptCount(0)
+    : m_scripts(nullptr)
+    , m_scriptCount(0)
+    , m_scriptCapacity(0)
     , m_selectedIndex(-1)
     , m_scrollOffset(0)
     , m_isActive(false)
@@ -62,7 +65,6 @@ ScreenScripts::ScreenScripts()
     , m_pressStartScrollOffset(0)
     , m_pressInList(false)
 {
-    memset(m_scripts, 0, sizeof(m_scripts));
     m_currentScript[0] = '\0';
 }
 
@@ -98,6 +100,17 @@ void ScreenScripts::ensureSelectedVisible()
     clampScrollOffset();
 }
 
+void ScreenScripts::reloadScripts()
+{
+    static_assert(MAX_SCRIPTS == PICORUBY_MAX_SCRIPTS, "keep in sync with picoruby-esp32.h");
+    static_assert(MAX_FILENAME_LEN == PICORUBY_MAX_SCRIPT_NAME, "keep in sync with picoruby-esp32.h");
+
+    clearScripts();
+    picoruby_esp32_foreach_script([](const char* name, void* arg) {
+        static_cast<ScreenScripts*>(arg)->addScript(name);
+    }, this);
+}
+
 void ScreenScripts::enter()
 {
     m_isActive = true;
@@ -106,14 +119,7 @@ void ScreenScripts::enter()
     uint32_t currentVersion = picoruby_esp32_get_script_list_version();
     if (currentVersion != m_scriptListVersion && picoruby_esp32_script_list_ready()) {
         m_scriptListVersion = currentVersion;
-        clearScripts();
-        int count = picoruby_esp32_get_script_count();
-        for (int i = 0; i < count && m_scriptCount < MAX_SCRIPTS; i++) {
-            const char* name = picoruby_esp32_get_script_name(i);
-            if (name != NULL) {
-                addScript(name);
-            }
-        }
+        reloadScripts();
         if (m_scriptCount > 0 && m_selectedIndex < 0) {
             m_selectedIndex = 0;
         }
@@ -138,14 +144,7 @@ void ScreenScripts::update()
     uint32_t currentVersion = picoruby_esp32_get_script_list_version();
     if (currentVersion != m_scriptListVersion && picoruby_esp32_script_list_ready()) {
         m_scriptListVersion = currentVersion;
-        clearScripts();
-        int count = picoruby_esp32_get_script_count();
-        for (int i = 0; i < count && m_scriptCount < MAX_SCRIPTS; i++) {
-            const char* name = picoruby_esp32_get_script_name(i);
-            if (name != NULL) {
-                addScript(name);
-            }
-        }
+        reloadScripts();
         ESP_LOGI(TAG, "Script list updated: %d script(s) (version %lu)", m_scriptCount, (unsigned long)currentVersion);
         if (m_scriptCount > 0 && m_selectedIndex < 0) {
             m_selectedIndex = 0;
@@ -512,6 +511,18 @@ void ScreenScripts::addScript(const char* filename)
 {
     if (m_scriptCount >= MAX_SCRIPTS || filename == nullptr) return;
 
+    if (m_scriptCount == m_scriptCapacity) {
+        int cap = m_scriptCapacity ? m_scriptCapacity * 2 : 16;
+        if (cap > MAX_SCRIPTS) cap = MAX_SCRIPTS;
+        void* p = realloc(m_scripts, cap * sizeof(*m_scripts));
+        if (p == nullptr) {
+            ESP_LOGE(TAG, "Out of memory for script list (%d entries)", cap);
+            return;
+        }
+        m_scripts = static_cast<char (*)[MAX_FILENAME_LEN]>(p);
+        m_scriptCapacity = cap;
+    }
+
     // Find insertion position for case-insensitive alphabetical order
     int pos = m_scriptCount;
     for (int i = 0; i < m_scriptCount; i++) {
@@ -543,7 +554,9 @@ void ScreenScripts::clearScripts()
     m_scriptCount = 0;
     m_selectedIndex = -1;
     m_scrollOffset = 0;
-    memset(m_scripts, 0, sizeof(m_scripts));
+    free(m_scripts);
+    m_scripts = nullptr;
+    m_scriptCapacity = 0;
 
     if (m_isActive) {
         m_needsRedraw = true;

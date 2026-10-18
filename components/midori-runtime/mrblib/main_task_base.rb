@@ -213,14 +213,22 @@ def notify_scripts_to_c
   # Only scan if SD card is mounted
   if $sd_available
     begin
+      names = []
       Dir.open("/sd") do |dir|
         while entry = dir.read
           next if entry == "." || entry == ".."
           next unless entry.end_with?(".rb")
-          sm.add(entry)
+          names << entry
         end
       end
-      puts "Scripts notified to C side"
+      # Sort first so that, if the list overflows, the entries kept do not
+      # depend on the FAT directory order.
+      names = names.sort { |a, b| a.downcase <=> b.downcase }
+      skipped = names.count { |name| !sm.add(name) }
+      puts "Scripts notified to C side (#{names.size - skipped} of #{names.size})"
+      if skipped > 0
+        puts "Warning: #{skipped} script(s) not listed (too many, or name too long)"
+      end
     rescue => e
       puts "Failed to scan scripts: #{e.message}"
     end

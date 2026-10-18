@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 #include <nvs_flash.h>
 #include <stdio.h>
@@ -7,6 +8,7 @@
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "picoruby.h"
 #include "picoruby-esp32.h"
 #include "midi.h"            // MIDI_TRANSPORT_USB_DEVICE (picoruby-midi)
@@ -164,10 +166,26 @@ picoruby_esp32_midi_cleanup(void)
 }
 
 // Script list management
-static char g_script_list[PICORUBY_MAX_SCRIPTS][PICORUBY_MAX_SCRIPT_NAME];
+//
+// Written by the PicoRuby task (notify_scripts_to_c) and read by the UI task,
+// so every access goes through g_script_list_mutex. The names are heap
+// allocated on demand rather than kept in .bss (see docs/MEMORY_ALLOCATION.md).
+static char **g_script_list = NULL;
 static int g_script_count = 0;
+static int g_script_capacity = 0;
+static StaticSemaphore_t g_script_list_mutex_buf;
+static SemaphoreHandle_t g_script_list_mutex = NULL;
 static volatile bool g_script_list_ready = false;
 static volatile uint32_t g_script_list_version = 0;
+
+// Static creation only initializes memory, so it is safe before the scheduler
+// starts and both tasks always see the same mutex.
+__attribute__((constructor))
+static void
+script_list_mutex_init(void)
+{
+  g_script_list_mutex = xSemaphoreCreateMutexStatic(&g_script_list_mutex_buf);
+}
 
 // SD card refresh request (from UI to Ruby)
 // Note: Not static, accessible from picoruby_supervisor.c
@@ -176,39 +194,80 @@ volatile bool g_sd_refresh_requested = false;
 void
 picoruby_esp32_clear_script_list(void)
 {
+  xSemaphoreTake(g_script_list_mutex, portMAX_DELAY);
+  for (int i = 0; i < g_script_count; i++) {
+    free(g_script_list[i]);
+  }
+  free(g_script_list);
+  g_script_list = NULL;
   g_script_count = 0;
+  g_script_capacity = 0;
   g_script_list_ready = false;
-  memset(g_script_list, 0, sizeof(g_script_list));
+  xSemaphoreGive(g_script_list_mutex);
   ESP_LOGD(TAG, "Script list cleared");
 }
 
 bool
 picoruby_esp32_add_script(const char *filename)
 {
-  if (filename == NULL || g_script_count >= PICORUBY_MAX_SCRIPTS) {
+  if (filename == NULL) {
+    return false;
+  }
+  size_t len = strlen(filename);
+  if (len == 0 || len >= PICORUBY_MAX_SCRIPT_NAME) {
+    // A truncated name would not open, so leave it out instead.
+    ESP_LOGW(TAG, "Script name too long (max %d): %s", PICORUBY_MAX_SCRIPT_NAME - 1, filename);
     return false;
   }
 
-  strncpy(g_script_list[g_script_count], filename, PICORUBY_MAX_SCRIPT_NAME - 1);
-  g_script_list[g_script_count][PICORUBY_MAX_SCRIPT_NAME - 1] = '\0';
-  g_script_count++;
-  ESP_LOGD(TAG, "Added script: %s (total: %d)", filename, g_script_count);
-  return true;
+  bool added = false;
+  xSemaphoreTake(g_script_list_mutex, portMAX_DELAY);
+  if (g_script_count < PICORUBY_MAX_SCRIPTS) {
+    if (g_script_count == g_script_capacity) {
+      int cap = g_script_capacity ? g_script_capacity * 2 : 16;
+      if (cap > PICORUBY_MAX_SCRIPTS) cap = PICORUBY_MAX_SCRIPTS;
+      char **list = realloc(g_script_list, cap * sizeof(char *));
+      if (list != NULL) {
+        g_script_list = list;
+        g_script_capacity = cap;
+      }
+    }
+    if (g_script_count < g_script_capacity) {
+      char *name = strdup(filename);
+      if (name != NULL) {
+        g_script_list[g_script_count++] = name;
+        added = true;
+      }
+    }
+  }
+  int count = g_script_count;
+  xSemaphoreGive(g_script_list_mutex);
+
+  if (added) {
+    ESP_LOGD(TAG, "Added script: %s (total: %d)", filename, count);
+  }
+  return added;
 }
 
 int
 picoruby_esp32_get_script_count(void)
 {
-  return g_script_count;
+  xSemaphoreTake(g_script_list_mutex, portMAX_DELAY);
+  int count = g_script_count;
+  xSemaphoreGive(g_script_list_mutex);
+  return count;
 }
 
-const char*
-picoruby_esp32_get_script_name(int index)
+int
+picoruby_esp32_foreach_script(void (*fn)(const char *filename, void *arg), void *arg)
 {
-  if (index < 0 || index >= g_script_count) {
-    return NULL;
+  xSemaphoreTake(g_script_list_mutex, portMAX_DELAY);
+  int count = g_script_count;
+  for (int i = 0; i < count; i++) {
+    fn(g_script_list[i], arg);
   }
-  return g_script_list[index];
+  xSemaphoreGive(g_script_list_mutex);
+  return count;
 }
 
 bool

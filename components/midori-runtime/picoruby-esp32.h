@@ -48,8 +48,8 @@ void picoruby_esp32_midi_cleanup(void);
 /**
  * @brief Script list management (called from Ruby to notify C about available scripts)
  */
-#define PICORUBY_MAX_SCRIPTS 20
-#define PICORUBY_MAX_SCRIPT_NAME 32
+#define PICORUBY_MAX_SCRIPTS 128
+#define PICORUBY_MAX_SCRIPT_NAME 64  // including the terminating NUL
 
 /**
  * @brief Clear the script list
@@ -60,7 +60,8 @@ void picoruby_esp32_clear_script_list(void);
  * @brief Add a script to the list
  *
  * @param filename Script filename (without path, e.g., "app.rb")
- * @return true if added successfully, false if list is full
+ * @return true if added, false if the list is full or the name is too long
+ *         (PICORUBY_MAX_SCRIPT_NAME - 1 bytes at most)
  */
 bool picoruby_esp32_add_script(const char *filename);
 
@@ -72,12 +73,14 @@ bool picoruby_esp32_add_script(const char *filename);
 int picoruby_esp32_get_script_count(void);
 
 /**
- * @brief Get script name by index
+ * @brief Call fn for every script name, in list order
  *
- * @param index Script index (0 to count-1)
- * @return Pointer to script filename, or NULL if index out of range
+ * The list is locked for the duration, so fn must copy the name if it needs
+ * it afterwards and must not call back into the script list API.
+ *
+ * @return Number of scripts visited
  */
-const char* picoruby_esp32_get_script_name(int index);
+int picoruby_esp32_foreach_script(void (*fn)(const char *filename, void *arg), void *arg);
 
 /**
  * @brief Check if script list is available (SD card mounted and scripts enumerated)

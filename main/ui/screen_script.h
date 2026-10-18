@@ -33,8 +33,9 @@ public:
     void refreshFromSD();
 
 private:
-    static constexpr int MAX_SCRIPTS = 20;
-    static constexpr int MAX_FILENAME_LEN = 32;
+    // Match PICORUBY_MAX_SCRIPTS / PICORUBY_MAX_SCRIPT_NAME (checked in the .cpp)
+    static constexpr int MAX_SCRIPTS = 128;
+    static constexpr int MAX_FILENAME_LEN = 64;
 
     // Buttons in the bottom row of the content area
     enum ButtonId {
@@ -43,8 +44,10 @@ private:
         BUTTON_COUNT,
     };
 
-    char m_scripts[MAX_SCRIPTS][MAX_FILENAME_LEN];
+    // Heap allocated and grown on demand, so the list costs nothing in .bss
+    char (*m_scripts)[MAX_FILENAME_LEN];
     int m_scriptCount;
+    int m_scriptCapacity;
     int m_selectedIndex;
     int m_scrollOffset;
     char m_currentScript[MAX_FILENAME_LEN];
@@ -59,6 +62,9 @@ private:
     int m_pressStartY;
     int m_pressStartScrollOffset;
     bool m_pressInList;
+
+    // Copy the C-side list into m_scripts (call when its version changed)
+    void reloadScripts();
 
     int visibleItems() const;
     int maxScrollOffset() const;
