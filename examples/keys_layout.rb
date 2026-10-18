@@ -13,7 +13,7 @@
 require 'midi'
 require 'ui'
 
-out = MIDIDevices.amy || MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
+out = MIDIDevices.usb_midi_device
 unless out
   puts "No MIDI output available"
   return
@@ -35,6 +35,9 @@ UI.layout("Play", cols: 4, rows: [1, 2]) do
   # keys: を省くと UI::Keys.new(**キーワード) で作られる（layout[:id] で取れる）
   keys col: 0..3, row: 1, keys: kb
 end.show
+
+# PC（DAW）から USB-MIDI で送られてきたノートで鍵盤を光らせる
+MIDI.route(out, kb)
 
 sm = ScriptManager.new
 loop do

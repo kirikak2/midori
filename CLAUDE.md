@@ -813,6 +813,7 @@ pad.show
 keys = UI::Keys.new(octaves: 2, low: 48, velocity: :position, device: MIDIDevices.amy)
 MIDI.route(keys, MIDIDevices.sam2695)          # 弾いた音を SAM2695 にも
 MIDI.route(MIDIDevices.usb_midi_host, keys)    # 外部鍵盤の演奏で鍵を光らせる
+MIDI.route(MIDIDevices.usb_midi_device, keys)  # PC から来たノートで鍵を光らせる
 keys.set_color([48, 52, 55], :blue)            # スケール / 和音の表示
 keys.show
 ```
@@ -998,7 +999,8 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
 ### MIDI.route（MIDI Thru / 2026-10-04）
 
 `MIDI.route(from, to, channel: nil)` で、受信をトランスポート間で **C の入力タスクが直接転送**する
-（Ruby を通らない）。受信元は USB-MIDI Host と UART（と、自分で転送する送信元として宣言したトランスポート。例: `UI::Keys`）、送信先は登録表の任意のトランスポート。
+（Ruby を通らない）。受信元は USB-MIDI Host と UART と USB-MIDI Device（デバイスから張られたルートがある間だけ入力タスクが読む。
+その間 `read_available` とは併用しない）（と、自分で転送する送信元として宣言したトランスポート。例: `UI::Keys`）、送信先は登録表の任意のトランスポート。
 `MIDI.unroute(from, to = nil)` / `MIDI.unroute_all`。スクリプト停止時に
 `picoruby_esp32_midi_cleanup()` が `MIDI_route_clear()` で全消去する。
 

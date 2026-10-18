@@ -594,7 +594,8 @@ picoruby-midi に入れた（`include/midi_route.h` / `src/midi_route.c` / `mrbl
   ルートは送信先をまとめる。転送は登録表の `MIDI_transport_send()` で、同じ送信先に二重には送らない。
   受信元自身へは送らない
 - **受信元**は入力タスクが読むトランスポートだけ：USB-MIDI Host（受信パケットをそのまま転送。
-  SysEx も含む）と UART（パーサを通したイベントを USB-MIDI パケットに戻して転送。SysEx は対象外）
+  SysEx も含む）と UART（パーサを通したイベントを USB-MIDI パケットに戻して転送。SysEx は対象外）。
+  2026-10-18 から USB-MIDI Device（PC からの受信。デバイスから張られたルートがある間だけ読む）も加えた
 - **入力タスク**は「Ruby の `MIDI::Input` が読んでいる」か「ルートがある」間動く。Ruby 用キューへの
   積み込みは `MIDI::Input` が動いているときだけ（バインディングの `_start_task` / `_stop_task` が
   `MIDI_Input_set_queueing()` で切り替える）。ルートだけのときにキューが溢れて警告を出し続けないため。

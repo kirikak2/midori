@@ -61,6 +61,7 @@ keys.show              # Keys 画面へ（UI.keys / UI.show(:keys) と同じ）
 ```ruby
 MIDI.route(keys, MIDIDevices.amy)               # 弾いた音を AMY へ（C で転送）
 MIDI.route(MIDIDevices.usb_midi_host, keys)     # 外部鍵盤で弾いた音で鍵を光らせる
+MIDI.route(MIDIDevices.usb_midi_device, keys)   # PC（DAW）から送られてきた音で鍵を光らせる
 MIDI::Device.new(keys).note_on(60)              # 60 を光らせる（trigger なら自動で消える）
 ```
 
@@ -170,11 +171,18 @@ XYPad / Tombola と同じく、モデルが 1 つなので 1 レイアウトに 
 | 関数 | 内容 |
 |---|---|
 | `MIDI_route_set_source(bit, on)` | `bit` を送信元として宣言 / 取り消し |
-| `MIDI_route_sources()` | 送信元になれるビット（0x03 + 宣言済み）。Ruby の `MIDI._route_sources` |
+| `MIDI_route_sources()` | 送信元になれるビット（0x07 + 宣言済み）。Ruby の `MIDI._route_sources` |
 | `MIDI_route_targets(src, cin, b1)` | そのパケットの転送先マスク（`MIDI_route_packet` の中身を切り出したもの） |
 
 `MIDI.route` は送信元を `MIDI._route_sources` で検査し、入力タスク由来でない送信元では
 `_route_start`（入力タスクの起動）を呼ばない。
+
+**USB-MIDI Device（0x04）も入力タスクが読む送信元にした**（2026-10-18）。PC から来たノートで
+鍵盤を光らせるため（`MIDI.route(MIDIDevices.usb_midi_device, keys)`）。入力タスクがデバイスの
+受信リングバッファを読むのは**デバイスから張られたルートがある間だけ**（`MIDI_route_from()`）で、
+その間は PC からのパケットを全部取るので `USB_MIDI_DEVICE#read_available` と併用しないこと。
+ルートが無いときは従来どおり Ruby の `read_available` 用にバッファへ残す。列挙（`tud_ready()`）
+は見ないので、PC がポートを開く前に張ったルートもそのまま効く。
 
 ## タッチ → ノート
 
