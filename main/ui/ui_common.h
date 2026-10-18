@@ -171,7 +171,7 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         11
+#define UI_SCREEN_COUNT         12
 
 // Screen indices
 // New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
@@ -188,6 +188,7 @@ typedef enum {
     UI_SCREEN_XYPAD,
     UI_SCREEN_LAYOUT,     // Script-defined layouts (docs/UI_LAYOUT_DSL.md)
     UI_SCREEN_HOME,       // Tile menu every other screen is reached from
+    UI_SCREEN_KEYS,       // On-screen keyboard (docs/KEYS.md)
 } ui_screen_index_t;
 
 // What caused a screen switch, reported with UI_EVENT_SCREEN_CHANGE
@@ -370,6 +371,7 @@ typedef enum {
     UI_EVENT_KNOB_BANK,       // The visible knob bank was switched
     UI_EVENT_XYPAD_TOUCH,     // An XYPad slot's touch moved through a phase
     UI_EVENT_WIDGET,          // A pad / knob on a layout was operated
+    UI_EVENT_KEY,             // A key of the on-screen keyboard went down / up
 } ui_event_type_t;
 
 typedef enum {
@@ -431,6 +433,12 @@ typedef struct {
             bool    final;   // Knob: last change of a drag
             float   value;   // Knob value
         } widget;
+        struct {
+            uint8_t note;    // For UI_EVENT_KEY
+            uint8_t velocity;
+            uint8_t channel;
+            bool    on;
+        } key;
     } data;
 } ui_event_t;
 
@@ -580,6 +588,62 @@ int ui_xypad_touch_down(int touch_id, int x, int y, int content_x, int content_y
 int ui_xypad_touch_move(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
 int ui_xypad_touch_up(int touch_id);
 
+// --- Keys -------------------------------------------------------------------
+// An on-screen keyboard of 1 to 4 octaves (13 to 49 keys) that is also a
+// picoruby-midi transport (docs/KEYS.md). Implemented in ui_keys.cpp.
+//
+// As a source, a touched key sends its note on / off from the UI task, in C,
+// to the keyboard's own destinations (out_mask) and to wherever MIDI.route
+// sends what comes from its transport bit -- the same latency argument as
+// Tombola's. As a destination (MIDI::Device.new(keys), MIDI.route(x, keys))
+// incoming notes light the keys, so the keyboard can mirror what another
+// instrument plays.
+//
+// One keyboard (a single model, like the XYPad's), allocated the first time
+// anything touches it: the per-note tables are ~1KB, which is not something
+// to leave in .bss (docs/MEMORY_ALLOCATION.md).
+#define UI_KEYS_MIN_OCTAVES   1
+#define UI_KEYS_MAX_OCTAVES   4
+#define UI_KEYS_MAX_KEYS     (UI_KEYS_MAX_OCTAVES * 12 + 1)   // 49
+
+typedef enum {
+    KEYS_VELOCITY_FIXED = 0,   // Always the configured velocity
+    KEYS_VELOCITY_POSITION,    // Softer near the top of a key, louder at its bottom
+} keys_velocity_mode_t;
+
+// Every setter may be called from any task; drawing happens on the UI task.
+void ui_keys_reset(void);                // Defaults, lights and key colours cleared
+
+// Named parameters, string-keyed like Tombola's.
+// Int keys: octaves low channel velocity velocity_mode slide labels notify
+//           out_mask white_color black_color press_color light_color
+//           transport_bit (read-only)
+// low is moved down to the nearest white key; octaves is clamped to
+// UI_KEYS_MIN_OCTAVES..UI_KEYS_MAX_OCTAVES and low so the top key fits 0..127.
+bool ui_keys_set_i(const char* name, int value);
+int  ui_keys_get_i(const char* name);
+
+// Per-note colour (RGB565), shown while the key is neither pressed nor lit.
+// color < 0 clears it back to plain white / black.
+void ui_keys_set_key_color(int note, int color);
+int  ui_keys_get_key_color(int note);    // -1 when not set
+void ui_keys_clear_key_colors(void);
+// Colour incoming notes on a channel light their key with; color < 0 clears
+// it back to light_color.
+void ui_keys_set_channel_color(int channel, int color);
+
+// The keyboard as a destination: what its transport's send_packet does.
+// Note on / off light and unlight keys, All Notes Off / All Sound Off and
+// System Reset clear the lights.
+void ui_keys_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
+void ui_keys_clear_lights(void);
+
+bool ui_keys_is_lit(int note);           // Lit by incoming MIDI
+bool ui_keys_is_pressed(int note);       // Held down by a finger
+
+// A script ended: back to defaults (any task, including the MIDI clock's).
+void ui_keys_cleanup(void);
+
 // --- Layouts ----------------------------------------------------------------
 // Script-defined screens of pads, knobs, XYPad... placed on a grid by Ruby
 // (docs/UI_LAYOUT_DSL.md). Up to UI_LAYOUT_MAX_LAYOUTS live at once, each a
@@ -593,6 +657,7 @@ typedef enum {
     UI_WIDGET_KNOB,
     UI_WIDGET_XYPAD,      // The XYPad screen's view, drawn in the widget's cell
     UI_WIDGET_TOMBOLA,    // Likewise the Tombola's
+    UI_WIDGET_KEYS,       // Likewise the Keys'
 } ui_widget_kind_t;
 
 typedef struct {

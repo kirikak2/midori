@@ -109,6 +109,7 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
         case PICORUBY_UI_EVENT_KNOB_BANK:     type = MRB_SYM(knob_bank); break;
         case PICORUBY_UI_EVENT_XYPAD_TOUCH:   type = MRB_SYM(xypad_touch); break;
         case PICORUBY_UI_EVENT_WIDGET:        type = MRB_SYM(widget); break;
+        case PICORUBY_UI_EVENT_KEY:           type = MRB_SYM(key); break;
         default:                              type = MRB_SYM(unknown); break;
     }
 
@@ -193,6 +194,12 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             HSET(final, mrb_bool_value(event.widget_final));
             break;
         }
+        case PICORUBY_UI_EVENT_KEY:
+            HSET(note, mrb_fixnum_value(event.key_note));
+            HSET(velocity, mrb_fixnum_value(event.key_velocity));
+            HSET(channel, mrb_fixnum_value(event.key_channel));
+            HSET(state, mrb_bool_value(event.key_on));
+            break;
         default:
             break;
     }
@@ -874,6 +881,112 @@ mrb_ui_lw_knob_reset(mrb_state *mrb, mrb_value self)
 }
 
 /* ------------------------------------------------------------------------
+ * Keys
+ *
+ * The Ruby-visible object is UI::Keys (mrblib/ui.rb). Parameters go through
+ * _keys_set_i / _keys_get_i keyed by name, the same shape as Tombola.
+ * ------------------------------------------------------------------------ */
+
+static mrb_value
+mrb_ui_keys_reset(mrb_state *mrb, mrb_value self)
+{
+    picoruby_ui_keys_reset();
+    return mrb_nil_value();
+}
+
+/* UI._keys_set_i(name, value) -> true / false (unknown name) */
+static mrb_value
+mrb_ui_keys_set_i(mrb_state *mrb, mrb_value self)
+{
+    mrb_value name_v, value;
+    int i;
+    mrb_get_args(mrb, "oo", &name_v, &value);
+    const char *name = param_name(mrb, name_v);
+    if (name == NULL || !val_to_flag_i(value, &i)) return mrb_false_value();
+    return mrb_bool_value(picoruby_ui_keys_set_i(name, i));
+}
+
+/* UI._keys_get_i(name) */
+static mrb_value
+mrb_ui_keys_get_i(mrb_state *mrb, mrb_value self)
+{
+    mrb_value name_v;
+    mrb_get_args(mrb, "o", &name_v);
+    const char *name = param_name(mrb, name_v);
+    if (name == NULL) return mrb_fixnum_value(0);
+    return mrb_fixnum_value(picoruby_ui_keys_get_i(name));
+}
+
+/* UI._keys_set_key_color(note, rgb565 or -1) */
+static mrb_value
+mrb_ui_keys_set_key_color(mrb_state *mrb, mrb_value self)
+{
+    mrb_value note, color;
+    mrb_get_args(mrb, "oo", &note, &color);
+    picoruby_ui_keys_set_key_color(val_to_i(note), val_to_i(color));
+    return mrb_nil_value();
+}
+
+/* UI._keys_key_color(note) -> rgb565, or -1 when not set */
+static mrb_value
+mrb_ui_keys_key_color(mrb_state *mrb, mrb_value self)
+{
+    mrb_value note;
+    mrb_get_args(mrb, "o", &note);
+    return mrb_fixnum_value(picoruby_ui_keys_get_key_color(val_to_i(note)));
+}
+
+static mrb_value
+mrb_ui_keys_clear_key_colors(mrb_state *mrb, mrb_value self)
+{
+    picoruby_ui_keys_clear_key_colors();
+    return mrb_nil_value();
+}
+
+/* UI._keys_set_channel_color(channel, rgb565 or -1) */
+static mrb_value
+mrb_ui_keys_set_channel_color(mrb_state *mrb, mrb_value self)
+{
+    mrb_value channel, color;
+    mrb_get_args(mrb, "oo", &channel, &color);
+    picoruby_ui_keys_set_channel_color(val_to_i(channel), val_to_i(color));
+    return mrb_nil_value();
+}
+
+/* UI._keys_receive(cin, b1, b2, b3): one USB-MIDI packet sent to the keyboard */
+static mrb_value
+mrb_ui_keys_receive(mrb_state *mrb, mrb_value self)
+{
+    mrb_value cin, b1, b2, b3;
+    mrb_get_args(mrb, "oooo", &cin, &b1, &b2, &b3);
+    picoruby_ui_keys_receive(val_to_i(cin), val_to_i(b1), val_to_i(b2), val_to_i(b3));
+    return mrb_fixnum_value(0);
+}
+
+static mrb_value
+mrb_ui_keys_clear_lights(mrb_state *mrb, mrb_value self)
+{
+    picoruby_ui_keys_clear_lights();
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ui_keys_is_lit(mrb_state *mrb, mrb_value self)
+{
+    mrb_value note;
+    mrb_get_args(mrb, "o", &note);
+    return mrb_bool_value(picoruby_ui_keys_is_lit(val_to_i(note)));
+}
+
+static mrb_value
+mrb_ui_keys_is_pressed(mrb_state *mrb, mrb_value self)
+{
+    mrb_value note;
+    mrb_get_args(mrb, "o", &note);
+    return mrb_bool_value(picoruby_ui_keys_is_pressed(val_to_i(note)));
+}
+
+/* ------------------------------------------------------------------------
  * Gem initialization
  * ------------------------------------------------------------------------ */
 
@@ -946,6 +1059,19 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_xypad_get_i,           mrb_ui_xypad_get_i,           MRB_ARGS_REQ(2));
     DEF(_xypad_set_scale,       mrb_ui_xypad_set_scale,       MRB_ARGS_REQ(2));
     DEF(_xypad_get_scale,       mrb_ui_xypad_get_scale,       MRB_ARGS_REQ(1));
+
+    /* Keys */
+    DEF(_keys_reset,             mrb_ui_keys_reset,             MRB_ARGS_NONE());
+    DEF(_keys_set_i,             mrb_ui_keys_set_i,             MRB_ARGS_REQ(2));
+    DEF(_keys_get_i,             mrb_ui_keys_get_i,             MRB_ARGS_REQ(1));
+    DEF(_keys_set_key_color,     mrb_ui_keys_set_key_color,     MRB_ARGS_REQ(2));
+    DEF(_keys_key_color,         mrb_ui_keys_key_color,         MRB_ARGS_REQ(1));
+    DEF(_keys_clear_key_colors,  mrb_ui_keys_clear_key_colors,  MRB_ARGS_NONE());
+    DEF(_keys_set_channel_color, mrb_ui_keys_set_channel_color, MRB_ARGS_REQ(2));
+    DEF(_keys_receive,           mrb_ui_keys_receive,           MRB_ARGS_REQ(4));
+    DEF(_keys_clear_lights,      mrb_ui_keys_clear_lights,      MRB_ARGS_NONE());
+    DEF(_keys_lit,               mrb_ui_keys_is_lit,            MRB_ARGS_REQ(1));
+    DEF(_keys_pressed,           mrb_ui_keys_is_pressed,        MRB_ARGS_REQ(1));
 
     /* Layouts */
     DEF(_display,          mrb_ui_display,          MRB_ARGS_NONE());

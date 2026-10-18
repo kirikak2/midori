@@ -239,6 +239,7 @@ end
 | `knob` | 上限内で任意 | 56x56px | リング半径はセルの短辺から決める |
 | `xypad` | **1** | 96x64px | C 側のモデル（5 スロット）がシングルトン |
 | `tombola` | **1** | 96x96px | 物理モデルがシングルトン |
+| `keys` | **1** | 120x48px | 鍵盤のモデルがシングルトン（docs/KEYS.md） |
 | `sequencer` | 未定（当面 1） | 未定 | 7 章 |
 | `label`（追加候補） | 任意 | — | 静的テキスト / 値の表示用 |
 
@@ -293,6 +294,7 @@ pad   col:, row:, label:, color:, type: (:trigger | :momentary | :toggle) { |sta
 knob  col:, row:, label:, color:, value:, min:, max:, step:, origin:, sensitivity: { |v| }
 xypad col:, row:, **UI::XYPad.new と同じキーワード          # => UI::XYPad
 tombola col:, row:, **UI::Tombola.new と同じキーワード      # => UI::Tombola
+keys  col:, row:, **UI::Keys.new と同じキーワード（keys: で既存を渡す）  # => UI::Keys
 grid  col:, row:, cols:, rows:, gap:, padding: { ... }       # 入れ子
 ```
 
@@ -322,6 +324,7 @@ kick.state               # => true / false
 | `UI::Layout::Knob` | `value` / `value=` / `set_value(v, notify: true)` / `reset` / `send_value` / `label=` / `color=` |
 | `xypad` | 既存の `UI::XYPad` インスタンスそのもの（`slot` / `hold=` / `on_touch`） |
 | `tombola` | 既存の `UI::Tombola` インスタンスそのもの |
+| `keys` | 既存の `UI::Keys` インスタンスそのもの（`set_color` / `octave_up` / `on_note` …） |
 
 `layout.widgets` は定義順のハンドルの配列。
 

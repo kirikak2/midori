@@ -449,3 +449,68 @@ bool ui_layout_knob_reset(int slot, int id)
     (void)slot; (void)id;
     return false;
 }
+
+// Keys stubs (docs/KEYS.md) - no screen to play. The keyboard never joins the
+// transport registry here, so UI::Keys#transport_id is 0 and MIDI.route
+// refuses it like any unregistered transport.
+
+void ui_keys_reset(void)
+{
+}
+
+bool ui_keys_set_i(const char *name, int value)
+{
+    (void)name; (void)value;
+    return false;
+}
+
+int ui_keys_get_i(const char *name)
+{
+    (void)name;
+    return 0;
+}
+
+void ui_keys_set_key_color(int note, int color)
+{
+    (void)note; (void)color;
+}
+
+int ui_keys_get_key_color(int note)
+{
+    (void)note;
+    return -1;
+}
+
+void ui_keys_clear_key_colors(void)
+{
+}
+
+void ui_keys_set_channel_color(int channel, int color)
+{
+    (void)channel; (void)color;
+}
+
+void ui_keys_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)cin; (void)b1; (void)b2; (void)b3;
+}
+
+void ui_keys_clear_lights(void)
+{
+}
+
+bool ui_keys_is_lit(int note)
+{
+    (void)note;
+    return false;
+}
+
+bool ui_keys_is_pressed(int note)
+{
+    (void)note;
+    return false;
+}
+
+void ui_keys_cleanup(void)
+{
+}

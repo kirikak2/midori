@@ -2,6 +2,7 @@
 #include "screen_layout.h"
 #include "screen_xypad.h"
 #include "screen_tombola.h"
+#include "screen_keys.h"
 #include "ui_layout.h"
 #include "ui_strip.h"
 #include "ui_widgets.h"
@@ -21,7 +22,7 @@ static constexpr float SWEEP_RAD = UI_KNOB_ANGLE_SWEEP * 3.14159265f / 180.0f;
 
 static bool isView(uint8_t kind)
 {
-    return kind == UI_WIDGET_XYPAD || kind == UI_WIDGET_TOMBOLA;
+    return kind == UI_WIDGET_XYPAD || kind == UI_WIDGET_TOMBOLA || kind == UI_WIDGET_KEYS;
 }
 
 ScreenLayout::ScreenLayout()
@@ -30,6 +31,7 @@ ScreenLayout::ScreenLayout()
     , m_version(0)
     , m_hasXYPad(false)
     , m_hasTombola(false)
+    , m_hasKeys(false)
 {
     m_title[0] = '\0';
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
@@ -48,6 +50,7 @@ void ScreenLayout::attachViews(LayoutDef* def)
 {
     m_hasXYPad = false;
     m_hasTombola = false;
+    m_hasKeys = false;
     if (!def) return;
 
     for (int i = 0; i < def->count; i++) {
@@ -60,6 +63,10 @@ void ScreenLayout::attachViews(LayoutDef* def)
             getScreenTombola().setArea(wd.x, wd.y, wd.w, wd.h);
             getScreenTombola().enter();
             m_hasTombola = true;
+        } else if (wd.kind == UI_WIDGET_KEYS && !m_hasKeys) {
+            getScreenKeys().setArea(wd.x, wd.y, wd.w, wd.h);
+            getScreenKeys().enter();
+            m_hasKeys = true;
         }
     }
 }
@@ -77,6 +84,11 @@ void ScreenLayout::detachViews()
         getScreenTombola().leave();
         getScreenTombola().resetArea();
         m_hasTombola = false;
+    }
+    if (m_hasKeys) {
+        getScreenKeys().leave();
+        getScreenKeys().resetArea();
+        m_hasKeys = false;
     }
 }
 
@@ -170,6 +182,8 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
             // The view's model would otherwise keep a note held
             if (m_ownerKind[t] == UI_WIDGET_XYPAD) {
                 getScreenXYPad().onTouch(t, m_lastX[t], m_lastY[t], false);
+            } else if (m_ownerKind[t] == UI_WIDGET_KEYS) {
+                getScreenKeys().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else {
                 getScreenTombola().onTouch(t, m_lastX[t], m_lastY[t], false);
             }
@@ -223,6 +237,7 @@ void ScreenLayout::update()
     // The views animate on their own schedule, inside their cells
     if (m_hasXYPad) getScreenXYPad().update();
     if (m_hasTombola) getScreenTombola().update();
+    if (m_hasKeys) getScreenKeys().update();
 }
 
 void ScreenLayout::draw()
@@ -238,6 +253,7 @@ void ScreenLayout::draw()
 
     if (m_hasXYPad) getScreenXYPad().draw();
     if (m_hasTombola) getScreenTombola().draw();
+    if (m_hasKeys) getScreenKeys().draw();
 }
 
 // --- Touch ------------------------------------------------------------------
@@ -309,6 +325,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
 
         if (kind == UI_WIDGET_XYPAD) getScreenXYPad().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_TOMBOLA) getScreenTombola().onTouch(touchId, x, y, true);
+        if (kind == UI_WIDGET_KEYS) getScreenKeys().onTouch(touchId, x, y, true);
         return;
     }
 
@@ -323,6 +340,10 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
     }
     if (kind == UI_WIDGET_TOMBOLA) {
         getScreenTombola().onTouch(touchId, x, y, false);
+        return;
+    }
+    if (kind == UI_WIDGET_KEYS) {
+        getScreenKeys().onTouch(touchId, x, y, false);
         return;
     }
 
@@ -362,6 +383,12 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         m_lastX[touchId] = x;
         m_lastY[touchId] = y;
         getScreenTombola().onTouchMove(touchId, x, y);
+        return;
+    }
+    if (kind == UI_WIDGET_KEYS) {
+        m_lastX[touchId] = x;
+        m_lastY[touchId] = y;
+        getScreenKeys().onTouchMove(touchId, x, y);
         return;
     }
     if (kind != UI_WIDGET_KNOB) return;

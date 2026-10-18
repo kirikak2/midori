@@ -1,6 +1,6 @@
 # Layout DSL (docs/UI_LAYOUT_DSL.md)
 #
-# Places pads, knobs, the XYPad and the Tombola on one screen by grid column /
+# Places pads, knobs, the XYPad, the Tombola and the Keys on one screen by grid column /
 # row. Everything grid-related -- tracks, areas, nesting, validation -- is
 # resolved here, once, when the layout is defined; the C++ side only ever
 # receives a list of pixel rectangles.
@@ -200,6 +200,7 @@ module UI
     KIND_KNOB    = 1
     KIND_XYPAD   = 2
     KIND_TOMBOLA = 3
+    KIND_KEYS    = 4
 
     # Below this a widget is hard to hit with a finger. Provisional numbers,
     # to be tuned on the hardware (docs/UI_LAYOUT_DSL.md D13): placing one
@@ -208,11 +209,12 @@ module UI
       pad:     [40, 32],
       knob:    [56, 56],
       xypad:   [96, 64],
-      tombola: [96, 96]
+      tombola: [96, 96],
+      keys:    [120, 48]
     }
 
     # Only one of these per layout: the C side holds a single model of each
-    SINGLETONS = [:xypad, :tombola]
+    SINGLETONS = [:xypad, :tombola, :keys]
 
     # One grid level of a definition: its cells, its named areas, and which
     # cells are taken (overlap is an error).
@@ -333,6 +335,11 @@ module UI
       # Keywords are UI::Tombola.new's; tombola: hands over an existing one.
       def tombola(col: nil, row: nil, area: nil, id: nil, tombola: nil, **opts)
         add(:tombola, col, row, area, id, nil, { instance: tombola, opts: opts })
+      end
+
+      # Keywords are UI::Keys.new's; keys: hands over an existing one.
+      def keys(col: nil, row: nil, area: nil, id: nil, keys: nil, **opts)
+        add(:keys, col, row, area, id, nil, { instance: keys, opts: opts })
       end
 
       # Splits a cell (or area) into a grid of its own. col:/row: inside the
@@ -536,6 +543,10 @@ module UI
         t = pr[:instance] || UI::Tombola.new(**pr[:opts])
         UI._layout_add_view(KIND_TOMBOLA, x, y, w, h) if live
         t
+      when :keys
+        k = pr[:instance] || UI::Keys.new(**pr[:opts])
+        UI._layout_add_view(KIND_KEYS, x, y, w, h) if live
+        k
       end
     end
 

@@ -128,6 +128,7 @@ CoreS3 (content 320x180)                Tab5 (content 1280x620)
 | `:knobs` | Knobs | `UI::SCREEN_KNOBS` |
 | `:xypad` | XYPad | `UI::SCREEN_XYPAD` |
 | `:tombola` | Tombola | `UI::SCREEN_TOMBOLA` |
+| `:keys` | Keys（画面の鍵盤、docs/KEYS.md） | `UI::SCREEN_KEYS`（2026-10-18 追加。値 11） |
 | `:layout` | 現在のレイアウト | `UI::SCREEN_LAYOUT`（新設） |
 | `:midi_info` | MIDI Info | `UI::SCREEN_MIDI_INFO` |
 | `:scripts` | Scripts | `UI::SCREEN_SCRIPTS` |

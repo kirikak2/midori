@@ -48,6 +48,10 @@ typedef struct {
     bool widget_state;     /* ...pad state */
     bool widget_final;     /* ...knob: last change of a drag */
     float widget_value;    /* ...knob value */
+    uint8_t key_note;      /* For key events */
+    uint8_t key_velocity;  /* ...0 on release */
+    uint8_t key_channel;
+    bool key_on;
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -62,6 +66,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_KNOB_BANK     8
 #define PICORUBY_UI_EVENT_XYPAD_TOUCH   9
 #define PICORUBY_UI_EVENT_WIDGET       10
+#define PICORUBY_UI_EVENT_KEY          11
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -171,6 +176,21 @@ int     picoruby_ui_xypad_get_i(int index, const char *name);
 void    picoruby_ui_xypad_set_scale(int index, const uint8_t *notes, int len);
 /* Writes up to max_len notes into out, returns how many. */
 int     picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len);
+
+/* Keys: the on-screen keyboard, also a picoruby-midi transport
+ * (docs/KEYS.md). Parameters are string-keyed like Tombola's; see
+ * ui_common.h for the accepted names. Colours are RGB565, -1 to clear. */
+void picoruby_ui_keys_reset(void);
+bool picoruby_ui_keys_set_i(const char *name, int value);
+int  picoruby_ui_keys_get_i(const char *name);
+void picoruby_ui_keys_set_key_color(int note, int color);
+int  picoruby_ui_keys_get_key_color(int note);
+void picoruby_ui_keys_clear_key_colors(void);
+void picoruby_ui_keys_set_channel_color(int channel, int color);
+void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3);
+void picoruby_ui_keys_clear_lights(void);
+bool picoruby_ui_keys_is_lit(int note);
+bool picoruby_ui_keys_is_pressed(int note);
 
 #ifdef __cplusplus
 }

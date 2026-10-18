@@ -789,6 +789,37 @@ pad.show
 
 サンプル: [examples/xypad.rb](examples/xypad.rb)
 
+## Keys 画面（画面の鍵盤 / 2026-10-18）
+
+詳細は [docs/KEYS.md](docs/KEYS.md) を参照。
+
+1〜4 オクターブ（13〜49 鍵）の鍵盤を指（最大 5 本）で弾く。`UI::Keys` は
+**picoruby-midi のトランスポートでもあり**、`MIDI.route` の送信元にも宛先にもなる。
+宛先として受けたノートは鍵を光らせる（光る MIDI 鍵盤のように押下状態を表示）。
+レイアウトでは `keys`（1 レイアウトに 1 つ）。Tab5 のビルドのみ確認、**実機未確認**。
+
+- **発音は C++ 側**（[main/ui/ui_keys.cpp](main/ui/ui_keys.cpp)、UI タスク）。送信先は
+  `device:`（`out_mask`）と、鍵盤のビットから張られたルートの宛先（`MIDI_route_targets()`）の OR を
+  1 回の `MIDI_transport_send()` で。note off は note on を送ったときの送信先・チャンネルへ
+- 送信元にするため picoruby-midi に `MIDI_route_set_source()` / `MIDI_route_sources()` /
+  `MIDI_route_targets()` を追加した。`MIDI.route` は送信元を `MIDI._route_sources` で検査する
+  （従来は USB Host / UART 固定の `ROUTE_SOURCES`）
+- モデルは初回使用時に calloc（約 1KB、.bss に置かない）し、そのときトランスポート登録表に載る
+- 色の優先順位は 押下 > 光（チャンネル色）> 鍵ごとの色 > 白鍵 / 黒鍵の地の色。
+  色は Symbol / RGB565 / `[r, g, b]`、`UI.rgb(r, g, b)` を追加
+- 画面は `UI_SCREEN_KEYS`（= 11、末尾に追加）、Ruby は `:keys` / `UI.keys` / `UI::SCREEN_KEYS`
+
+```ruby
+keys = UI::Keys.new(octaves: 2, low: 48, velocity: :position, device: MIDIDevices.amy)
+MIDI.route(keys, MIDIDevices.sam2695)          # 弾いた音を SAM2695 にも
+MIDI.route(MIDIDevices.usb_midi_host, keys)    # 外部鍵盤の演奏で鍵を光らせる
+keys.set_color([48, 52, 55], :blue)            # スケール / 和音の表示
+keys.show
+```
+
+サンプル: [examples/keys.rb](examples/keys.rb) / [examples/keys_layout.rb](examples/keys_layout.rb) /
+[examples/keys_amy.rb](examples/keys_amy.rb)（AMY を鍵盤 + レイアウト + Knobs で）
+
 ## Home メニューと画面切り替え（2026-10-12）
 
 詳細は [docs/UI_NAVIGATION.md](docs/UI_NAVIGATION.md) を参照。
@@ -816,7 +847,7 @@ Back は Home を除いた直前の画面で、押すたびに 2 画面を往復
 
 詳細は [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) を参照。
 
-pad / knob / XYPad / Tombola を 1 画面にグリッドで並べる。最大 4 レイアウト、それぞれが
+pad / knob / XYPad / Tombola / Keys を 1 画面にグリッドで並べる。最大 4 レイアウト、それぞれが
 Home のタイル。**列・行は 0 始まり**、範囲は Range（`col: 0..2`）。
 
 ```ruby
@@ -967,7 +998,7 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
 ### MIDI.route（MIDI Thru / 2026-10-04）
 
 `MIDI.route(from, to, channel: nil)` で、受信をトランスポート間で **C の入力タスクが直接転送**する
-（Ruby を通らない）。受信元は USB-MIDI Host と UART、送信先は登録表の任意のトランスポート。
+（Ruby を通らない）。受信元は USB-MIDI Host と UART（と、自分で転送する送信元として宣言したトランスポート。例: `UI::Keys`）、送信先は登録表の任意のトランスポート。
 `MIDI.unroute(from, to = nil)` / `MIDI.unroute_all`。スクリプト停止時に
 `picoruby_esp32_midi_cleanup()` が `MIDI_route_clear()` で全消去する。
 

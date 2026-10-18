@@ -47,6 +47,10 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->widget_state = false;
     event->widget_final = false;
     event->widget_value = 0.0f;
+    event->key_note = 0;
+    event->key_velocity = 0;
+    event->key_channel = 0;
+    event->key_on = false;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -112,6 +116,13 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->widget_state = ui_evt.data.widget.state;
             event->widget_final = ui_evt.data.widget.final;
             event->widget_value = ui_evt.data.widget.value;
+            break;
+        case UI_EVENT_KEY:
+            event->type = PICORUBY_UI_EVENT_KEY;
+            event->key_note = ui_evt.data.key.note;
+            event->key_velocity = ui_evt.data.key.velocity;
+            event->key_channel = ui_evt.data.key.channel;
+            event->key_on = ui_evt.data.key.on;
             break;
         default:
             break;
@@ -533,4 +544,61 @@ int picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len)
     if (max_len < 0) max_len = 0;
     if (max_len > UI_XYPAD_MAX_SCALE) max_len = UI_XYPAD_MAX_SCALE;
     return ui_xypad_get_scale((uint8_t)index, out, (uint8_t)max_len);
+}
+
+/* Keys */
+
+void picoruby_ui_keys_reset(void)
+{
+    ui_keys_reset();
+}
+
+bool picoruby_ui_keys_set_i(const char *name, int value)
+{
+    return ui_keys_set_i(name, value);
+}
+
+int picoruby_ui_keys_get_i(const char *name)
+{
+    return ui_keys_get_i(name);
+}
+
+void picoruby_ui_keys_set_key_color(int note, int color)
+{
+    ui_keys_set_key_color(note, color);
+}
+
+int picoruby_ui_keys_get_key_color(int note)
+{
+    return ui_keys_get_key_color(note);
+}
+
+void picoruby_ui_keys_clear_key_colors(void)
+{
+    ui_keys_clear_key_colors();
+}
+
+void picoruby_ui_keys_set_channel_color(int channel, int color)
+{
+    ui_keys_set_channel_color(channel, color);
+}
+
+void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3)
+{
+    ui_keys_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
+}
+
+void picoruby_ui_keys_clear_lights(void)
+{
+    ui_keys_clear_lights();
+}
+
+bool picoruby_ui_keys_is_lit(int note)
+{
+    return ui_keys_is_lit(note);
+}
+
+bool picoruby_ui_keys_is_pressed(int note)
+{
+    return ui_keys_is_pressed(note);
 }

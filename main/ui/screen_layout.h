@@ -8,12 +8,12 @@
 struct LayoutDef;
 
 // Shows one script-defined layout (docs/UI_LAYOUT_DSL.md): pads, knobs and
-// the XYPad / Tombola views at the rectangles Ruby resolved from its grid.
+// the XYPad / Tombola / Keys views at the rectangles Ruby resolved from its grid.
 // Which of the (up to four) layouts is shown is the screen argument, so every
 // layout is the same UI_SCREEN_LAYOUT with a different slot.
 //
 // Pads and knobs are drawn and operated here, from the shared widget drawing
-// (ui_widgets.h). The XYPad and Tombola are their own screens' views, narrowed
+// (ui_widgets.h). The XYPad, Tombola and Keys are their own screens' views, narrowed
 // to the widget's cell while this screen shows: one model each, so at most
 // one of each per layout.
 class ScreenLayout : public Screen {
@@ -40,6 +40,7 @@ private:
     // Which views are borrowed into this screen, so leave() can return them
     bool m_hasXYPad;
     bool m_hasTombola;
+    bool m_hasKeys;
 
     // What each finger is holding: a widget id, or -1. Pads and knobs are
     // handled here; a finger that landed on a view is forwarded to it.

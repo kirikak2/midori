@@ -198,7 +198,7 @@ int ui_layout_add_knob(int x, int y, int w, int h, const char* label,
 
 int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
 {
-    if (kind != UI_WIDGET_XYPAD && kind != UI_WIDGET_TOMBOLA) return -1;
+    if (kind != UI_WIDGET_XYPAD && kind != UI_WIDGET_TOMBOLA && kind != UI_WIDGET_KEYS) return -1;
     // One of each per layout: there is one model behind each view
     if (s_building) {
         for (int i = 0; i < s_building->count; i++) {

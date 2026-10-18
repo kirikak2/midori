@@ -8,6 +8,7 @@
 #include "screen_tombola.h"
 #include "screen_knob.h"
 #include "screen_xypad.h"
+#include "screen_keys.h"
 #include "screen_home.h"
 #include "screen_layout.h"
 #include "ui_layout.h"
@@ -119,6 +120,7 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_XYPAD] = &getScreenXYPad();
     m_screens[UI_SCREEN_LAYOUT] = &getScreenLayout();
     m_screens[UI_SCREEN_HOME] = &getScreenHome();
+    m_screens[UI_SCREEN_KEYS] = &getScreenKeys();
 }
 
 void UIManager::update()
@@ -327,6 +329,7 @@ static const struct { ui_screen_index_t screen; uint8_t group; } MENU_ORDER[] = 
     { UI_SCREEN_PADS,      MENU_GROUP_PERFORM },
     { UI_SCREEN_KNOBS,     MENU_GROUP_PERFORM },
     { UI_SCREEN_XYPAD,     MENU_GROUP_PERFORM },
+    { UI_SCREEN_KEYS,      MENU_GROUP_PERFORM },
     { UI_SCREEN_TOMBOLA,   MENU_GROUP_PERFORM },
     { UI_SCREEN_LAYOUT,    MENU_GROUP_PERFORM },
     { UI_SCREEN_MAIN,      MENU_GROUP_STATE },
@@ -554,6 +557,7 @@ void UIManager::scriptCleanup()
 {
     m_menuHidden = 0;
     ui_layout_cleanup();
+    ui_keys_cleanup();
     m_needsRedraw = true;
 }
 

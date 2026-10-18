@@ -27,7 +27,7 @@ end
 - **USB MIDI Host** — Plug synthesizers, keyboards and controllers straight into the board, with hot-plug detection and recovery
 - **USB MIDI Device** — In `midi_device` mode the board itself is a USB MIDI device to a computer (TinyUSB CDC + MIDI composite; appears as `Midori <board>`)
 - **UART MIDI / SAM2695** — Serial MIDI out to DIN gear or the onboard SAM2695 General MIDI sound module
-- **MIDI routing** — `MIDI.route(from, to, channel:)` forwards input to any output in C, without going through Ruby, so a keyboard can drive a synth with no added latency
+- **MIDI routing** — `MIDI.route(from, to, channel:)` forwards input to any output in C, without going through Ruby, so a keyboard can drive a synth with no added latency. The on-screen keyboard (`UI::Keys`) can be a source or a destination as well
 
 ### Script
 
@@ -46,6 +46,7 @@ end
   - **Knobs** — Banks of rotary knobs for continuous parameters such as CCs (`UI.knob`, [docs](docs/KNOBS.md))
   - **XY Pad** — Up to five fingers, each playing pitch (snapped to a scale, with glide) on X and a CC on Y (`UI::XYPad`, [docs](docs/XYPAD.md))
   - **Tombola** — A physics sequencer: balls bounce inside a rotating polygon and play a note on every wall hit (`UI::Tombola`, [docs](docs/TOMBOLA.md))
+  - **Keys** — A 1 to 4 octave keyboard (13 to 49 keys) played with up to five fingers. It is a MIDI transport too: what you play can be routed anywhere, and notes sent to it light up the keys, like a light-up keyboard showing what is being played. Each key's colour can be set from scripts (`UI::Keys`, [docs](docs/KEYS.md))
   - **Layouts** — Any mix of the above on one screen, placed on a grid by column and row (`UI.layout`, [docs](docs/UI_LAYOUT_DSL.md))
 - **AMY synthesizer** (Tab5 / CrowPanel) — The [AMY](https://github.com/shorepine/amy) engine plays through the built-in speaker, as an ordinary MIDI output: `AMY::FM` (DX7 presets) and `AMY::Synth` (subtractive, Juno-style), see [docs](docs/AMY_SYNTH.md)
 - **Rotary encoders** — DFRobot SEN0502 I2C encoders as physical knobs
@@ -249,6 +250,33 @@ MIDI.route(MIDIDevices.usb_midi_host, MIDIDevices.sam2695, channel: 9)
 MIDI.unroute_all
 ```
 
+### On-screen keyboard (UI::Keys)
+
+```ruby
+keys = UI::Keys.new(octaves: 2, low: 48,       # C3..C5, 25 keys
+                    velocity: :position,       # softer at the top of a key, louder at the bottom
+                    device: MIDIDevices.amy)   # where the keys play
+
+MIDI.route(keys, MIDIDevices.sam2695)          # play the SAM2695 as well
+MIDI.route(MIDIDevices.usb_midi_host, keys)    # light the keys a USB keyboard plays
+
+keys.set_color([48, 52, 55], :blue)            # give keys colours of their own (a chord, a scale)
+keys.channel_color(9, :red)                    # notes on channel 10 light up red
+keys.octave_up
+keys.on_note { |e| UI.log("#{e[:note]} #{e[:state]}") }   # optional; not needed for sound
+keys.show
+```
+
+Touched keys send their notes from C on the UI task, both to `device:` and
+along every `MIDI.route` from the keyboard, so how often the script calls
+`UI.process` does not affect timing. Notes sent to the keyboard (as a route
+destination or through `MIDI::Device.new(keys)`) light their keys until the
+note off. When colours overlap, a pressed key shows first, then a lit key,
+then the key's own colour, then plain white / black. Colours are Symbols,
+RGB565 integers or `[r, g, b]` (`UI.rgb(r, g, b)`). The keyboard has its own
+Keys screen and can also go on a layout (`keys`). It has been built for Tab5
+but not yet tried on hardware. See [docs/KEYS.md](docs/KEYS.md).
+
 ### MIDI.bpm_loop
 
 ```ruby
@@ -276,7 +304,7 @@ end
 
 ### UI layouts (UI.layout)
 
-Put pads, knobs, the XY pad and the Tombola on one screen, placed on a grid
+Put pads, knobs, the XY pad, the Tombola and the keyboard on one screen, placed on a grid
 by column and row (CoreS3 / Tab5 / CrowPanel):
 
 ```ruby
@@ -320,21 +348,22 @@ end
 - **Sizing the grid**: `cols: 4` makes four equal columns, `cols: [3, 1]` sizes
   them by weight, and `cols: [UI.px(60), 1, 1]` gives the first a fixed width.
   The same goes for `rows:`. `gap:` and `padding:` default to a per-board value.
-- **Widgets**: `pad`, `knob`, `xypad` and `tombola` take the same keywords
-  as `UI.pad`, `UI.knob`, `UI::XYPad.new` and `UI::Tombola.new`. `grid` nests
+- **Widgets**: `pad`, `knob`, `xypad`, `tombola` and `keys` take the same keywords
+  as `UI.pad`, `UI.knob`, `UI::XYPad.new`, `UI::Tombola.new` and `UI::Keys.new`. `grid` nests
   another grid. Write the blocks with `do ... end`, because `label: "x" { }`
   does not parse.
 - **Handles**: each widget returns a handle you can change later.
   `knob.value = 100` (calls the block) / `knob.set_value(100, notify: false)` /
   `pad.state` / `label=` / `color=`. Add `id: :cutoff` to fetch it again with
-  `layout[:cutoff]`. `xypad` and `tombola` return the `UI::XYPad` /
-  `UI::Tombola` instance.
+  `layout[:cutoff]`. `xypad`, `tombola` and `keys` return the `UI::XYPad` /
+  `UI::Tombola` / `UI::Keys` instance (or pass an existing one with `pad:` /
+  `tombola:` / `keys:`).
 - **Pages**: you can define up to four layouts. Each one gets a tile on the Home
   screen and can be shown with `layout.show` or `UI.show(layout)`, for example
   from a `MIDI::Input` handler. Defining the same title again replaces that
   layout and resets its values. The layouts go away when the script ends.
-- **Limits**: a layout holds up to 32 widgets, with at most one `xypad` and one
-  `tombola`. Widgets may not overlap, and a cell outside the grid raises
+- **Limits**: a layout holds up to 32 widgets, with at most one `xypad`, one
+  `tombola` and one `keys`. Widgets may not overlap, and a cell outside the grid raises
   `ArgumentError`. A widget too small to touch comfortably is still placed but
   logs a warning.
 - **Fitting each board**: weights scale with the screen. For larger changes,
@@ -358,6 +387,9 @@ Ready-to-run scripts are in [examples/](examples/):
 | [tombola.rb](examples/tombola.rb) | Bouncing-ball sequencer |
 | [layout.rb](examples/layout.rb) | XY pad, knobs and pads on one screen; switching screens from MIDI |
 | [tombola_layout.rb](examples/tombola_layout.rb) | The Tombola with its knobs and pads on one screen |
+| [keys.rb](examples/keys.rb) | On-screen keyboard; a USB keyboard lights its keys, a scale shown in colour |
+| [keys_layout.rb](examples/keys_layout.rb) | The keyboard with knobs and pads on one screen |
+| [keys_amy.rb](examples/keys_amy.rb) | Play the built-in synth from the keyboard, with layout knobs and the Knobs screen |
 | [amy_fm.rb](examples/amy_fm.rb) / [amy_synth.rb](examples/amy_synth.rb) | Play the built-in synth from pads, XY pad, knobs and a USB keyboard |
 | [bach_air.rb](examples/bach_air.rb) | MML playback |
 | [midi_monitor.rb](examples/midi_monitor.rb) | Log every incoming MIDI message |

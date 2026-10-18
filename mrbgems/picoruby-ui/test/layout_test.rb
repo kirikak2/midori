@@ -109,6 +109,24 @@ check_raises("one xypad per layout", "only one xypad") do
   end
 end
 
+check_raises("one keys per layout", "only one keys") do
+  UI::Layout.resolve(CORES3, cols: 2) do
+    keys col: 0
+    keys col: 1
+  end
+end
+
+specs, warnings = UI::Layout.resolve(TAB5, cols: 4, rows: 3, gap: 20) do
+  xypad col: 0..3, row: 0
+  keys col: 0..3, row: 1..2, octaves: 3
+end
+check "keys under an xypad", [[20, 60, 1240, 180], [20, 260, 1240, 380]], rects(specs)
+check "keys keeps its keywords for UI::Keys.new", { octaves: 3 }, specs[1][:params][:opts]
+check "a wide keyboard does not warn", [], warnings
+
+_, warnings = UI::Layout.resolve(CORES3, cols: 4, gap: 0) { keys col: 0 }
+check "a narrow keyboard warns", true, warnings[0].include?("keys 0 is 80x180px")
+
 check_raises("widget limit", "too many widgets") do
   UI::Layout.resolve(TAB5, cols: 33, gap: 0) do
     33.times { |i| pad col: i }
@@ -262,6 +280,16 @@ check "setting a knob calls its block", [64.0], hits.map { |v| v.to_f }
 hits.clear
 check "an unchanged value does not", false, perform[:cutoff].set_value(64)
 check "...and does not call it", [], hits
+
+$calls.clear
+given = Object.new
+played = UI.layout("Play", rows: 2, gap: 0) do
+  pad row: 0, label: "Oct+"
+  keys row: 1, keys: given
+end
+check "keys goes over as a view of kind 4", [:view, 4, 0, 110, 320, 90], $calls[2]
+check "a given keyboard is used as is", true, played.widgets[1].equal?(given)
+played.delete
 
 mix = UI.layout("Mix") { |l| l.knob label: "Vol" }
 check "second layout gets slot 1", 1, mix.slot
