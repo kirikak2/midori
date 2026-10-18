@@ -21,12 +21,14 @@ public:
 private:
     bool m_isActive;
     bool m_needsRedraw;
+    uint32_t m_lastDiagMs;
 
     void drawDeviceCard(int y, const char* icon, const char* type,
                        const char* name, bool inConnected, bool outConnected);
     void drawUsbMidiCard();
     void drawDinMidiCard();
     void drawBleMidiCard();
+    void drawUsbDeviceDiag();
 };
 
 // Global instance
