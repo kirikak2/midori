@@ -414,6 +414,9 @@ if(HAS_AMY)
     # VM on core 1 -- see "タスクとコア配置" in docs/AMY_SYNTH.md.
     AMY_GEM_TASK_CORE=0
     AMY_GEM_TASK_PRIORITY=3
+    # The gem's 0.7 tripped the failsafe (silence + synths wiped) while
+    # turning knobs. 0.9 still leaves the UI loop 10% of core 0.
+    AMY_GEM_OVERLOAD_THRESHOLD=0.9f
   )
 endif()
 
