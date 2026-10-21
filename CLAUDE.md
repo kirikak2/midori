@@ -136,11 +136,12 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
 - 中身: `CMakeLists.txt`（ボード設定・gem の ports）、`build_config/`、`mrblib/`
   （`main_task_base.rb` / `board_config.rb.in`）、Supervisor、コンソール入力、
   `picoruby-esp32.c`（スクリプト一覧・停止要求などの C API。名前は互換のため据え置き）
-- `components/midori-runtime/picoruby/` が picoruby のサブモジュール。kirikak2/picoruby の
-  **`midori` ブランチ = upstream picoruby/picoruby の master + 小さなパッチ**（2026-10-12 時点で 2 本:
-  picoruby-gpio の `mrb_int` 修正、picoruby-machine の ESP32 HAL を 1 回だけ初期化する修正）。
-  upstream を取り込むときは `git fetch upstream && git rebase upstream/master`（remote `upstream` は
-  picoruby/picoruby）。パッチは upstream に PR して減らしていく
+- `components/midori-runtime/picoruby/` が picoruby のサブモジュール。**upstream
+  picoruby/picoruby の `master` を直接参照する**（2026-10-21 から。それまでは kirikak2/picoruby の
+  `midori` ブランチ = master + 2 本のパッチだったが、picoruby-gpio の `mrb_int` 修正と
+  picoruby-machine の ESP32 HAL を 1 回だけ初期化する修正はどちらも upstream に取り込まれた）。
+  更新は `git submodule update --remote components/midori-runtime/picoruby`。
+  また独自パッチが必要になったら fork にブランチを切って `.gitmodules` を戻す
 - ビルド設定の名前は upstream に合わせている（`build_config/{xtensa,riscv}-esp-picoruby.rb`、
   libmruby は `picoruby/build/esp32-picoruby/`）。`main_task.rb` をコンパイルする mrbc は
   クロスビルドが自分用に作る `picoruby/build/mrbc/default/bin/mrbc`
