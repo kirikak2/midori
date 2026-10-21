@@ -68,6 +68,7 @@ module UI
   SCREEN_TEMPO     = 0   # The Main screen, renamed; SCREEN_MAIN stays
   SCREEN_PADS      = 1
   SCREEN_MIDI_INFO = 2
+  SCREEN_MIDI_DEVICES = 2   # The MIDI Info screen, renamed; SCREEN_MIDI_INFO stays
   SCREEN_LOGS      = 3
   SCREEN_SCRIPTS   = 4
   SCREEN_SETTINGS  = 5
@@ -89,12 +90,13 @@ module UI
     home: SCREEN_HOME, tempo: SCREEN_TEMPO, main: SCREEN_MAIN,
     pads: SCREEN_PADS, knobs: SCREEN_KNOBS, xypad: SCREEN_XYPAD,
     tombola: SCREEN_TOMBOLA, keys: SCREEN_KEYS, layout: SCREEN_LAYOUT,
-    midi_info: SCREEN_MIDI_INFO, scripts: SCREEN_SCRIPTS,
+    midi_devices: SCREEN_MIDI_DEVICES, midi_info: SCREEN_MIDI_INFO, scripts: SCREEN_SCRIPTS,
     logs: SCREEN_LOGS, settings: SCREEN_SETTINGS
   }
 
-  # Index -> Symbol. Screen 0 reads back as :tempo, its current name.
-  SCREEN_NAMES = [:tempo, :pads, :midi_info, :logs, :scripts, :settings,
+  # Index -> Symbol. Screens 0 and 2 read back as :tempo and :midi_devices,
+  # their current names.
+  SCREEN_NAMES = [:tempo, :pads, :midi_devices, :logs, :scripts, :settings,
                   :tombola, :knobs, :xypad, :layout, :home, :keys]
 
   # Internal: Symbol / SCREEN_* -> index, or nil
@@ -181,6 +183,7 @@ module UI
   def self.keys;      show(:keys);      end
   def self.tombola;   show(:tombola);   end
   def self.midi_info; show(:midi_info); end
+  def self.midi_devices; show(:midi_devices); end
   def self.scripts;   show(:scripts);   end
   def self.logs;      show(:logs);      end
   def self.settings;  show(:settings);  end
@@ -259,6 +262,12 @@ module UI
       # The layout shown, as the UI::Layout UI.layout returned
       slot = event[:layout]
       event[:layout] = slot ? $ui_layouts.values.find { |l| l.slot == slot } : nil
+    end
+    if event && event[:type] == :midi_devices
+      # Bits travel; scripts see devices (ui_midi_devices.rb)
+      event[:from] = MIDIDevices._device_for_bit(event[:from])
+      event[:to] = MIDIDevices._device_for_bit(event[:to])
+      event[:device] = event[:from]
     end
     event
   end

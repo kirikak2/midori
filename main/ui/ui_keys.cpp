@@ -46,7 +46,8 @@ struct KeysModel {
 
     // --- Fingers (UI task) ---
     uint8_t holdCount[128];          // Fingers on each note
-    uint8_t heldMask[128];           // Where its note on went, for the note off
+    uint8_t heldMask[128];           // Where its note on went (device:), for the note off
+    uint8_t heldRoute[128];          // ... and which MIDI.route destinations
     uint8_t heldChannel[128];
     int16_t touchNote[MAX_TOUCH_POINTS];   // -1: over no key
     bool    touchActive[MAX_TOUCH_POINTS];
@@ -156,6 +157,8 @@ static KeysModel* model()
         ESP_LOGW(TAG, "MIDI transport registry full: the keyboard is no transport");
     } else {
         MIDI_route_set_source(s_bit, true);
+        // A device on the MIDI Devices screen from now on (both IN and OUT)
+        ui_mididev_register("keys", "Keys", s_bit, UI_COLOR_YELLOW, true);
     }
     return fresh;
 }
@@ -207,14 +210,16 @@ static void key_on(KeysModel* m, int note, int velocity)
     uint8_t ch = m->channel & 0x0F;
     uint8_t status = 0x90 | ch;
     uint8_t vel = velocity < 1 ? 1 : clamp7(velocity);
-    uint8_t mask = m->outMask;
-    if (s_bit) {
-        mask |= MIDI_route_targets(s_bit, 0x9, status);
-        mask &= (uint8_t)~s_bit;            // Never back into itself
-    }
+    // Route destinations go through MIDI_route_dispatch so their filters
+    // (MIDI.filter) and listeners (MIDI.on) see the key; device: is direct.
+    uint8_t route = 0;
+    if (s_bit) route = MIDI_route_targets(s_bit, 0x9, status) & (uint8_t)~s_bit;  // Never back into itself
+    uint8_t mask = m->outMask & (uint8_t)~route & (uint8_t)~s_bit;
     m->heldMask[note] = mask;
+    m->heldRoute[note] = route;
     m->heldChannel[note] = ch;
     if (mask) MIDI_transport_send(mask, 0, 0x9, status, (uint8_t)note, vel);
+    if (s_bit) MIDI_route_dispatch(s_bit, route, 0x9, status, (uint8_t)note, vel);
 
     mark_dirty(note);
     if (m->notify) post_event(note, vel, ch, true);
@@ -228,6 +233,7 @@ static void key_off(KeysModel* m, int note)
     uint8_t ch = m->heldChannel[note];
     uint8_t mask = m->heldMask[note];
     if (mask) MIDI_transport_send(mask, 0, 0x8, 0x80 | ch, (uint8_t)note, 0);
+    if (s_bit) MIDI_route_dispatch(s_bit, m->heldRoute[note], 0x8, 0x80 | ch, (uint8_t)note, 0);
 
     mark_dirty(note);
     if (m->notify) post_event(note, 0, ch, false);

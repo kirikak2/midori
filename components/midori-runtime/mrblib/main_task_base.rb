@@ -88,6 +88,8 @@ module MIDIDevices
       require 'amy'
       $midi_amy = AMY::Transport.instance
       puts "AMY synthesizer initialized"
+      # The MIDI Devices list had it on standby: patches saved to it route now
+      UI._mididev_activate("amy", $midi_amy.transport_id)
     else
       puts "AMY not available on this board"
     end
@@ -135,7 +137,7 @@ module MIDI
     alias_method :_original_start!, :start!
     alias_method :_original_bpm_loop, :bpm_loop
 
-    def start!(bpm: 120, output: nil, sync: nil, subdivisions: 24, &user_block)
+    def start!(bpm: 120, output: nil, sync: nil, sync_from: nil, subdivisions: 24, &user_block)
       # Seed UI.bpm with the caller-supplied initial value so the on-screen
       # tempo widget matches what the script asked for. Subsequent UI
       # tempo changes flow back into the loop via the MIDI.on_bpm_change
@@ -147,7 +149,7 @@ module MIDI
            rescue
              nil
            end
-      _original_start!(bpm: bpm, output: output, sync: sync,
+      _original_start!(bpm: bpm, output: output, sync: sync, sync_from: sync_from,
                        subdivisions: subdivisions) do |c|
         if sm && sm.stop_requested?
           break
@@ -167,7 +169,7 @@ module MIDI
     # script-switch by up to one subdivision interval - acceptable for
     # the legacy path; new code should use MIDI.start! instead.
     def bpm_loop(bpm = 120, output: nil, subdivisions: 1, send_start: true,
-                 sync: false, input: nil, on_loop: nil, on_error: nil,
+                 sync: false, input: nil, sync_from: nil, on_loop: nil, on_error: nil,
                  bpm_source: nil, &user_block)
       # Seed UI.bpm so the tempo widget reflects the caller-supplied value;
       # subsequent UI changes are propagated via MIDI.on_bpm_change (wired
@@ -181,7 +183,7 @@ module MIDI
              nil
            end
       _original_bpm_loop(bpm, output: output, subdivisions: subdivisions,
-                         send_start: send_start, sync: sync, input: input,
+                         send_start: send_start, sync: sync, input: input, sync_from: sync_from,
                          on_loop: on_loop, on_error: on_error,
                          bpm_source: bpm_source) do |c|
         if sm && sm.stop_requested?
@@ -190,6 +192,21 @@ module MIDI
         end
         user_block.call(c) if user_block
       end
+    end
+  end
+end
+
+# Scripts that drive themselves with UI.process run the MIDI filters
+# (MIDI.filter / MIDI.on) there too, so a UI loop with a plain sleep_ms does
+# not leave them queued.
+module UI
+  class << self
+    alias_method :_process_ui_only, :process
+
+    def process
+      MIDI.run_filters
+      UI::MIDIDevices._poll
+      _process_ui_only
     end
   end
 end
@@ -204,6 +221,32 @@ end
 # ============================================================================
 # Function definitions (used in both modes)
 # ============================================================================
+
+# The board's MIDI devices on the MIDI Devices screen (docs/UI_MIDI_DEVICES.md),
+# then the patches saved there. Every mode does this at start: the supervisor
+# clears the routes between scripts (picoruby_esp32_midi_cleanup). The built-in
+# transports have fixed registry bits (USB host 0x01, UART 0x02, USB device
+# 0x04); AMY gets one when it starts, so it is listed on standby (bit 0) and
+# started only when a saved patch or the screen needs it.
+def setup_midi_devices
+  md = UI::MIDIDevices
+  if BoardConfig::HAS_USB_MIDI_HOST
+    md.register_builtin(:usb_host, "USB Host", 0x01, color: :green) { MIDIDevices.usb_midi_host }
+  end
+  if BoardConfig::HAS_SAM2695
+    md.register_builtin(:uart, "SAM2695", 0x02, color: :orange) { MIDIDevices.sam2695 }
+  end
+  if BoardConfig::HAS_USB_MIDI_DEVICE
+    md.register_builtin(:usb_dev, "PC", 0x04, color: :cyan) { MIDIDevices.usb_midi_device }
+  end
+  if BoardConfig::HAS_AMY
+    md.register_builtin(:amy, "AMY", 0, color: :magenta) { MIDIDevices.amy }
+  end
+  # (The on-screen keys list themselves when their model is made.)
+  md.boot
+rescue => e
+  puts "MIDI devices setup failed: #{e.message}"
+end
 
 # Scan SD card for Ruby scripts and notify C side
 def notify_scripts_to_c
@@ -430,6 +473,7 @@ if sm.irb_requested?
     $sd_available = try_init_sd_card
   end
 
+  setup_midi_devices
   run_irb_session
   puts "irb finished, exiting to supervisor"
 
@@ -454,9 +498,10 @@ elsif script_to_run
     puts "SD card ready"
   end
 
-  # MIDI devices will be initialized on first access
-  # (lazy initialization to reduce startup power consumption)
+  # The built-in MIDI devices start here (setup_midi_devices); AMY and the
+  # rest of MIDIDevices stay lazy
 
+  setup_midi_devices
   run_script(script_to_run)
   puts "Script completed, exiting to supervisor"
   # main_task.rb ends here, supervisor will detect and restart in UI mode
@@ -517,8 +562,9 @@ else
   # Always notify C side about scripts (even if SD card failed)
   notify_scripts_to_c
 
-  # MIDI devices will be initialized on first access
-  # (lazy initialization to reduce startup power consumption)
+  # The built-in MIDI devices start here (setup_midi_devices), so the MIDI
+  # Devices screen can patch between them; AMY stays lazy
+  setup_midi_devices
 
   GC.start
 
@@ -586,6 +632,9 @@ else
         notify_scripts_to_c  # still notify so UI can clear its list
       end
     end
+
+    # A device the MIDI Devices screen asked for (AMY on standby)
+    UI::MIDIDevices._poll
 
     sleep_ms 100
   end

@@ -11,7 +11,7 @@
 #include "freertos/semphr.h"
 #include "picoruby.h"
 #include "picoruby-esp32.h"
-#include "midi.h"            // MIDI_TRANSPORT_USB_DEVICE (picoruby-midi)
+#include "midi.h"            // MIDI_TRANSPORT_USB_DEVICE, MIDI_Filter_flush (picoruby-midi)
 #include "midi_transport.h"  // MIDI_transport_send (picoruby-midi)
 #include "midi_route.h"      // MIDI_route_clear (picoruby-midi)
 #include "amy_gem.h"         // AMY_GEM_reset (picoruby-amy)
@@ -131,6 +131,9 @@ picoruby_esp32_midi_cleanup(void)
   // Routes (MIDI.route) belong to the script that set them up: drop them
   // first, so nothing more is forwarded from here on.
   MIDI_route_clear();
+  // Their filters went with them (MIDI_route_clear drops those too); so do
+  // the packets still queued for the script's filter blocks.
+  MIDI_Filter_flush();
 
   // Every registered transport except the USB-MIDI device port, which has
   // never been part of the cleanup (the host PC on the other end is not

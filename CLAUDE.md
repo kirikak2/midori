@@ -822,6 +822,24 @@ keys.show
 サンプル: [examples/keys.rb](examples/keys.rb) / [examples/keys_layout.rb](examples/keys_layout.rb) /
 [examples/keys_amy.rb](examples/keys_amy.rb)（AMY を鍵盤 + レイアウト + Knobs で）
 
+## MIDI Devices 画面（UI::MIDIDevices / 2026-10-22）
+
+詳細は [docs/UI_MIDI_DEVICES.md](docs/UI_MIDI_DEVICES.md)。旧 MIDI Info 画面（`UI_SCREEN_MIDI_INFO` = 2 を
+流用、Ruby は `:midi_devices`）。**実機未確認**。
+
+- 行 = MIDI IN（ルートの送信元）、列 = MIDI OUT のクロスバー。セル = `MIDI.route` のルート
+  （画面はルート表をそのまま読む）。最後の行・列 **Prog** でプログラムの OUT / IN を選ぶ
+  （`UI::MIDIDevices.midi_out` / `.midi_in`、選択に追従する入力は `.input`）
+- モデルは [main/ui/ui_midi_devices.cpp](main/ui/ui_midi_devices.cpp)（デバイス一覧・選択・NVS `midi_devs`）。
+  内蔵デバイスは**どのモードでも起動時に** `main_task_base.rb` の `setup_midi_devices` が登録し、
+  保存済みパッチを張り直す（スーパーバイザが切り替えのたびにルートを消すため）。NVS のキーは
+  ビットではなく `usb_host` / `uart` / `usb_dev` / `amy` / `keys`（AMY と Keys のビットは起動ごとに変わる）
+- **AMY は standby**（ビット 0）で登録し、保存済みパッチ・選択・画面で必要になったとき初めて起動する
+  （起動するとオーディオ・I2S・Tab5 の USB パッドに触るため）。画面の鍵盤は C（`ui_keys.cpp`）が自分で登録
+- 画面で変えたパッチ（両端が内蔵）と選択は即 NVS に保存。スクリプトの `patch` / `midi_in=` は
+  スクリプト限り（`UI::MIDIDevices.save` で保存）
+- Ruby のホストテスト: `ruby test/midi_devices_test.rb`（picoruby-ui ディレクトリで）
+
 ## Home メニューと画面切り替え（2026-10-12）
 
 詳細は [docs/UI_NAVIGATION.md](docs/UI_NAVIGATION.md) を参照。
@@ -1012,6 +1030,27 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
   `vTaskDelay(0)` は待たない）。0 tick のまま優先度を上げると Core 1 の VM が止まり、
   UI 入力が一切効かなくなる（2026-10-04 に発生）
 - 詳細は [docs/AMY_SYNTH.md](docs/AMY_SYNTH.md) の「他デバイスからの入力を AMY へ繋ぐ」
+- `MIDI.route` は `MIDI::Route` を返す（失敗時は false）
+
+### MIDI.filter / MIDI.on（2026-10-22）
+
+詳細は [docs/MIDI_FILTER.md](docs/MIDI_FILTER.md)。ルートに Ruby のブロックを差し込む。
+`MIDI::Input#on` の後継（`MIDI::Input` は非推奨、初回の new で警告）。
+
+```ruby
+MIDI.route(kb, syn).filter(types: [:note_on, :note_off]) { |m| m.note += 12; m }  # Message / Array / nil
+MIDI.on(kb, :note_on) { |m| puts m.note }   # 宛先のない filter（USB Device / UI::Keys からも受けられる）
+MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
+```
+
+- **C で絞ってから Ruby に回す**: `types:` / `channel:` に合うパケットの、filter 付きの宛先の分だけ
+  キューへ。それ以外（クロックなど）と他の宛先は従来どおり C から直接。filter 表はルート表とは別
+  （`MIDI_FILTER_MAX` 16 件、(送信元, 宛先ビット) ごと）。listener の宛先は `MIDI_ROUTE_DST_RUBY`（0x100）
+- ブロックは `MIDI.run_filters` で走る（`MIDI.sleep_ms` / クロックループ / `UI.process`）。filter が
+  あるときの待ちはキューを待ちながら寝る（`MIDI_Filter_wait`）。素の `sleep_ms` では走らない
+- 自分で送る送信元（`UI::Keys`）は `MIDI_route_packet()` ではなく `MIDI_route_dispatch()` を呼ぶこと
+  （呼ばないと filter / listener に届かない）
+- ホストテスト: `make -C mrbgems/picoruby-midi/host_test`（C）、`ruby host_test/filter_test.rb`（Ruby、gem ディレクトリで）
 
 ## 既知の課題
 

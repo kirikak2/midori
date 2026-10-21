@@ -3,6 +3,7 @@
  */
 
 #include <stddef.h>
+#include <stdio.h>
 #include "../../include/ui.h"
 #include "ui_common.h"
 
@@ -51,6 +52,10 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->key_velocity = 0;
     event->key_channel = 0;
     event->key_on = false;
+    event->mididev_kind = 0;
+    event->mididev_from = 0;
+    event->mididev_to = 0;
+    event->mididev_channel = -1;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -123,6 +128,13 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->key_velocity = ui_evt.data.key.velocity;
             event->key_channel = ui_evt.data.key.channel;
             event->key_on = ui_evt.data.key.on;
+            break;
+        case UI_EVENT_MIDI_DEVICES:
+            event->type = PICORUBY_UI_EVENT_MIDI_DEVICES;
+            event->mididev_kind = ui_evt.data.mididev.kind;
+            event->mididev_from = ui_evt.data.mididev.from;
+            event->mididev_to = ui_evt.data.mididev.to;
+            event->mididev_channel = ui_evt.data.mididev.channel;
             break;
         default:
             break;
@@ -601,4 +613,74 @@ bool picoruby_ui_keys_is_lit(int note)
 bool picoruby_ui_keys_is_pressed(int note)
 {
     return ui_keys_is_pressed(note);
+}
+
+/* --- MIDI Devices --- */
+
+int picoruby_ui_mididev_register(const char *key, const char *name, int bit,
+                                 int color, bool builtin)
+{
+    return ui_mididev_register(key, name, (uint8_t)bit, (uint16_t)color, builtin);
+}
+
+bool picoruby_ui_mididev_unregister(int bit)
+{
+    return ui_mididev_unregister((uint8_t)bit);
+}
+
+bool picoruby_ui_mididev_activate(const char *key, int bit)
+{
+    return ui_mididev_activate(key, (uint8_t)bit);
+}
+
+int picoruby_ui_mididev_count(void)
+{
+    return ui_mididev_count();
+}
+
+bool picoruby_ui_mididev_get(int index, int *bit, int *flags, char *key, int key_len,
+                             char *name, int name_len)
+{
+    ui_mididev_t d;
+    if (!ui_mididev_get(index, &d)) return false;
+    *bit = d.bit;
+    *flags = d.flags;
+    snprintf(key, key_len, "%s", d.key);
+    snprintf(name, name_len, "%s", d.name);
+    return true;
+}
+
+int picoruby_ui_mididev_selected(bool out)
+{
+    return ui_mididev_selected(out);
+}
+
+void picoruby_ui_mididev_select(bool out, int index, bool save)
+{
+    ui_mididev_select(out, index, save);
+}
+
+int picoruby_ui_mididev_restore(void)
+{
+    return ui_mididev_restore();
+}
+
+bool picoruby_ui_mididev_save(void)
+{
+    return ui_mididev_save();
+}
+
+bool picoruby_ui_mididev_take_wanted(char *key, int len)
+{
+    return ui_mididev_take_wanted(key, len);
+}
+
+int picoruby_ui_mididev_connected_mask(void)
+{
+    return ui_mididev_connected_mask();
+}
+
+int picoruby_ui_mididev_serial(void)
+{
+    return (int)ui_mididev_serial();
 }

@@ -2,7 +2,7 @@
 #include "screen_log.h"
 #include "screen_main.h"
 #include "screen_pad.h"
-#include "screen_midi_info.h"
+#include "screen_midi_devices.h"
 #include "screen_script.h"
 #include "screen_settings.h"
 #include "screen_tombola.h"
@@ -111,7 +111,7 @@ void UIManager::initScreens()
     // Initialize all screens
     m_screens[UI_SCREEN_MAIN] = &getScreenMain();
     m_screens[UI_SCREEN_PADS] = &getScreenPads();
-    m_screens[UI_SCREEN_MIDI_INFO] = &getScreenMidiInfo();
+    m_screens[UI_SCREEN_MIDI_INFO] = &getScreenMidiDevices();
     m_screens[UI_SCREEN_LOGS] = &getScreenLog();
     m_screens[UI_SCREEN_SCRIPTS] = &getScreenScripts();
     m_screens[UI_SCREEN_SETTINGS] = &getScreenSettings();
@@ -174,6 +174,7 @@ void UIManager::update()
     // check: a running patch must keep playing while the user is looking at
     // another screen.
     ui_tombola_tick();
+    ui_mididev_tick();
 
     // Update current screen. Not when a full repaint is pending (a screen
     // was just switched to, say): update() draws its incremental changes
@@ -558,6 +559,7 @@ void UIManager::scriptCleanup()
     m_menuHidden = 0;
     ui_layout_cleanup();
     ui_keys_cleanup();
+    ui_mididev_cleanup();
     m_needsRedraw = true;
 }
 

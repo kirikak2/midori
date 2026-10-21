@@ -372,6 +372,7 @@ typedef enum {
     UI_EVENT_XYPAD_TOUCH,     // An XYPad slot's touch moved through a phase
     UI_EVENT_WIDGET,          // A pad / knob on a layout was operated
     UI_EVENT_KEY,             // A key of the on-screen keyboard went down / up
+    UI_EVENT_MIDI_DEVICES,    // MIDI Devices: selection, patch or connection changed
 } ui_event_type_t;
 
 typedef enum {
@@ -439,6 +440,12 @@ typedef struct {
             uint8_t channel;
             bool    on;
         } key;
+        struct {
+            uint8_t kind;    // For UI_EVENT_MIDI_DEVICES: ui_mididev_event_t
+            uint8_t from;    // Transport bit (the device for select / connect)
+            uint8_t to;      // Transport bit (patches)
+            int8_t  channel; // Patches: 0..15, or -1 for all
+        } mididev;
     } data;
 } ui_event_t;
 
@@ -700,6 +707,74 @@ int  ui_layout_last_shown(void);                 // -1 before any was shown
 void ui_layout_title(int slot, char* buf, int len);
 // The script that defined them is gone: drop every layout. Any task.
 void ui_layout_cleanup(void);
+
+// --- MIDI Devices -------------------------------------------------------------
+// The devices the MIDI Devices screen patches between (docs/UI_MIDI_DEVICES.md),
+// each a picoruby-midi transport bit. Patches are MIDI.route's route table;
+// this keeps the device list, the program's IN / OUT selection and the saved
+// patches (NVS). Implemented in ui_midi_devices.cpp.
+#define UI_MIDIDEV_MAX       8
+#define UI_MIDIDEV_KEY_LEN  12
+#define UI_MIDIDEV_NAME_LEN 16
+
+enum {
+    UI_MIDIDEV_BUILTIN = 0x01,   // The firmware's: survives scripts, its patches are saved
+    UI_MIDIDEV_STANDBY = 0x02,   // Not started yet, no bit (AMY until first used)
+};
+
+typedef enum {
+    UI_MIDIDEV_EVENT_SELECT_IN = 0,
+    UI_MIDIDEV_EVENT_SELECT_OUT,
+    UI_MIDIDEV_EVENT_PATCH,
+    UI_MIDIDEV_EVENT_UNPATCH,
+    UI_MIDIDEV_EVENT_CONNECT,
+    UI_MIDIDEV_EVENT_DISCONNECT,
+} ui_mididev_event_t;
+
+typedef struct {
+    uint8_t  bit;                       // Transport bit, 0 while standby
+    uint8_t  flags;                     // UI_MIDIDEV_*
+    uint16_t color;                     // RGB565
+    char     key[UI_MIDIDEV_KEY_LEN];   // Built-ins: what NVS knows it by
+    char     name[UI_MIDIDEV_NAME_LEN];
+} ui_mididev_t;
+
+// Registering (PicoRuby task). A device is found again by its key (built-ins)
+// or its bit: registering it again renames it. bit 0 registers a built-in
+// standby. Returns the entry's index, or -1 when the list is full.
+int  ui_mididev_register(const char* key, const char* name, uint8_t bit,
+                         uint16_t color, bool builtin);
+bool ui_mididev_unregister(uint8_t bit);
+// A standby device started and got its bit
+bool ui_mididev_activate(const char* key, uint8_t bit);
+
+// Reading (any task)
+int  ui_mididev_count(void);
+bool ui_mididev_get(int index, ui_mididev_t* out);
+int  ui_mididev_find_bit(uint8_t bit);           // index, or -1
+uint8_t ui_mididev_connected_mask(void);         // Transports that are up
+uint32_t ui_mididev_serial(void);                // Bumped on every change
+
+// The program's IN / OUT (Prog column / row). index -1 for none. save: also
+// make it what a script starts with (NVS).
+int  ui_mididev_selected(bool out);
+void ui_mididev_select(bool out, int index, bool save);
+
+// Patches from the screen (UI task): toggles the route between two entries,
+// saved when both are built-ins. channel -1 for all.
+void ui_mididev_toggle_patch(int from, int to, int channel);
+// The channel of the route between two entries: -2 none, -1 all, else 0..15
+int  ui_mididev_patch_channel(int from, int to);
+
+// Saved patches (NVS)
+int  ui_mididev_restore(void);                   // Route them again; how many
+bool ui_mididev_save(void);                      // Save the live ones
+// A standby device something needs (a saved patch, the selection): copies its
+// key and clears the request. Polled by Ruby, which starts it.
+bool ui_mididev_take_wanted(char* key, int len);
+
+void ui_mididev_tick(void);      // UI task: connection changes -> events
+void ui_mididev_cleanup(void);   // A script ended (any task)
 
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);

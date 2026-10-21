@@ -110,6 +110,7 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
         case PICORUBY_UI_EVENT_XYPAD_TOUCH:   type = MRB_SYM(xypad_touch); break;
         case PICORUBY_UI_EVENT_WIDGET:        type = MRB_SYM(widget); break;
         case PICORUBY_UI_EVENT_KEY:           type = MRB_SYM(key); break;
+        case PICORUBY_UI_EVENT_MIDI_DEVICES:  type = MRB_SYM(midi_devices); break;
         default:                              type = MRB_SYM(unknown); break;
     }
 
@@ -200,6 +201,24 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             HSET(channel, mrb_fixnum_value(event.key_channel));
             HSET(state, mrb_bool_value(event.key_on));
             break;
+        case PICORUBY_UI_EVENT_MIDI_DEVICES: {
+            /* Bits; UI::MIDIDevices turns them into devices */
+            mrb_sym kind;
+            switch (event.mididev_kind) {
+                case 0:  kind = MRB_SYM(select_in);  break;
+                case 1:  kind = MRB_SYM(select_out); break;
+                case 2:  kind = MRB_SYM(patch);      break;
+                case 3:  kind = MRB_SYM(unpatch);    break;
+                case 4:  kind = MRB_SYM(connect);    break;
+                default: kind = MRB_SYM(disconnect); break;
+            }
+            HSET(kind, mrb_symbol_value(kind));
+            HSET(from, mrb_fixnum_value(event.mididev_from));
+            HSET(to, mrb_fixnum_value(event.mididev_to));
+            HSET(channel, event.mididev_channel < 0 ? mrb_nil_value()
+                                                    : mrb_fixnum_value(event.mididev_channel));
+            break;
+        }
         default:
             break;
     }
@@ -993,6 +1012,122 @@ mrb_ui_keys_is_pressed(mrb_state *mrb, mrb_value self)
 #define DEF(name, func, aspec) \
     mrb_define_module_function_id(mrb, ui, MRB_SYM(name), func, aspec)
 
+/* ------------------------------------------------------------------------
+ * MIDI Devices (docs/UI_MIDI_DEVICES.md)
+ * ------------------------------------------------------------------------ */
+
+/* UI._mididev_register(key, name, bit, color, builtin) -> index or -1 */
+static mrb_value
+mrb_ui_mididev_register(mrb_state *mrb, mrb_value self)
+{
+    mrb_value key, name, bit, color, builtin;
+    mrb_get_args(mrb, "ooooo", &key, &name, &bit, &color, &builtin);
+    return mrb_fixnum_value(picoruby_ui_mididev_register(str_arg(mrb, key), str_arg(mrb, name),
+                                                         val_to_i(bit), val_to_i(color),
+                                                         mrb_test(builtin)));
+}
+
+/* UI._mididev_unregister(bit) -> bool */
+static mrb_value
+mrb_ui_mididev_unregister(mrb_state *mrb, mrb_value self)
+{
+    mrb_value bit;
+    mrb_get_args(mrb, "o", &bit);
+    return mrb_bool_value(picoruby_ui_mididev_unregister(val_to_i(bit)));
+}
+
+/* UI._mididev_activate(key, bit) -> bool */
+static mrb_value
+mrb_ui_mididev_activate(mrb_state *mrb, mrb_value self)
+{
+    mrb_value key, bit;
+    mrb_get_args(mrb, "oo", &key, &bit);
+    return mrb_bool_value(picoruby_ui_mididev_activate(str_arg(mrb, key), val_to_i(bit)));
+}
+
+/* UI._mididev_count -> Integer */
+static mrb_value
+mrb_ui_mididev_count(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_mididev_count());
+}
+
+/* UI._mididev_get(index) -> [bit, flags, key, name] or nil */
+static mrb_value
+mrb_ui_mididev_get(mrb_state *mrb, mrb_value self)
+{
+    mrb_value index;
+    mrb_get_args(mrb, "o", &index);
+    int bit, flags;
+    char key[16], name[24];
+    if (!picoruby_ui_mididev_get(val_to_i(index), &bit, &flags, key, sizeof(key),
+                                 name, sizeof(name))) {
+        return mrb_nil_value();
+    }
+    mrb_value a = mrb_ary_new_capa(mrb, 4);
+    mrb_ary_push(mrb, a, mrb_fixnum_value(bit));
+    mrb_ary_push(mrb, a, mrb_fixnum_value(flags));
+    mrb_ary_push(mrb, a, mrb_str_new_cstr(mrb, key));
+    mrb_ary_push(mrb, a, mrb_str_new_cstr(mrb, name));
+    return a;
+}
+
+/* UI._mididev_selected(out) -> index or -1 */
+static mrb_value
+mrb_ui_mididev_selected(mrb_state *mrb, mrb_value self)
+{
+    mrb_value out;
+    mrb_get_args(mrb, "o", &out);
+    return mrb_fixnum_value(picoruby_ui_mididev_selected(mrb_test(out)));
+}
+
+/* UI._mididev_select(out, index, save) */
+static mrb_value
+mrb_ui_mididev_select(mrb_state *mrb, mrb_value self)
+{
+    mrb_value out, index, save;
+    mrb_get_args(mrb, "ooo", &out, &index, &save);
+    picoruby_ui_mididev_select(mrb_test(out), val_to_i(index), mrb_test(save));
+    return mrb_nil_value();
+}
+
+/* UI._mididev_restore -> patches routed */
+static mrb_value
+mrb_ui_mididev_restore(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_mididev_restore());
+}
+
+/* UI._mididev_save -> bool */
+static mrb_value
+mrb_ui_mididev_save(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(picoruby_ui_mididev_save());
+}
+
+/* UI._mididev_take_wanted -> key String or nil */
+static mrb_value
+mrb_ui_mididev_take_wanted(mrb_state *mrb, mrb_value self)
+{
+    char key[16];
+    if (!picoruby_ui_mididev_take_wanted(key, sizeof(key))) return mrb_nil_value();
+    return mrb_str_new_cstr(mrb, key);
+}
+
+/* UI._mididev_connected_mask -> Integer */
+static mrb_value
+mrb_ui_mididev_connected_mask(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_mididev_connected_mask());
+}
+
+/* UI._mididev_serial -> Integer */
+static mrb_value
+mrb_ui_mididev_serial(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_mididev_serial());
+}
+
 void
 mrb_picoruby_ui_gem_init(mrb_state *mrb)
 {
@@ -1072,6 +1207,20 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_keys_clear_lights,      mrb_ui_keys_clear_lights,      MRB_ARGS_NONE());
     DEF(_keys_lit,               mrb_ui_keys_is_lit,            MRB_ARGS_REQ(1));
     DEF(_keys_pressed,           mrb_ui_keys_is_pressed,        MRB_ARGS_REQ(1));
+
+    /* MIDI Devices */
+    DEF(_mididev_register,       mrb_ui_mididev_register,       MRB_ARGS_REQ(5));
+    DEF(_mididev_unregister,     mrb_ui_mididev_unregister,     MRB_ARGS_REQ(1));
+    DEF(_mididev_activate,       mrb_ui_mididev_activate,       MRB_ARGS_REQ(2));
+    DEF(_mididev_count,          mrb_ui_mididev_count,          MRB_ARGS_NONE());
+    DEF(_mididev_get,            mrb_ui_mididev_get,            MRB_ARGS_REQ(1));
+    DEF(_mididev_selected,       mrb_ui_mididev_selected,       MRB_ARGS_REQ(1));
+    DEF(_mididev_select,         mrb_ui_mididev_select,         MRB_ARGS_REQ(3));
+    DEF(_mididev_restore,        mrb_ui_mididev_restore,        MRB_ARGS_NONE());
+    DEF(_mididev_save,           mrb_ui_mididev_save,           MRB_ARGS_NONE());
+    DEF(_mididev_take_wanted,    mrb_ui_mididev_take_wanted,    MRB_ARGS_NONE());
+    DEF(_mididev_connected_mask, mrb_ui_mididev_connected_mask, MRB_ARGS_NONE());
+    DEF(_mididev_serial,         mrb_ui_mididev_serial,         MRB_ARGS_NONE());
 
     /* Layouts */
     DEF(_display,          mrb_ui_display,          MRB_ARGS_NONE());

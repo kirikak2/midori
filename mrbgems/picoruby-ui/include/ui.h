@@ -52,6 +52,11 @@ typedef struct {
     uint8_t key_velocity;  /* ...0 on release */
     uint8_t key_channel;
     bool key_on;
+    uint8_t mididev_kind;  /* For MIDI Devices events: 0 select_in / 1 select_out /
+                              2 patch / 3 unpatch / 4 connect / 5 disconnect */
+    uint8_t mididev_from;  /* ...transport bit (the device for select / connect) */
+    uint8_t mididev_to;    /* ...transport bit (patches) */
+    int8_t  mididev_channel; /* ...patches: 0..15, -1 all */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -67,6 +72,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_XYPAD_TOUCH   9
 #define PICORUBY_UI_EVENT_WIDGET       10
 #define PICORUBY_UI_EVENT_KEY          11
+#define PICORUBY_UI_EVENT_MIDI_DEVICES 12
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -191,6 +197,26 @@ void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3);
 void picoruby_ui_keys_clear_lights(void);
 bool picoruby_ui_keys_is_lit(int note);
 bool picoruby_ui_keys_is_pressed(int note);
+
+/* MIDI Devices (docs/UI_MIDI_DEVICES.md): the device list, the program's IN /
+ * OUT and the saved patches. Devices are picoruby-midi transport bits; key
+ * names a built-in ("" for a script's device), bit 0 registers a standby one.
+ * Indices are positions in the list, -1 for none. */
+int  picoruby_ui_mididev_register(const char *key, const char *name, int bit,
+                                  int color, bool builtin);
+bool picoruby_ui_mididev_unregister(int bit);
+bool picoruby_ui_mididev_activate(const char *key, int bit);
+int  picoruby_ui_mididev_count(void);
+/* Copies entry `index`: its bit, flags (1 built-in, 2 standby), key and name */
+bool picoruby_ui_mididev_get(int index, int *bit, int *flags, char *key, int key_len,
+                             char *name, int name_len);
+int  picoruby_ui_mididev_selected(bool out);
+void picoruby_ui_mididev_select(bool out, int index, bool save);
+int  picoruby_ui_mididev_restore(void);
+bool picoruby_ui_mididev_save(void);
+bool picoruby_ui_mididev_take_wanted(char *key, int len);
+int  picoruby_ui_mididev_connected_mask(void);
+int  picoruby_ui_mididev_serial(void);
 
 #ifdef __cplusplus
 }

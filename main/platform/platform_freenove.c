@@ -514,3 +514,78 @@ bool ui_keys_is_pressed(int note)
 void ui_keys_cleanup(void)
 {
 }
+
+// MIDI Devices stubs (docs/UI_MIDI_DEVICES.md) - no screen to patch on. The
+// list stays empty, so UI::MIDIDevices has no devices, no selection and
+// nothing saved; MIDI.route itself works as everywhere.
+
+int ui_mididev_register(const char *key, const char *name, uint8_t bit,
+                        uint16_t color, bool builtin)
+{
+    (void)key; (void)name; (void)bit; (void)color; (void)builtin;
+    return -1;
+}
+
+bool ui_mididev_unregister(uint8_t bit)
+{
+    (void)bit;
+    return false;
+}
+
+bool ui_mididev_activate(const char *key, uint8_t bit)
+{
+    (void)key; (void)bit;
+    return false;
+}
+
+int ui_mididev_count(void)
+{
+    return 0;
+}
+
+bool ui_mididev_get(int index, ui_mididev_t *out)
+{
+    (void)index; (void)out;
+    return false;
+}
+
+int ui_mididev_selected(bool out)
+{
+    (void)out;
+    return -1;
+}
+
+void ui_mididev_select(bool out, int index, bool save)
+{
+    (void)out; (void)index; (void)save;
+}
+
+int ui_mididev_restore(void)
+{
+    return 0;
+}
+
+bool ui_mididev_save(void)
+{
+    return false;
+}
+
+bool ui_mididev_take_wanted(char *key, int len)
+{
+    (void)key; (void)len;
+    return false;
+}
+
+uint8_t ui_mididev_connected_mask(void)
+{
+    return 0;
+}
+
+uint32_t ui_mididev_serial(void)
+{
+    return 0;
+}
+
+void ui_mididev_cleanup(void)
+{
+}

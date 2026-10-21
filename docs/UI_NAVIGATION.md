@@ -59,7 +59,7 @@ Main → Pads → MIDI Info → Logs → Scripts → Settings → Tombola → Kn
 | グループ | 画面（シンボル） | タイルの表示 |
 |---|---|---|
 | 演奏 | `:pads` `:knobs` `:xypad` `:tombola` `:sequencer`（将来）、スクリプトが定義したレイアウト（1 つにつき 1 枚、最大 4） | 画面名（レイアウトは title）+ 状態（Tombola 再生中、Knobs の現在バンクなど） |
-| テンポ / 状態 | `:tempo` `:midi_info` | Tempo は BPM、MIDI Info は接続状態 |
+| テンポ / 状態 | `:tempo` `:midi_devices` | Tempo は BPM、MIDI Devices は機器の一覧とパッチ（docs/UI_MIDI_DEVICES.md） |
 | システム | `:scripts` `:logs` `:settings` | Scripts は実行中のスクリプト名 |
 
 ```
@@ -130,7 +130,7 @@ CoreS3 (content 320x180)                Tab5 (content 1280x620)
 | `:tombola` | Tombola | `UI::SCREEN_TOMBOLA` |
 | `:keys` | Keys（画面の鍵盤、docs/KEYS.md） | `UI::SCREEN_KEYS`（2026-10-18 追加。値 11） |
 | `:layout` | 現在のレイアウト | `UI::SCREEN_LAYOUT`（新設） |
-| `:midi_info` | MIDI Info | `UI::SCREEN_MIDI_INFO` |
+| `:midi_devices`（旧 `:midi_info` も可） | MIDI Devices | `UI::SCREEN_MIDI_DEVICES`（= `UI::SCREEN_MIDI_INFO`） |
 | `:scripts` | Scripts | `UI::SCREEN_SCRIPTS` |
 | `:logs` | Logs | `UI::SCREEN_LOGS` |
 | `:settings` | Settings | `UI::SCREEN_SETTINGS` |
@@ -159,7 +159,7 @@ UI.knobs(bank: nil)        # 既存。bank: を追加
 UI.xypad
 UI.tombola
 UI.layout_screen           # ※ UI.layout はレイアウト定義に使う（UI_LAYOUT_DSL.md）
-UI.midi_info
+UI.midi_devices
 UI.scripts
 UI.logs                    # ※ UI.log(text) とは別物（引数なし）
 UI.settings
@@ -193,7 +193,7 @@ perform = UI.layout("Perform") { ... }; perform.show
 ### 4.4 メニューのカスタマイズ
 
 ```ruby
-UI.menu(hide: [:settings, :midi_info, :tombola])   # Home のタイルと next/prev から外す
+UI.menu(hide: [:settings, :midi_devices, :tombola])   # Home のタイルと next/prev から外す
 UI.menu(only: [:xypad, :knobs, :layout, :tempo])    # これだけを出す
 UI.menu(reset: true)                               # 既定に戻す
 ```
