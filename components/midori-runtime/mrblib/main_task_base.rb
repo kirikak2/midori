@@ -137,13 +137,9 @@ module MIDI
     alias_method :_original_start!, :start!
     alias_method :_original_bpm_loop, :bpm_loop
 
-    def start!(bpm: 120, output: nil, sync: nil, sync_from: nil, subdivisions: 24, &user_block)
-      # Seed UI.bpm with the caller-supplied initial value so the on-screen
-      # tempo widget matches what the script asked for. Subsequent UI
-      # tempo changes flow back into the loop via the MIDI.on_bpm_change
-      # hook wired up at the bottom of this file.
-      # (mrubyc has no Numeric class; check Integer/Float individually.)
-      UI.set_bpm(bpm) if bpm.is_a?(Integer) || bpm.is_a?(Float)
+    def start!(bpm: nil, output: nil, sync: nil, sync_from: nil, subdivisions: 24, &user_block)
+      # The tempo needs no seeding: a BPM given here becomes MIDI::Clock's,
+      # which the Tempo screen shows, and an omitted one follows it.
       sm = begin
              ScriptManager.new
            rescue
@@ -160,7 +156,7 @@ module MIDI
     end
 
     # bpm_loop is the legacy entry point. The upstream gem has been
-    # stripped of UI.bpm and ScriptManager references; we re-inject them
+    # stripped of ScriptManager references; we re-inject the stop check
     # here so existing SD-card scripts that rely on bpm_loop's old
     # midori-flavoured behavior keep working unchanged.
     #
@@ -168,15 +164,9 @@ module MIDI
     # bpm_loop). For scripts with sparse subdivisions this may delay
     # script-switch by up to one subdivision interval - acceptable for
     # the legacy path; new code should use MIDI.start! instead.
-    def bpm_loop(bpm = 120, output: nil, subdivisions: 1, send_start: true,
+    def bpm_loop(bpm = nil, output: nil, subdivisions: 1, send_start: true,
                  sync: false, input: nil, sync_from: nil, on_loop: nil, on_error: nil,
                  bpm_source: nil, &user_block)
-      # Seed UI.bpm so the tempo widget reflects the caller-supplied value;
-      # subsequent UI changes are propagated via MIDI.on_bpm_change (wired
-      # up below). bpm_source: still works for scripts that supply their
-      # own dynamic tempo callable.
-      # (mrubyc has no Numeric class; check Integer/Float individually.)
-      UI.set_bpm(bpm) if bpm.is_a?(Integer) || bpm.is_a?(Float)
       sm = begin
              ScriptManager.new
            rescue
@@ -209,13 +199,6 @@ module UI
       _process_ui_only
     end
   end
-end
-
-# Bridge UI tempo changes into MIDI's BPM-change hook so any running
-# clock loop (start! or bpm_loop) follows the on-screen widget without
-# the script having to wire it up itself.
-UI.on(:bpm_change) do |event|
-  MIDI._notify_bpm_change(event[:bpm]) if event && event[:bpm]
 end
 
 # ============================================================================

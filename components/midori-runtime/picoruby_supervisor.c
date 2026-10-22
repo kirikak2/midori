@@ -16,7 +16,7 @@
 #include "picoruby_supervisor.h"
 #include "picoruby-esp32.h"
 #include "console_input.h"
-#include "midi.h"  /* for MIDI_set_stop_check / MIDI_set_cleanup_hook */
+#include "midi.h"  /* for MIDI_set_stop_check */
 
 #include "picoruby.h"
 #include "task.h"
@@ -128,11 +128,10 @@ void supervisor_init(void)
         return;
     }
 
-    // Wire picoruby-midi's cooperative-stop hooks to the supervisor's
-    // script-stop flag and to the all-notes-off cleanup helper, so the
-    // gem itself stays free of picoruby-esp32 symbols.
+    // Wire picoruby-midi's cooperative-stop hook to the supervisor's
+    // script-stop flag, so the gem itself stays free of picoruby-esp32
+    // symbols. (The cleanup runs from here when a script ends.)
     MIDI_set_stop_check(picoruby_esp32_stop_requested);
-    MIDI_set_cleanup_hook(picoruby_esp32_midi_cleanup);
 
     // Initialize NVS (needed for some operations)
     initialize_nvs();

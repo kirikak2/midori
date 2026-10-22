@@ -658,6 +658,36 @@ BLE 対応ボード向けに Apple BLE-MIDI 仕様準拠の MIDI トランスポ
    - upstream に提出するのは `picoruby-midi`（コア）と `picoruby-midi-mml`（MML）の 2 本立て
    - Midori 側の依存関係は両方を引く形に
 
+## 設計判断（MIDI クロック・決定済 / 2026-10-23）
+
+Midori の `UI::Tempo` が独自の esp_timer で MIDI クロックを送るようになり（2026-10-22）、
+`bpm_loop` / `start!` の `output:`・gem の `MIDI::Clock` と送信元が 3 つになったのを整理した。
+picoruby-midi は Midori 以外（画面のないボード、他の PicoRuby アプリ）でも使う標準 gem なので、
+マスタークロックは gem が持ち、Midori の Tempo はその上の UI とする。
+
+1. **クロックはプロセスに 1 つ。** `MIDI::Clock`（クラスメソッド）がそれで、送信専用のトランスポート
+   兼ルートの送信元。送り先は `MIDI.route(MIDI::Clock, dev)`。`MIDI::Clock.new(device)` /
+   `MIDI.clock(device)` は同じクロックを操作するハンドルとして残す（`start` で `device` へルート）
+2. **ESP32 port の修正。** F8 を `g_usb_transport` 固定ではなくルート（`MIDI_route_dispatch`）で送る。
+   F8 はクロックからのルートがある間ずっと送り、Start / Continue / Stop は別のメッセージ
+   （以前は start でタイマを動かし stop で止めていた）。タイマのコールバックが停止要求を見て cleanup を
+   呼ぶ処理と `MIDI_set_cleanup_hook()` は削除（cleanup はアプリが自分で呼ぶ。`MIDI_Clock_reset()` を追加）。
+   USB Host の切断でクロックを止める処理も削除（クロックは USB Host のものではない）
+3. **`bpm_loop` / `start!` はクロックに委譲する。** port があって `output:` が登録済みトランスポートなら、
+   ループの間だけクロックを `output` へルートし（既存のルートは残す）、ブロックはクロックの tick
+   （`MIDI::Clock._count`）に合わせて呼ぶ。port がない・`output` がルートできないときは従来どおり
+   Ruby ループが F8 を送る（低精度の層）
+   - **`bpm` を省略したら現在のクロックのテンポに従う。** 指定したらクロックのテンポを設定する。
+     そのため `bpm_loop` の第 1 引数の既定値は 120 から `nil` に、`start!` の `bpm:` も `nil` にした
+   - **`output:` なしのループは互換を保つ。** ブロックは従来どおり `60000/bpm/subdivisions` の自前の計時で
+     呼ぶ（テンポの変化には追従する）
+4. **ブロックに渡す clock count は現状維持。** ループに入った時点を 0 とする（クロックの Start 起点にはしない）
+5. **ループの形は特定しない。** MIDIBASE（upstream の picoruby-midibase）の `Session` 型ループは採用しない。
+   クロックは C で動くので、`MIDI.start!`・`MIDI.bpm_loop`・`loop do ... MIDI.sleep_ms ... end`・
+   `MIDIBASE::Session` のどれでも同じクロックが出る
+6. **picoruby-midibase とはアラインしない。** ただし将来、picoruby-usb_midi_host / usb_midi_device /
+   picoruby-amy などのトランスポート gem を MIDIBASE から呼べるようにすることは検討する（保留）
+
 ## 設計判断（関連 gem・決定済）
 
 ### A. `picoruby-sam2695` のスコープ

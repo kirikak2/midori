@@ -154,6 +154,10 @@ picoruby_esp32_midi_cleanup(void)
 
   // Send MIDI Stop (0xFC)
   MIDI_transport_send(mask, 0, 0x05, 0xFC, 0, 0);  // CIN 0x05 for single-byte system common
+  // ...which stops the MIDI clock's receivers too: the clock (UI::Tempo,
+  // MIDI::Clock) goes back to stopped. Its F8s go on wherever the next
+  // script or the saved patches route them.
+  MIDI_Clock_reset();
 
   // The AMY synth keeps its state (synths, patches, CC mappings, effects)
   // across scripts unless told otherwise, so the next script would start

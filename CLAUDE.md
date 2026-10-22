@@ -299,13 +299,13 @@ UI（またはC側）からのスクリプト変更リクエストを処理し�
    - `g_stop_requested = true` と `g_script_change_requested = true` がセット
 
 2. **MIDI クリーンアップ（C側自動）**
-   - MIDI Clock タイマーコールバック（`clock_timer_callback`）が `stop_requested` を検出
-   - `picoruby_esp32_midi_cleanup()` を自動実行：
+   - Supervisor がスクリプトの終了時に `picoruby_esp32_midi_cleanup()` を実行
+     （以前は MIDI Clock のタイマーコールバックも `stop_requested` を見て呼んでいたが、
+     2026-10-23 にクロックを `MIDI::Clock` に一本化したときに外した）：
      - 全チャンネル（0-15）に All Sound Off (CC#120) 送信
      - 全チャンネル（0-15）に All Notes Off (CC#123) 送信
-     - MIDI Stop (0xFC) 送信
-     - USB_MIDI と SAM2695 両方に送信
-   - タイマー停止、`g_running = false`
+     - MIDI Stop (0xFC) 送信（USB Device 以外の登録済みトランスポートすべて）
+     - `MIDI_Clock_reset()` でクロックを停止状態に戻す（F8 は止めない）
 
 3. **MIDI Input タスク停止（C側自動）**
    - `midi_input_task` ループが `stop_requested` を検出
@@ -314,7 +314,7 @@ UI（またはC側）からのスクリプト変更リクエストを処理し�
 4. **Ruby スクリプト終了**
    - `MIDI.bpm_loop` が各イテレーションで `ScriptManager#stop_requested?` をチェック
    - `true` の場合、`send_stop` を送信（必要に応じて）してループを `break`
-   - `MIDI::Clock#running?` は C側の `_timer_running?` を確認（自動同期）
+   - `MIDI::Clock.running?` は C 側の Start / Stop の状態（クリーンアップで停止に戻る）
 
 5. **新スクリプトロード**
    - main_task_base.rb のメインループに制御が戻る
@@ -826,11 +826,19 @@ keys.show
 
 詳細は [docs/TEMPO.md](docs/TEMPO.md)。**実機未確認**。
 
-- Tempo は **MIDI クロックを送るデバイス**（[main/ui/ui_tempo.cpp](main/ui/ui_tempo.cpp)）。送信だけの
-  トランスポートとして登録され、`MIDI.route(UI::Tempo, dev)` / MIDI Devices 画面（IN の行のみ、
-  `UI_MIDIDEV_NO_OUT`）で任意のデバイスへクロックを送る。クロックは esp_timer が `ui_get_bpm()`
-  （Sync 中は外部クロック）で送り、Tempo からのルートがある間だけ動く。Start / Stop は画面の Play / Stop ボタンか
-  `UI::Tempo.start` / `.stop`（FA / FC を Tempo のルートへ）
+- Tempo は **MIDI クロックを送るデバイス**。クロック本体は picoruby-midi の **`MIDI::Clock`**
+  （プロセスに 1 つ、gem の port の esp_timer。2026-10-23 に Tempo 自前のタイマから一本化）で、
+  [main/ui/ui_tempo.cpp](main/ui/ui_tempo.cpp) は UI とのつなぎだけ。`MIDI.route(UI::Tempo, dev)` =
+  `MIDI.route(MIDI::Clock, dev)` / MIDI Devices 画面（IN の行のみ、`UI_MIDIDEV_NO_OUT`）で任意のデバイスへ送る。
+  F8 はクロックからのルートがある間だけ送られ、Start / Stop（画面の Play / Stop、`UI::Tempo.start` / `.stop`
+  = `MIDI::Clock.start` / `.stop`）とは独立
+- テンポは UI の内部 BPM = `MIDI::Clock` のテンポ。スクリプトが `MIDI::Clock.bpm=` で変えると UI タスクが拾う。
+  Sync 中は `MIDI_Clock_set_follow_bpm()` で外部クロックに従う
+- `MIDI.bpm_loop` / `MIDI.start!` は、port があって `output:` が登録済みトランスポートなら自分で F8 を送らず、
+  ループの間だけ `MIDI::Clock` を `output` へルートしてクロックの tick に合わせてブロックを呼ぶ（既存のパッチは残す）。
+  `bpm` を省略すると現在のクロックのテンポに従い、指定するとクロックのテンポを設定する。`output:` なしは従来どおり
+  Ruby の計時（`60000/bpm/subdivisions`）でブロックを呼ぶ（テンポの変化には追従）。ホストテスト:
+  `ruby host_test/clock_test.rb`（picoruby-midi ディレクトリで）
 - 画面の -10 / -1 / +1 / +10 ボタンと Bar / Beat 表示・拍のバーは削除。BPM は `UI::Tempo.bpm` / `bpm=`
   （ノブ・パッドからはスクリプトでつなぐ）。TAP は BPM 表示のタップかナビバー
 - 画面は `setArea()` の矩形に収まるよう配置を計算し、レイアウト DSL の `tempo`（`UI_WIDGET_TEMPO`）でセルに置ける

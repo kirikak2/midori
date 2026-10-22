@@ -1,11 +1,11 @@
 # Tempo（UI::Tempo）
 
-> **状態: 実装済み（2026-10-22）**。Tab5 のビルドとホストの Ruby テストのみ。**実機では未確認**。
+> **状態: 実装済み（2026-10-22、クロックを `MIDI::Clock` に一本化 2026-10-23）**。Tab5 のビルドとホストの Ruby テストのみ。**実機では未確認**。
 
 テンポ（BPM）の画面と、その**テンポで MIDI クロックを送る MIDI デバイス**。
 
 - 画面: [main/ui/screen_main.cpp](../main/ui/screen_main.cpp)（クラス名・`UI_SCREEN_MAIN`・`:main` は互換のため旧名のまま）
-- クロックを送るデバイス: [main/ui/ui_tempo.cpp](../main/ui/ui_tempo.cpp)
+- クロック: picoruby-midi の `MIDI::Clock`。UI とのつなぎは [main/ui/ui_tempo.cpp](../main/ui/ui_tempo.cpp)
 - Ruby: [mrbgems/picoruby-ui/mrblib/ui_tempo.rb](../mrbgems/picoruby-ui/mrblib/ui_tempo.rb)
 - サンプル: [examples/tempo.rb](../examples/tempo.rb)
 
@@ -29,29 +29,35 @@
 
 ## MIDI クロックを送るデバイス
 
-Tempo は picoruby-midi のトランスポート（`UI::Tempo.transport_id`）で、**送信だけ**のデバイス。
-`MIDI.route` や MIDI Devices 画面で任意のデバイスへルーティングすると、そこへクロックが届く。
+Tempo のクロックは **picoruby-midi の `MIDI::Clock`**（プロセスに 1 つのマスタークロック、2026-10-23）。
+Tempo はそれを画面・TAP・Sync・Play / Stop で操作する UI で、自前のタイマは持たない。
+`UI::Tempo` と `MIDI::Clock` は同じクロックを指す（`UI::Tempo.transport_id == MIDI::Clock.transport_id`）。
 
 ```ruby
-MIDI.route(UI::Tempo, MIDIDevices.usb_midi_device)          # PC（DAW）へ
+MIDI.route(UI::Tempo, MIDIDevices.usb_midi_device)          # PC（DAW）へ。MIDI.route(MIDI::Clock, ...) と同じ
 MIDI.route(UI::Tempo, MIDIDevices.sam2695, channel: :clock) # クロックだけ（Tempo はもともとクロックしか出さない）
-UI::Tempo.start   # MIDI Start（FA）  / UI::Tempo.stop で Stop（FC）
+UI::Tempo.start   # MIDI Start（FA）  / UI::Tempo.stop で Stop（FC）。MIDI::Clock.start / .stop と同じ
 ```
 
-- UIManager の初期化時に登録される（`ui_tempo_init`）。MIDI Devices には内蔵デバイス
-  `tempo`（表示名 "Tempo"）として載り、**IN の行にだけ出る**（`UI_MIDIDEV_NO_OUT`。送られても何もしないので OUT の列は出さない）。
-  画面で張ったパッチは他の内蔵デバイスと同じく NVS に保存される
-- クロック（F8、4 分音符あたり 24 回）は esp_timer（`ESP_TIMER_TASK`）が送る。
-  **Tempo からのルートがある間だけ**タイマを動かす（`ui_tempo_tick`、UI タスクの毎周回）。
-  送るのは `MIDI_route_dispatch()` 経由なので、Tempo に付けた filter / listener も効く
-- テンポは `ui_get_bpm()`、つまり内部 BPM、**Sync 中は外部クロックの BPM**。外部クロックを受けて
-  そのテンポで別のデバイスへクロックを出し直すこともできる。0.05 BPM 未満の変化では周期を変えない
-  （Sync 中に測った BPM が細かく揺れるため）
+- クロックは gem の port（[ports/esp32/midi.c](../mrbgems/picoruby-midi/ports/esp32/midi.c)）が持つ送信専用の
+  トランスポートで、登録表の最初の動的ビット（0x08）を起動時に取る。UIManager の初期化時（`ui_tempo_init`）に
+  タイマを起こし、MIDI Devices に内蔵デバイス `tempo`（表示名 "Tempo"）として載せる。**IN の行にだけ出る**
+  （`UI_MIDIDEV_NO_OUT`。送られても何もしないので OUT の列は出さない）。画面で張ったパッチは他の内蔵デバイスと
+  同じく NVS に保存される（キーは名前なので、自前のトランスポートだった頃のパッチもそのまま使える）
+- クロック（F8、4 分音符あたり 24 回）は esp_timer（`ESP_TIMER_TASK`）が送る。タイマは常に回っていて、
+  **クロックからのルート・filter・watch がある間だけ** F8 を `MIDI_route_dispatch()` で送る（filter / listener も効く）。
+  Start / Stop は別のメッセージで、F8 は止めない
+- テンポは UI の内部 BPM がそのまま `MIDI::Clock` のテンポ（`UIManager::setBpm` → `MIDI_Clock_set_bpm`）。
+  スクリプトが `MIDI::Clock.bpm =` や `MIDI.bpm_loop(120, ...)` で変えたテンポは、UI タスクが毎周回
+  （`ui_tempo_tick`）拾って UI の BPM にする（`:bpm_change` も出る）。**Sync 中は外部クロックの BPM に従う**
+  （`MIDI_Clock_set_follow_bpm`。0.05 BPM 未満の揺れでは周期を変えない）。外部クロックを受けて
+  そのテンポで別のデバイスへクロックを出し直すこともできる
 - Start / Stop は明示的に送る（`UI::Tempo.start` / `.stop`）。Start の直後に周期を取り直すので、
   Start の次の F8 が 1 拍目になる。スクリプト終了時のクリーンアップは全デバイスに Stop を送り、
-  Tempo も停止状態に戻る
-- Freenove（画面なし）では Tempo のデバイスは無い（`transport_id` が 0。`MIDI.route` は登録されていない
-  トランスポートとして拒否する）
+  クロックも停止状態に戻す（`MIDI_Clock_reset()`）
+- `MIDI.bpm_loop(output: dev)` / `MIDI.start!(output: dev)` は自分で F8 を送らず、ループの間だけ
+  クロックを `dev` へルートする（すでにパッチがあればそのまま）。Tempo と二重に送ることはない
+- Freenove（画面なし）では `UI::Tempo` のデバイスは無い（`transport_id` が 0）が、`MIDI::Clock` は使える
 
 ## Ruby API
 

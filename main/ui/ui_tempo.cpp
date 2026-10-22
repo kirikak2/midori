@@ -1,141 +1,89 @@
 // The tempo as a MIDI device that sends clock (docs/TEMPO.md).
 //
-// It is a picoruby-midi transport that only sends: a route source that pushes
-// its own output (like the on-screen keys), so MIDI.route(UI::Tempo, dev) and
-// the MIDI Devices screen send its clock anywhere. An esp_timer emits Timing
-// Clock (F8) at 24 per quarter note of ui_get_bpm() -- the internal BPM, or
-// the external clock's in Sync mode -- through MIDI_route_dispatch(), so
-// filters and listeners on it work too. The timer runs only while something
-// is routed from the tempo.
+// The clock itself is picoruby-midi's MIDI::Clock -- one per process, a
+// transport that only sends and a route source, ticking on an esp_timer in
+// the gem's port -- so MIDI.route(UI::Tempo, dev), MIDI.route(MIDI::Clock,
+// dev) and the MIDI Devices screen all send the same clock. This file lists
+// it on the MIDI Devices screen and keeps it in step with the UI: the
+// clock's tempo is the UI's internal BPM (a script that sets MIDI::Clock.bpm
+// shows up here as a BPM change), and in Sync mode it follows the external
+// clock instead.
 
 #include "ui_common.h"
 #include "ui_manager.h"
-#include "midi_route.h"
-#include "midi_transport.h"
-#include "freertos/FreeRTOS.h"
+#include "midi.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <cmath>
 
 static const char* TAG = "UI_TEMPO";
 
-static constexpr int PPQ = 24;
-// Below this change the period is left alone: in Sync mode the measured BPM
-// wobbles a little on every clock it is measured from.
+// Below this change the follow BPM is left alone: in Sync mode the measured
+// BPM wobbles a little on every clock it is measured from.
 static constexpr float RETIME_THRESHOLD_BPM = 0.05f;
 
-static uint8_t s_bit;
-static esp_timer_handle_t s_timer;
-static bool s_timerOn;
-static float s_timerBpm;
-static volatile bool s_running;     // Between Start and Stop
+static bool s_ready;
+static float s_followBpm;     // What the clock was last told to follow (0: none)
 
 // TAP tempo
 static uint32_t s_tapTimes[UI_TAP_TEMPO_SAMPLES];
 static int s_tapIndex;
 static int s_tapCount;
 
-// --- Transport ----------------------------------------------------------------------
-// Nothing is sent *to* the tempo (it has no MIDI OUT column), and nothing reads
-// it: it pushes its clock itself.
-
-static int tempo_send_packet(void*, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t)
-{
-    return 0;
-}
-
-static bool tempo_is_connected(void*)
-{
-    return true;
-}
-
-static const midi_transport_ops_t s_ops = {
-    .send_packet = tempo_send_packet,
-    .read_bytes = nullptr,
-    .bytes_available = nullptr,
-    .is_connected = tempo_is_connected,
-    .transport_id = MIDI_TRANSPORT_ID_NONE,
-};
-static const midi_transport_t s_transport = { &s_ops, nullptr };
-
-static void send(uint8_t status)
-{
-    if (!s_bit) return;
-    MIDI_route_dispatch(s_bit, MIDI_route_targets(s_bit, 0xF, status), 0xF, status, 0, 0);
-}
-
-// --- Clock ----------------------------------------------------------------------------
-
-static void clock_cb(void*)
-{
-    send(0xF8);
-}
-
-static uint64_t period_us(float bpm)
-{
-    if (bpm < UI_BPM_MIN) bpm = UI_BPM_MIN;
-    if (bpm > UI_BPM_MAX) bpm = UI_BPM_MAX;
-    return (uint64_t)(60000000.0f / (bpm * PPQ));
-}
-
 void ui_tempo_init(void)
 {
-    if (s_bit) return;
-    s_bit = MIDI_transport_register(&s_transport);
-    if (!s_bit) {
-        ESP_LOGW(TAG, "MIDI transport registry full: the tempo sends no clock");
+    if (s_ready) return;
+    if (MIDI_Clock_init() != 0 || !MIDI_Clock_bit()) {
+        ESP_LOGW(TAG, "No MIDI clock: the tempo sends no clock");
         return;
     }
-    MIDI_route_set_source(s_bit, true);
-    ui_mididev_register("tempo", "Tempo", s_bit, UI_COLOR_CYAN, true);
+    s_ready = true;
+    MIDI_Clock_set_bpm(UIManager::getInstance().getInternalBpm());
+    ui_mididev_register("tempo", "Tempo", MIDI_Clock_bit(), UI_COLOR_CYAN, true);
     ui_mididev_set_no_out("tempo");
-
-    esp_timer_create_args_t args = {};
-    args.callback = clock_cb;
-    args.dispatch_method = ESP_TIMER_TASK;
-    args.name = "tempo_clock";
-    args.skip_unhandled_events = true;
-    if (esp_timer_create(&args, &s_timer) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create the clock timer");
-        s_timer = nullptr;
-    }
 }
 
 void ui_tempo_tick(void)
 {
-    if (!s_timer) return;
-    bool want = MIDI_route_from(s_bit);
-    float bpm = ui_get_bpm();
+    if (!s_ready) return;
+    UIManager& ui = UIManager::getInstance();
 
-    if (want && !s_timerOn) {
-        s_timerBpm = bpm;
-        esp_timer_start_periodic(s_timer, period_us(bpm));
-        s_timerOn = true;
-    } else if (!want && s_timerOn) {
-        esp_timer_stop(s_timer);
-        s_timerOn = false;
-    } else if (s_timerOn && std::fabs(bpm - s_timerBpm) >= RETIME_THRESHOLD_BPM) {
-        s_timerBpm = bpm;
-        esp_timer_restart(s_timer, period_us(bpm));
+    // A script set the clock's tempo (MIDI::Clock.bpm =, MIDI.bpm_loop(120))
+    float clockBpm = MIDI_Clock_get_bpm();
+    if (clockBpm != ui.getInternalBpm()) ui.setBpm(clockBpm);
+
+    float follow = ui.getSyncMode() ? ui.getExternalBpm() : 0.0f;
+    if (follow < 0.0f) follow = 0.0f;
+    if ((follow == 0.0f) != (s_followBpm == 0.0f) ||
+        std::fabs(follow - s_followBpm) >= RETIME_THRESHOLD_BPM) {
+        s_followBpm = follow;
+        MIDI_Clock_set_follow_bpm(follow);
     }
+}
+
+void ui_tempo_bpm_changed(float bpm)
+{
+    if (s_ready) MIDI_Clock_set_bpm(bpm);
 }
 
 uint8_t ui_tempo_bit(void)
 {
-    return s_bit;
+    return s_ready ? MIDI_Clock_bit() : 0;
 }
 
 void ui_tempo_set_running(bool running)
 {
-    s_running = running;
-    send(running ? 0xFA : 0xFC);
-    // The first clock after Start marks the downbeat: start the period afresh
-    if (running && s_timerOn) esp_timer_restart(s_timer, period_us(s_timerBpm));
+    if (!s_ready) return;
+    if (running) {
+        MIDI_Clock_start();
+    } else {
+        MIDI_Clock_stop();
+    }
 }
 
 bool ui_tempo_running(void)
 {
-    return s_running;
+    return MIDI_Clock_is_running();
 }
 
 void ui_tempo_tap(void)
@@ -180,10 +128,4 @@ void ui_tempo_set_sync(bool on)
     // As the Sync button: nothing to follow without an external clock
     if (on && UIManager::getInstance().getExternalBpm() <= 0) return;
     ui_set_sync_mode(on);
-}
-
-void ui_tempo_cleanup(void)
-{
-    // picoruby_esp32_midi_cleanup() has just sent Stop everywhere
-    s_running = false;
 }

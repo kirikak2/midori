@@ -787,20 +787,20 @@ void ui_mididev_tick(void);      // UI task: connection changes -> events
 void ui_mididev_cleanup(void);   // A script ended (any task)
 
 // --- Tempo ------------------------------------------------------------------------
-// The tempo is a MIDI device that sends clock (docs/TEMPO.md): a picoruby-midi
-// transport that only sends, routed like any other source (MIDI.route /
-// the MIDI Devices screen). Its clock runs at ui_get_bpm() -- the external
-// clock's in Sync mode -- while something is routed from it. Implemented in
-// ui_tempo.cpp.
-void    ui_tempo_init(void);          // UIManager::init: registers the transport
-void    ui_tempo_tick(void);          // UI task, every pass: timer on / off, period
-uint8_t ui_tempo_bit(void);           // Its transport bit, 0 if the registry was full
+// The tempo is a MIDI device that sends clock (docs/TEMPO.md): picoruby-midi's
+// MIDI::Clock (one per process), listed on the MIDI Devices screen as "Tempo"
+// and routed like any other source (MIDI.route / the MIDI Devices screen). Its
+// tempo is the UI's internal BPM; in Sync mode it follows the external clock.
+// Implemented in ui_tempo.cpp.
+void    ui_tempo_init(void);          // UIManager::init: lists the clock as a device
+void    ui_tempo_tick(void);          // UI task, every pass: BPM to / from the clock, Sync
+void    ui_tempo_bpm_changed(float bpm);      // UIManager::setBpm: the clock follows
+uint8_t ui_tempo_bit(void);           // The clock's transport bit, 0 if there is none
 void    ui_tempo_set_running(bool running);   // Sends Start (FA) / Stop (FC)
 bool    ui_tempo_running(void);
 void    ui_tempo_tap(void);           // One tap of TAP tempo
 bool    ui_tempo_sync(void);          // Following the external clock
 void    ui_tempo_set_sync(bool on);   // Only takes when an external clock is there
-void    ui_tempo_cleanup(void);       // A script ended (any task)
 
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);

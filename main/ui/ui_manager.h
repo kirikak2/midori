@@ -117,6 +117,7 @@ public:
     // BPM management
     void setBpm(float bpm);
     float getBpm() const;
+    float getInternalBpm() const { return m_internalBpm; }  // Without Sync
     void setExternalBpm(float bpm);
     float getExternalBpm() const;
     void setExternalBpmSource(midi_interface_t source, float bpm);  // Source-specific BPM update

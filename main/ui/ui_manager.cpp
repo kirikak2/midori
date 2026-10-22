@@ -573,7 +573,6 @@ void UIManager::scriptCleanup()
     ui_layout_cleanup();
     ui_keys_cleanup();
     ui_mididev_cleanup();
-    ui_tempo_cleanup();
     m_needsRedraw = true;
 }
 
@@ -605,6 +604,7 @@ void UIManager::setBpm(float bpm)
 
     if (m_internalBpm != bpm) {
         m_internalBpm = bpm;
+        ui_tempo_bpm_changed(bpm);   // The MIDI clock runs at it
         // Push UI event for Ruby hooks
         ui_event_t event;
         event.type = UI_EVENT_BPM_CHANGE;

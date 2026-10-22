@@ -11,11 +11,13 @@
 #   UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }
 #   UI.pad(1, label: "TAP") { UI::Tempo.tap }
 #
-# The clock (24 per quarter note) runs at the current BPM -- the external
-# clock's while Sync is on -- whenever something is routed from the tempo,
-# in C: what the script does in between does not move it. It is a MIDI
-# device that only sends, so it has no MIDI OUT column on the MIDI Devices
-# screen. In a layout: `tempo area: :t`.
+# The clock is picoruby-midi's MIDI::Clock (one per process): UI::Tempo and
+# MIDI::Clock route, start and stop the same clock, and its tempo is this
+# BPM -- the external clock's while Sync is on. The clock (24 per quarter
+# note) runs whenever something is routed from it, in C: what the script
+# does in between does not move it. It is a MIDI device that only sends, so
+# it has no MIDI OUT column on the MIDI Devices screen. In a layout:
+# `tempo area: :t`.
 module UI
   class Tempo
     class << self
