@@ -5,7 +5,7 @@
 //   columns = devices with a MIDI OUT, then "Prog"
 //
 // A cell between two devices is a route in picoruby-midi's table -- tap to
-// patch / unpatch, hold for a channel. The Prog column picks the program's
+// patch / unpatch, hold for a channel or the clock alone. The Prog column picks the program's
 // IN, the Prog row its OUT. Hold a device's name for its details.
 
 #include "sdkconfig.h"
@@ -50,7 +50,7 @@ static constexpr int HEADER_H = 16;
 static constexpr int CELL_W_MAX = 44;
 static constexpr int CELL_H_MAX = 24;
 static constexpr int DOT_R = 3;
-static constexpr int PICK_BTN_W = 44;
+static constexpr int PICK_BTN_W = 40;
 static constexpr int PICK_BTN_H = 30;
 static constexpr int MOVE_SLOP = 10;
 #endif
@@ -63,10 +63,11 @@ static constexpr uint16_t CELL_BG_A = 0x1082;
 static constexpr uint16_t CELL_BG_B = 0x18E3;
 static constexpr uint16_t PROG_COLOR = UI_COLOR_CYAN;
 
-// Channel picker: "All", 1..16, "Off" on a 6 x 3 grid
-static constexpr int PICK_COLS = 6;
+// Channel picker: "All", "Clock", 1..16, "Off" on a 7 x 3 grid (two slots spare)
+static constexpr int PICK_COLS = 7;
 static constexpr int PICK_ROWS = 3;
 static constexpr int PICK_OFF = -3;
+static constexpr int PICK_NONE = -4;      // An empty slot
 
 static void print_fit(const char* text, int maxChars)
 {
@@ -147,7 +148,9 @@ void ScreenMidiDevices::rebuild()
     g.colCount = 0;
     for (int i = 0; i < g.count; i++) {
         if (g.devs[i].bit && (g.devs[i].bit & sources)) g.rows[g.rowCount++] = i;
-        g.cols[g.colCount++] = i;   // Every transport (and a standby one) takes MIDI
+        // Every transport (and a standby one) takes MIDI, except those that
+        // only send (the tempo's clock)
+        if (!(g.devs[i].flags & UI_MIDIDEV_NO_OUT)) g.cols[g.colCount++] = i;
     }
 
     g.nameW = NAME_W;
@@ -341,7 +344,7 @@ void ScreenMidiDevices::drawCell(int row, int col)
     }
 
     int ch = ui_mididev_patch_channel(from, to);
-    if (ch == -2) {
+    if (ch == UI_MIDIDEV_NO_PATCH) {
         gfx.fillCircle(cx, cy, 1, UI_COLOR_DARKGRAY);
         return;
     }
@@ -354,9 +357,11 @@ void ScreenMidiDevices::drawCell(int row, int col)
     } else {
         gfx.drawCircle(cx, cy, r, UI_COLOR_GRAY);   // Patched, but an end is down
     }
-    if (ch >= 0) {
+    // The channel (1..16), or "clk" for the clock alone
+    if (ch >= 0 || ch == MIDI_ROUTE_CLOCK_ONLY) {
         char buf[4];
-        snprintf(buf, sizeof(buf), "%d", (ch & 0x0F) + 1);
+        if (ch >= 0) snprintf(buf, sizeof(buf), "%d", (ch & 0x0F) + 1);
+        else snprintf(buf, sizeof(buf), "clk");
         gfx.setTextSize(1);
         gfx.setTextColor(UI_COLOR_WHITE);
         gfx.setCursor(x + 2, y + g.cellH - 9);
@@ -384,9 +389,11 @@ static void picker_rect(int* px, int* py, int* pw, int* ph)
 
 static int picker_value(int i)
 {
-    if (i == 0) return -1;                 // All
-    if (i <= 16) return i - 1;             // 1..16
-    return PICK_OFF;                       // Off
+    if (i == 0) return MIDI_ROUTE_ALL_CHANNELS;   // All
+    if (i == 1) return MIDI_ROUTE_CLOCK_ONLY;     // Clock (sync messages only)
+    if (i <= 17) return i - 2;                    // 1..16
+    if (i == 18) return PICK_OFF;                 // Off
+    return PICK_NONE;
 }
 
 void ScreenMidiDevices::drawChannelPicker()
@@ -411,12 +418,14 @@ void ScreenMidiDevices::drawChannelPicker()
         int bx = px + MARGIN + (i % PICK_COLS) * (PICK_BTN_W + MARGIN);
         int by = py + 2 * MARGIN + CHAR_H + (i / PICK_COLS) * (PICK_BTN_H + MARGIN);
         int v = picker_value(i);
-        bool on = (v == PICK_OFF) ? (current == -2) : (current == v);
+        if (v == PICK_NONE) continue;
+        bool on = (v == PICK_OFF) ? (current == UI_MIDIDEV_NO_PATCH) : (current == v);
         uint16_t bg = on ? UI_COLOR_GREEN : UI_COLOR_BLACK;
         gfx.fillRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, bg);
         gfx.drawRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_GRAY);
         char label[6];
-        if (v == -1) snprintf(label, sizeof(label), "All");
+        if (v == MIDI_ROUTE_ALL_CHANNELS) snprintf(label, sizeof(label), "All");
+        else if (v == MIDI_ROUTE_CLOCK_ONLY) snprintf(label, sizeof(label), "Clock");
         else if (v == PICK_OFF) snprintf(label, sizeof(label), "Off");
         else snprintf(label, sizeof(label), "%d", v + 1);
         int n = (int)strlen(label);
@@ -434,6 +443,7 @@ bool ScreenMidiDevices::channelPickerHit(int x, int y, int* channel) const
         int bx = px + MARGIN + (i % PICK_COLS) * (PICK_BTN_W + MARGIN);
         int by = py + 2 * MARGIN + CHAR_H + (i / PICK_COLS) * (PICK_BTN_H + MARGIN);
         if (x >= bx && x < bx + PICK_BTN_W && y >= by && y < by + PICK_BTN_H) {
+            if (picker_value(i) == PICK_NONE) return false;
             *channel = picker_value(i);
             return true;
         }
@@ -457,8 +467,9 @@ void ScreenMidiDevices::drawDetail()
     snprintf(lines[n++], sizeof(lines[0]), "%s",
              (d.flags & UI_MIDIDEV_STANDBY) ? "Standby (starts when patched)"
              : isUp(d) ? "Connected" : "Not connected");
-    snprintf(lines[n++], sizeof(lines[0]), "MIDI IN %s  MIDI OUT yes",
-             (d.bit && (d.bit & MIDI_route_sources())) ? "yes" : "no");
+    snprintf(lines[n++], sizeof(lines[0]), "MIDI IN %s  MIDI OUT %s",
+             (d.bit && (d.bit & MIDI_route_sources())) ? "yes" : "no",
+             (d.flags & UI_MIDIDEV_NO_OUT) ? "no" : "yes");
 
     if (strcmp(d.key, "usb_host") == 0) {
         usb_midi_host_device_info_t info;
@@ -543,7 +554,7 @@ void ScreenMidiDevices::tap(int x, int y)
         if (channelPickerHit(x, y, &ch)) {
             int current = ui_mididev_patch_channel(m_overlayFrom, m_overlayTo);
             if (ch == PICK_OFF) {
-                if (current != -2) ui_mididev_toggle_patch(m_overlayFrom, m_overlayTo, current);
+                if (current != UI_MIDIDEV_NO_PATCH) ui_mididev_toggle_patch(m_overlayFrom, m_overlayTo, current);
             } else if (current != ch) {
                 ui_mididev_toggle_patch(m_overlayFrom, m_overlayTo, ch);
             }
@@ -577,7 +588,7 @@ void ScreenMidiDevices::tap(int x, int y)
         if (from == to) return;
         int current = ui_mididev_patch_channel(from, to);
         // A patch comes off whatever its channel; a new one is for all
-        ui_mididev_toggle_patch(from, to, current == -2 ? -1 : current);
+        ui_mididev_toggle_patch(from, to, current == UI_MIDIDEV_NO_PATCH ? MIDI_ROUTE_ALL_CHANNELS : current);
     }
     rebuild();
     m_signature = signature();

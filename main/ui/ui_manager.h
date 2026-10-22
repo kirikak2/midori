@@ -127,13 +127,6 @@ public:
     bool getSyncMode() const;
     void setBpmChangeCallback(bpm_change_cb_t cb);
 
-    // Beat tracking
-    void setBarBeat(uint32_t bar, uint8_t beat);
-    void setBeatProgress(uint8_t progress);  // 0-23
-    uint32_t getBar() const;
-    uint8_t getBeat() const;
-    uint8_t getBeatProgress() const;
-
     // Pad event callback
     void setPadEventCallback(pad_event_cb_t cb);
     pad_event_cb_t getPadEventCallback() const;
@@ -144,6 +137,8 @@ public:
 private:
     UIManager();
     ~UIManager();
+
+    void updateClockWatch();
 
     // Non-copyable
     UIManager(const UIManager&) = delete;
@@ -177,15 +172,11 @@ private:
     // BPM state
     float m_internalBpm;
     float m_externalBpm;
-    float m_externalBpmBySource[3];  // USB, DIN, BLE
+    float m_externalBpmBySource[MIDI_INTERFACE_COUNT];
+    uint8_t m_clockWatch;            // Sources read for their clock (MIDI_route_set_watch)
     midi_interface_t m_selectedExternalBpmSource;
     bool m_syncMode;
     bpm_change_cb_t m_bpmChangeCallback;
-
-    // Beat tracking
-    uint32_t m_bar;
-    uint8_t m_beat;
-    uint8_t m_beatProgress;
 
     // Pad callback
     pad_event_cb_t m_padEventCallback;
@@ -223,8 +214,6 @@ bool ui_get_sync_mode(void);
 void ui_set_bpm_change_callback(bpm_change_cb_t cb);
 
 // Beat tracking
-void ui_set_bar_beat(uint32_t bar, uint8_t beat);
-void ui_set_beat_progress(uint8_t progress);
 
 // Screen control. ui_set_screen and ui_request_screen queue the switch for
 // the UI task and may be called from any task.

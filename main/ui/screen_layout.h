@@ -41,6 +41,7 @@ private:
     bool m_hasXYPad;
     bool m_hasTombola;
     bool m_hasKeys;
+    bool m_hasTempo;
 
     // What each finger is holding: a widget id, or -1. Pads and knobs are
     // handled here; a finger that landed on a view is forwarded to it.

@@ -201,6 +201,7 @@ module UI
     KIND_XYPAD   = 2
     KIND_TOMBOLA = 3
     KIND_KEYS    = 4
+    KIND_TEMPO   = 5
 
     # Below this a widget is hard to hit with a finger. Provisional numbers,
     # to be tuned on the hardware (docs/UI_LAYOUT_DSL.md D13): placing one
@@ -210,11 +211,12 @@ module UI
       knob:    [56, 56],
       xypad:   [96, 64],
       tombola: [96, 96],
-      keys:    [120, 48]
+      keys:    [120, 48],
+      tempo:   [120, 72]
     }
 
     # Only one of these per layout: the C side holds a single model of each
-    SINGLETONS = [:xypad, :tombola, :keys]
+    SINGLETONS = [:xypad, :tombola, :keys, :tempo]
 
     # One grid level of a definition: its cells, its named areas, and which
     # cells are taken (overlap is an error).
@@ -340,6 +342,12 @@ module UI
       # Keywords are UI::Keys.new's; keys: hands over an existing one.
       def keys(col: nil, row: nil, area: nil, id: nil, keys: nil, **opts)
         add(:keys, col, row, area, id, nil, { instance: keys, opts: opts })
+      end
+
+      # The Tempo screen in the cell: BPM (tap for TAP tempo), external clock
+      # source, Sync. Returns UI::Tempo.
+      def tempo(col: nil, row: nil, area: nil, id: nil)
+        add(:tempo, col, row, area, id, nil, {})
       end
 
       # Splits a cell (or area) into a grid of its own. col:/row: inside the
@@ -547,6 +555,9 @@ module UI
         k = pr[:instance] || UI::Keys.new(**pr[:opts])
         UI._layout_add_view(KIND_KEYS, x, y, w, h) if live
         k
+      when :tempo
+        UI._layout_add_view(KIND_TEMPO, x, y, w, h) if live
+        UI::Tempo
       end
     end
 

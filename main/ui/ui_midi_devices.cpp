@@ -139,7 +139,7 @@ static void set_selection_locked(Selection& sel, int index)
 }
 
 // --- NVS -----------------------------------------------------------------------
-// "patches": "from>to[:ch],..." by key; "in" / "out": the selection's key.
+// "patches": "from>to[:ch | :clock],..." by key; "in" / "out": the selection's key.
 
 static void parse_patches(const char* text)
 {
@@ -160,8 +160,12 @@ static void parse_patches(const char* text)
                 char* colon = strchr(to, ':');
                 if (colon) {
                     *colon = '\0';
-                    ch = atoi(colon + 1);
-                    if (ch < 0 || ch > 15) ch = -1;
+                    if (strcmp(colon + 1, "clock") == 0) {
+                        ch = MIDI_ROUTE_CLOCK_ONLY;
+                    } else {
+                        ch = atoi(colon + 1);
+                        if (ch < 0 || ch > 15) ch = -1;
+                    }
                 }
                 SavedPatch& sp = s_saved[s_savedCount++];
                 copy_str(sp.from, item, sizeof(sp.from));
@@ -207,6 +211,8 @@ static void snapshot_locked(SavedSnapshot& snap)
         if (s_saved[i].channel >= 0) {
             snprintf(item, sizeof(item), "%.11s>%.11s:%d", s_saved[i].from, s_saved[i].to,
                      s_saved[i].channel & 0x0F);
+        } else if (s_saved[i].channel == MIDI_ROUTE_CLOCK_ONLY) {
+            snprintf(item, sizeof(item), "%.11s>%.11s:clock", s_saved[i].from, s_saved[i].to);
         } else {
             snprintf(item, sizeof(item), "%.11s>%.11s", s_saved[i].from, s_saved[i].to);
         }
@@ -334,6 +340,15 @@ bool ui_mididev_activate(const char* key, uint8_t bit)
     return found;
 }
 
+void ui_mididev_set_no_out(const char* key)
+{
+    portENTER_CRITICAL(&s_mux);
+    int i = find_key_locked(key);
+    if (i >= 0) s_devs[i].pub.flags |= UI_MIDIDEV_NO_OUT;
+    portEXIT_CRITICAL(&s_mux);
+    bump();
+}
+
 // --- Reading -----------------------------------------------------------------------
 
 int ui_mididev_count(void)
@@ -412,21 +427,21 @@ void ui_mididev_select(bool out, int index, bool save)
 int ui_mididev_patch_channel(int from, int to)
 {
     ui_mididev_t a, b;
-    if (!ui_mididev_get(from, &a) || !ui_mididev_get(to, &b)) return -2;
+    if (!ui_mididev_get(from, &a) || !ui_mididev_get(to, &b)) return UI_MIDIDEV_NO_PATCH;
     if (a.bit && b.bit) {
-        int best = -2;
+        int best = UI_MIDIDEV_NO_PATCH;
         for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
             uint8_t src, dst;
             int ch;
             if (!MIDI_route_get(i, &src, &dst, &ch)) continue;
             if (src != a.bit || !(dst & b.bit)) continue;
             if (ch == MIDI_ROUTE_ALL_CHANNELS) return -1;
-            if (best == -2) best = ch;
+            if (best == UI_MIDIDEV_NO_PATCH) best = ch;
         }
         return best;
     }
     // A standby end: the saved patch is all there is
-    int ch = -2;
+    int ch = UI_MIDIDEV_NO_PATCH;
     portENTER_CRITICAL(&s_mux);
     int i = saved_find_locked(a.key, b.key);
     if (i >= 0) ch = s_saved[i].channel;
@@ -440,7 +455,7 @@ void ui_mididev_toggle_patch(int from, int to, int channel)
     if (from == to || !ui_mididev_get(from, &a) || !ui_mididev_get(to, &b)) return;
     load_saved();
     int current = ui_mididev_patch_channel(from, to);
-    bool add = (current == -2) || (current != channel);
+    bool add = (current == UI_MIDIDEV_NO_PATCH) || (current != channel);
     bool saveable = (a.flags & UI_MIDIDEV_BUILTIN) && (b.flags & UI_MIDIDEV_BUILTIN);
 
     if (a.bit && b.bit) {

@@ -822,6 +822,19 @@ keys.show
 サンプル: [examples/keys.rb](examples/keys.rb) / [examples/keys_layout.rb](examples/keys_layout.rb) /
 [examples/keys_amy.rb](examples/keys_amy.rb)（AMY を鍵盤 + レイアウト + Knobs で）
 
+## Tempo（UI::Tempo / 2026-10-22）
+
+詳細は [docs/TEMPO.md](docs/TEMPO.md)。**実機未確認**。
+
+- Tempo は **MIDI クロックを送るデバイス**（[main/ui/ui_tempo.cpp](main/ui/ui_tempo.cpp)）。送信だけの
+  トランスポートとして登録され、`MIDI.route(UI::Tempo, dev)` / MIDI Devices 画面（IN の行のみ、
+  `UI_MIDIDEV_NO_OUT`）で任意のデバイスへクロックを送る。クロックは esp_timer が `ui_get_bpm()`
+  （Sync 中は外部クロック）で送り、Tempo からのルートがある間だけ動く。Start / Stop は画面の Play / Stop ボタンか
+  `UI::Tempo.start` / `.stop`（FA / FC を Tempo のルートへ）
+- 画面の -10 / -1 / +1 / +10 ボタンと Bar / Beat 表示・拍のバーは削除。BPM は `UI::Tempo.bpm` / `bpm=`
+  （ノブ・パッドからはスクリプトでつなぐ）。TAP は BPM 表示のタップかナビバー
+- 画面は `setArea()` の矩形に収まるよう配置を計算し、レイアウト DSL の `tempo`（`UI_WIDGET_TEMPO`）でセルに置ける
+
 ## MIDI Devices 画面（UI::MIDIDevices / 2026-10-22）
 
 詳細は [docs/UI_MIDI_DEVICES.md](docs/UI_MIDI_DEVICES.md)。旧 MIDI Info 画面（`UI_SCREEN_MIDI_INFO` = 2 を
@@ -867,7 +880,7 @@ Back は Home を除いた直前の画面で、押すたびに 2 画面を往復
 
 詳細は [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) を参照。
 
-pad / knob / XYPad / Tombola / Keys を 1 画面にグリッドで並べる。最大 4 レイアウト、それぞれが
+pad / knob / XYPad / Tombola / Keys / Tempo を 1 画面にグリッドで並べる。最大 4 レイアウト、それぞれが
 Home のタイル。**列・行は 0 始まり**、範囲は Range（`col: 0..2`）。
 
 ```ruby
@@ -1030,7 +1043,8 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
   `vTaskDelay(0)` は待たない）。0 tick のまま優先度を上げると Core 1 の VM が止まり、
   UI 入力が一切効かなくなる（2026-10-04 に発生）
 - 詳細は [docs/AMY_SYNTH.md](docs/AMY_SYNTH.md) の「他デバイスからの入力を AMY へ繋ぐ」
-- `MIDI.route` は `MIDI::Route` を返す（失敗時は false）
+- `MIDI.route` は `MIDI::Route` を返す（失敗時は false）。`channel: :clock`（C では `MIDI_ROUTE_CLOCK_ONLY` = -2）で
+  クロック・Start / Continue / Stop・ソングポジションだけを通す（MIDI Devices の長押しメニューの「Clock」）
 
 ### MIDI.filter / MIDI.on（2026-10-22）
 
@@ -1051,6 +1065,9 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
 - 自分で送る送信元（`UI::Keys`）は `MIDI_route_packet()` ではなく `MIDI_route_dispatch()` を呼ぶこと
   （呼ばないと filter / listener に届かない）
 - ホストテスト: `make -C mrbgems/picoruby-midi/host_test`（C）、`ruby host_test/filter_test.rb`（Ruby、gem ディレクトリで）
+- 入力タスクが USB Device / UART を読むのはルート・filter・**watch**（`MIDI_route_set_watch`）のある間だけ。
+  外部クロックの BPM もそのときしか測れない。Tempo 画面は表示中か Sync 中に使える送信元を watch し
+  （`UIManager::updateClockWatch`、送信元ボタンは USB-H / USB-D / DIN / BLE）、`sync_from:` も指定元を watch する
 
 ## 既知の課題
 

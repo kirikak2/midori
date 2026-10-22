@@ -54,8 +54,9 @@ md.unregister(dev)               # そのデバイスから / へのパッチ（
 
 md.patch(j6, amy)                # = MIDI.route(j6, amy)
 md.patch(j6, sam, channel: 9)
+md.patch(pc, sam, channel: :clock)  # クロックだけ
 md.unpatch(j6, sam)              # = MIDI.unroute
-md.patches   # => [{from:, to:, channel: nil, active: true, filtered: false}, ...]
+md.patches   # => [{from:, to:, channel: nil, active: true, filtered: false}, ...]（channel は 0..15 / nil = 全部 / :clock）
 md.save      # 今の内蔵デバイス間のパッチと選択を NVS に保存（スクリプトの初期状態にする）
 
 md.midi_in  = j6                 # プログラムが使うデバイス（スクリプト限り。保存はしない）
@@ -93,9 +94,10 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 
 - 行見出しの丸: 緑 = 接続済み、暗い灰色 = 未接続。列見出しの下の線: 緑 / 灰色 / **黄 = standby**（AMY 起動前）
 - パッチ: 送信元の色で塗った丸。**片端が未接続（または standby）なら灰色の輪**（要件 4 の表示）。
-  チャンネル指定は左下に `1`〜`16`、Ruby の filter があれば右上に黄色の `f`
+  チャンネル指定は左下に `1`〜`16`、クロックだけなら `clk`、Ruby の filter があれば右上に黄色の `f`
 - **セルをタップ**: パッチの付け外し（新規は全チャンネル）。**長押し**: チャンネル選択
-  （All / 1〜16 / Off）
+  （All / **Clock** / 1〜16 / Off）。Clock はタイミングクロック・Start / Continue / Stop・
+  ソングポジションだけを通す（`MIDI.route(from, to, channel: :clock)`、NVS では `from>to:clock`）
 - **Prog 列**のタップで `midi_in`、**Prog 行**で `midi_out` を選ぶ（もう一度タップで解除）。
   画面での選択は NVS に保存する（ユーザーの明示的な操作なので）
 - **見出しを長押し**: デバイス詳細（キー・ビット・状態・USB Host の製品名と EP・USB Device の
@@ -152,6 +154,7 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 | `usb_dev` | USB-MIDI Device | ○ | ○ | 0x04 | 表示名 "PC" |
 | `amy` | AMY | — | ○ | 起動時に決まる | standby で登録 |
 | `keys` | UI::Keys | ○ | ○ | 起動時に決まる | 鍵盤のモデルが作られたとき C 側（`ui_keys.cpp`）が自分で登録 |
+| `tempo` | UI::Tempo | ○ | — | 起動時に決まる | MIDI クロックを送る（docs/TEMPO.md）。UI の初期化時に C 側（`ui_tempo.cpp`）が登録。OUT の列は出さない（`UI_MIDIDEV_NO_OUT`） |
 
 - USB Host / UART / USB Device は起動時に工場ブロックを呼んで初期化する（スクリプトモードでも。
   以前は初回アクセスまで遅延していた）。UART は初期化しないと接続扱いにならず受信もしないため

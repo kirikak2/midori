@@ -215,8 +215,10 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             HSET(kind, mrb_symbol_value(kind));
             HSET(from, mrb_fixnum_value(event.mididev_from));
             HSET(to, mrb_fixnum_value(event.mididev_to));
-            HSET(channel, event.mididev_channel < 0 ? mrb_nil_value()
-                                                    : mrb_fixnum_value(event.mididev_channel));
+            /* 0..15, -1 all (nil), -2 the clock alone (:clock) */
+            HSET(channel, event.mididev_channel == -2 ? mrb_symbol_value(MRB_SYM(clock))
+                          : event.mididev_channel < 0 ? mrb_nil_value()
+                          : mrb_fixnum_value(event.mididev_channel));
             break;
         }
         default:
@@ -1013,6 +1015,59 @@ mrb_ui_keys_is_pressed(mrb_state *mrb, mrb_value self)
     mrb_define_module_function_id(mrb, ui, MRB_SYM(name), func, aspec)
 
 /* ------------------------------------------------------------------------
+ * Tempo (docs/TEMPO.md)
+ * ------------------------------------------------------------------------ */
+
+/* UI._tempo_bit -> transport bit (0: none) */
+static mrb_value
+mrb_ui_tempo_bit(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_tempo_bit());
+}
+
+/* UI._tempo_set_running(bool): Start / Stop */
+static mrb_value
+mrb_ui_tempo_set_running(mrb_state *mrb, mrb_value self)
+{
+    mrb_value on;
+    mrb_get_args(mrb, "o", &on);
+    picoruby_ui_tempo_set_running(mrb_test(on));
+    return mrb_nil_value();
+}
+
+/* UI._tempo_running -> bool */
+static mrb_value
+mrb_ui_tempo_running(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(picoruby_ui_tempo_running());
+}
+
+/* UI._tempo_tap */
+static mrb_value
+mrb_ui_tempo_tap(mrb_state *mrb, mrb_value self)
+{
+    picoruby_ui_tempo_tap();
+    return mrb_nil_value();
+}
+
+/* UI._tempo_sync -> bool */
+static mrb_value
+mrb_ui_tempo_sync(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(picoruby_ui_tempo_sync());
+}
+
+/* UI._tempo_set_sync(bool) */
+static mrb_value
+mrb_ui_tempo_set_sync(mrb_state *mrb, mrb_value self)
+{
+    mrb_value on;
+    mrb_get_args(mrb, "o", &on);
+    picoruby_ui_tempo_set_sync(mrb_test(on));
+    return mrb_nil_value();
+}
+
+/* ------------------------------------------------------------------------
  * MIDI Devices (docs/UI_MIDI_DEVICES.md)
  * ------------------------------------------------------------------------ */
 
@@ -1207,6 +1262,14 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_keys_clear_lights,      mrb_ui_keys_clear_lights,      MRB_ARGS_NONE());
     DEF(_keys_lit,               mrb_ui_keys_is_lit,            MRB_ARGS_REQ(1));
     DEF(_keys_pressed,           mrb_ui_keys_is_pressed,        MRB_ARGS_REQ(1));
+
+    /* Tempo */
+    DEF(_tempo_bit,              mrb_ui_tempo_bit,              MRB_ARGS_NONE());
+    DEF(_tempo_set_running,      mrb_ui_tempo_set_running,      MRB_ARGS_REQ(1));
+    DEF(_tempo_running,          mrb_ui_tempo_running,          MRB_ARGS_NONE());
+    DEF(_tempo_tap,              mrb_ui_tempo_tap,              MRB_ARGS_NONE());
+    DEF(_tempo_sync,             mrb_ui_tempo_sync,             MRB_ARGS_NONE());
+    DEF(_tempo_set_sync,         mrb_ui_tempo_set_sync,         MRB_ARGS_REQ(1));
 
     /* MIDI Devices */
     DEF(_mididev_register,       mrb_ui_mididev_register,       MRB_ARGS_REQ(5));

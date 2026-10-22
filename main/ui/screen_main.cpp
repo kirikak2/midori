@@ -1,13 +1,21 @@
+// Tempo screen (docs/TEMPO.md): the BPM, the external clock source, Sync and
+// TAP tempo, laid out inside its area so a layout can show it in a cell.
+//
+//   [ 120 BPM ]            <- tap: TAP tempo (also the nav bar's TAP)
+//   Ext: 120.0 BPM
+//   [USB-H][USB-D][DIN][BLE]
+//   [ > Play ][ Sync ]     <- Play / Stop sends MIDI Start / Stop
+//
+// The BPM is set from Ruby (UI::Tempo.bpm, a knob, a pad) rather than with
+// buttons here, and the clock goes out through routes from the tempo device.
+
 #include "sdkconfig.h"
 #include "screen_main.h"
 #include "ui_strip.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
-#include "esp_log.h"
 #include "esp_timer.h"
-
-static const char* TAG = "SCREEN_MAIN";
 
 // Global instance
 static ScreenMain s_screenMain;
@@ -17,155 +25,151 @@ ScreenMain& getScreenMain()
     return s_screenMain;
 }
 
-// Layout constants - Board-specific
-// Top row layout (centered):  [-10][-1]  [ BPM ]  [+1][+10]
+// Upper bounds for the parts; the area may make them smaller
 #if defined(UI_LAYOUT_LARGE)
-// Tab5: Larger fonts and spacious layout for 1280x720
-static constexpr int BPM_TEXT_SIZE = 5;          // Reduced from 6 to fit between buttons
-static constexpr int BPM_LABEL_TEXT_SIZE = 2;
-static constexpr int BAR_BEAT_TEXT_SIZE = 4;
-static constexpr int EXTERNAL_BPM_TEXT_SIZE = 2;
-static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 30;
-static constexpr int BPM_BUTTON_W = 80;
-static constexpr int BPM_BUTTON_H = 50;
-static constexpr int BPM_DISPLAY_GAP = 30;       // Gap between BPM display and adjacent buttons
-static constexpr int BPM_BUTTON_GAP = 10;        // Gap between adjacent buttons
-// BPM display is vertically centered with the buttons
-static constexpr int BPM_Y = BPM_BUTTON_Y + (BPM_BUTTON_H - BPM_TEXT_SIZE * 8) / 2;
-static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 180;
-static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 140;
-static constexpr int SOURCE_BTN_W = 80;
-static constexpr int SOURCE_BTN_H = 40;
-static constexpr int SYNC_Y = UI_CONTENT_Y + 240;
-static constexpr int SYNC_BTN_W = 200;
-static constexpr int SYNC_BTN_H = 50;
-static constexpr int BAR_BEAT_Y = UI_CONTENT_Y + 340;
-static constexpr int PROGRESS_Y = UI_CONTENT_Y + 420;
-static constexpr int PROGRESS_W = 800;
-static constexpr int PROGRESS_H = 30;
+static constexpr int BPM_TEXT_MAX = 12;
+static constexpr int SOURCE_BTN_W_MAX = 120;
+static constexpr int SOURCE_BTN_H_MAX = 56;
+static constexpr int SYNC_BTN_W_MAX = 260;
+static constexpr int SYNC_BTN_H_MAX = 64;
+static constexpr int GAP = 12;
 #else
-// CoreS3: Original compact layout for 320x240
-static constexpr int BPM_TEXT_SIZE = 3;
-static constexpr int BPM_LABEL_TEXT_SIZE = 1;
-static constexpr int BAR_BEAT_TEXT_SIZE = 2;
-static constexpr int EXTERNAL_BPM_TEXT_SIZE = 1;
-static constexpr int BPM_BUTTON_Y = UI_CONTENT_Y + 10;
-static constexpr int BPM_BUTTON_W = 45;
-static constexpr int BPM_BUTTON_H = 30;
-static constexpr int BPM_DISPLAY_GAP = 8;
-static constexpr int BPM_BUTTON_GAP = 4;
-static constexpr int BPM_Y = BPM_BUTTON_Y + (BPM_BUTTON_H - BPM_TEXT_SIZE * 8) / 2;
-static constexpr int EXTERNAL_BPM_Y = UI_CONTENT_Y + 65;
-static constexpr int SOURCE_BTN_Y = UI_CONTENT_Y + 48;
-static constexpr int SOURCE_BTN_W = 40;
-static constexpr int SOURCE_BTN_H = 20;
-static constexpr int SYNC_Y = UI_CONTENT_Y + 85;
-static constexpr int SYNC_BTN_W = 100;
-static constexpr int SYNC_BTN_H = 30;
-static constexpr int BAR_BEAT_Y = UI_CONTENT_Y + 120;
-static constexpr int PROGRESS_Y = UI_CONTENT_Y + 145;
-static constexpr int PROGRESS_W = 260;
-static constexpr int PROGRESS_H = 16;
+static constexpr int BPM_TEXT_MAX = 6;
+static constexpr int SOURCE_BTN_W_MAX = 48;
+static constexpr int SOURCE_BTN_H_MAX = 24;
+static constexpr int SYNC_BTN_W_MAX = 110;
+static constexpr int SYNC_BTN_H_MAX = 30;
+static constexpr int GAP = 4;
 #endif
 
-// BPM display total width: "999" + gap + "BPM" label
-static constexpr int BPM_NUM_WIDTH = BPM_TEXT_SIZE * 6 * 3;          // 3 digits
-static constexpr int BPM_LABEL_WIDTH = BPM_LABEL_TEXT_SIZE * 6 * 3;  // "BPM" = 3 chars
-static constexpr int BPM_DISPLAY_WIDTH = BPM_NUM_WIDTH + 10 + BPM_LABEL_WIDTH;
+// Which external clock sources this board's USB mode has
+#if CONFIG_USB_MIDI_HOST_ENABLED
+static constexpr bool CLOCK_FROM_USB_HOST = true;
+#else
+static constexpr bool CLOCK_FROM_USB_HOST = false;
+#endif
+#if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
+static constexpr bool CLOCK_FROM_USB_DEVICE = true;
+#else
+static constexpr bool CLOCK_FROM_USB_DEVICE = false;
+#endif
 
-ScreenMain::ScreenMain()
-    : m_isActive(false)
-    , m_needsRedraw(false)
-    , m_tapIndex(0)
-    , m_tapCount(0)
-    , m_lastDrawnBpm(0)
-    , m_lastDrawnExternalBpm(0)
-    , m_lastDrawnBar(0)
-    , m_lastDrawnBeat(0)
-    , m_lastDrawnProgress(0)
-    , m_lastDrawnSyncMode(false)
-    , m_lastDrawnExternalBpmSource(0xFF)  // Invalid value to force initial draw
-    , m_lastSyncButtonState(-1)  // Invalid value to force initial draw
-    , m_lastExternalBpmDrawTime(0)
+// External BPM text redraws at most this often (it changes on every clock)
+static constexpr int64_t EXT_REDRAW_US = 100000;
+
+static int clampi(int v, int lo, int hi)
 {
-    memset(m_tapTimes, 0, sizeof(m_tapTimes));
-    initButtons();
+    return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Top area covers UI_CONTENT_Y .. SYNC_Y - 1 (i.e. everything above the Sync button)
-static constexpr int TOP_AREA_Y = UI_CONTENT_Y;
-static constexpr int TOP_AREA_HEIGHT = SYNC_Y - UI_CONTENT_Y;
-
-void ScreenMain::initButtons()
+ScreenMain::ScreenMain()
+    : m_areaX(0), m_areaY(UI_CONTENT_Y), m_areaW(UI_SCREEN_WIDTH), m_areaH(UI_CONTENT_HEIGHT)
+    , m_isActive(false)
+    , m_needsRedraw(false)
+    , m_bpmRect{0, 0, 0, 0}
+    , m_bpmTextSize(1)
+    , m_extY(0)
+    , m_extTextSize(1)
+    , m_buttonTextSize(1)
+    , m_sourceCount(0)
+    , m_lastBpm(-1)
+    , m_lastExt10(-1)
+    , m_lastFlags(0)
+    , m_lastExtDrawUs(0)
 {
-    int centerX = UI_SCREEN_WIDTH / 2;
-    int bpmHalfWidth = BPM_DISPLAY_WIDTH / 2;
-
-    // Layout: [-10][-1]  <BPM display>  [+1][+10]
-    // Inner buttons sit BPM_DISPLAY_GAP away from the BPM display.
-    // [-10] button (leftmost)
-    int minus1RightX = centerX - bpmHalfWidth - BPM_DISPLAY_GAP;
-    m_buttons[BTN_MINUS_1].x = minus1RightX - BPM_BUTTON_W;
-    m_buttons[BTN_MINUS_10].x = m_buttons[BTN_MINUS_1].x - BPM_BUTTON_GAP - BPM_BUTTON_W;
-
-    // [+1] [+10] buttons (right side)
-    m_buttons[BTN_PLUS_1].x = centerX + bpmHalfWidth + BPM_DISPLAY_GAP;
-    m_buttons[BTN_PLUS_10].x = m_buttons[BTN_PLUS_1].x + BPM_BUTTON_W + BPM_BUTTON_GAP;
-
-    for (int i = BTN_MINUS_10; i <= BTN_PLUS_10; i++) {
-        m_buttons[i].y = BPM_BUTTON_Y;
-        m_buttons[i].w = BPM_BUTTON_W;
-        m_buttons[i].h = BPM_BUTTON_H;
-        m_buttons[i].pressed = false;
+    static const struct { int button; bool available; } order[SOURCE_SLOTS] = {
+        { BTN_SOURCE_USB,        CLOCK_FROM_USB_HOST },
+        { BTN_SOURCE_USB_DEVICE, CLOCK_FROM_USB_DEVICE },
+        { BTN_SOURCE_DIN,        true },
+        { BTN_SOURCE_BLE,        true },
+    };
+    for (int i = 0; i < SOURCE_SLOTS; i++) {
+        if (order[i].available) m_sourceButtons[m_sourceCount++] = order[i].button;
     }
-    m_buttons[BTN_MINUS_10].label = "-10";
-    m_buttons[BTN_MINUS_1].label  = "-1";
-    m_buttons[BTN_PLUS_1].label   = "+1";
-    m_buttons[BTN_PLUS_10].label  = "+10";
+    layoutView();
+}
 
-    // [Sync] button
-    m_buttons[BTN_SYNC].x = UI_SCREEN_WIDTH / 2 - SYNC_BTN_W / 2;
-    m_buttons[BTN_SYNC].y = SYNC_Y;
-    m_buttons[BTN_SYNC].w = SYNC_BTN_W;
-    m_buttons[BTN_SYNC].h = SYNC_BTN_H;
-    m_buttons[BTN_SYNC].label = "Sync";
-    m_buttons[BTN_SYNC].pressed = false;
+void ScreenMain::setArea(int x, int y, int w, int h)
+{
+    m_areaX = x;
+    m_areaY = y;
+    m_areaW = w;
+    m_areaH = h;
+    layoutView();
+}
 
-    // Source selection buttons (centered horizontally)
-    int sourceStartX = (UI_SCREEN_WIDTH - (3 * SOURCE_BTN_W + 2 * 10)) / 2;
-    m_buttons[BTN_SOURCE_USB].x = sourceStartX;
-    m_buttons[BTN_SOURCE_USB].y = SOURCE_BTN_Y;
-    m_buttons[BTN_SOURCE_USB].w = SOURCE_BTN_W;
-    m_buttons[BTN_SOURCE_USB].h = SOURCE_BTN_H;
-    m_buttons[BTN_SOURCE_USB].label = "USB";
-    m_buttons[BTN_SOURCE_USB].pressed = false;
+void ScreenMain::resetArea()
+{
+    setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
+}
 
-    m_buttons[BTN_SOURCE_DIN].x = sourceStartX + SOURCE_BTN_W + 10;
-    m_buttons[BTN_SOURCE_DIN].y = SOURCE_BTN_Y;
-    m_buttons[BTN_SOURCE_DIN].w = SOURCE_BTN_W;
-    m_buttons[BTN_SOURCE_DIN].h = SOURCE_BTN_H;
-    m_buttons[BTN_SOURCE_DIN].label = "DIN";
-    m_buttons[BTN_SOURCE_DIN].pressed = false;
+// Rows from the top: BPM (about 40%), external BPM, source buttons, Sync. A
+// hidden source button keeps an empty rectangle, so no tap hits it.
+void ScreenMain::layoutView()
+{
+    int ax = m_areaX, ay = m_areaY, aw = m_areaW, ah = m_areaH;
+    int pad = clampi(ah / 30, 2, GAP);
 
-    m_buttons[BTN_SOURCE_BLE].x = sourceStartX + (SOURCE_BTN_W + 10) * 2;
-    m_buttons[BTN_SOURCE_BLE].y = SOURCE_BTN_Y;
-    m_buttons[BTN_SOURCE_BLE].w = SOURCE_BTN_W;
-    m_buttons[BTN_SOURCE_BLE].h = SOURCE_BTN_H;
-    m_buttons[BTN_SOURCE_BLE].label = "BLE";
-    m_buttons[BTN_SOURCE_BLE].pressed = false;
+    int bpmH = ah * 40 / 100;
+    int extH = ah * 12 / 100;
+    int srcH = ah * 20 / 100;
+    int syncH = ah - bpmH - extH - srcH - 2 * pad;
+
+    // "120" at size s is 18s wide, " BPM" at s/3 another ~24s/3: ~26s in all
+    m_bpmTextSize = clampi(bpmH / 8, 1, BPM_TEXT_MAX);
+    m_bpmTextSize = clampi((aw - 2 * pad) / 26, 1, m_bpmTextSize);
+    m_bpmRect = { ax + pad, ay + pad, aw - 2 * pad, bpmH };
+
+    m_extTextSize = (extH >= 24) ? 2 : 1;
+    m_extY = ay + pad + bpmH + (extH - 8 * m_extTextSize) / 2;
+
+    for (int i = 0; i < BTN_COUNT; i++) m_buttons[i] = { {0, 0, 0, 0}, "" };
+
+    int n = m_sourceCount > 0 ? m_sourceCount : 1;
+    int btnW = clampi((aw - (n + 1) * pad) / n, 1, SOURCE_BTN_W_MAX);
+    int btnH = clampi(srcH - pad, 1, SOURCE_BTN_H_MAX);
+    m_buttonTextSize = (btnH >= 36 && btnW >= 6 * 2 * 5 + 8) ? 2 : 1;
+    int srcY = ay + pad + bpmH + extH + (srcH - btnH) / 2;
+    int startX = ax + (aw - (m_sourceCount * btnW + (m_sourceCount - 1) * pad)) / 2;
+    for (int i = 0; i < m_sourceCount; i++) {
+        Button& b = m_buttons[m_sourceButtons[i]];
+        b.r = { startX + (btnW + pad) * i, srcY, btnW, btnH };
+        b.label = sourceLabel(m_sourceButtons[i]);
+    }
+
+    // Play / Stop and Sync side by side
+    int bw = clampi((aw - 3 * pad) / 2, 1, SYNC_BTN_W_MAX);
+    int sh = clampi(syncH - pad, 1, SYNC_BTN_H_MAX);
+    int syncY = ay + pad + bpmH + extH + srcH + (syncH - sh) / 2;
+    int rowX = ax + (aw - (2 * bw + pad)) / 2;
+    m_buttons[BTN_PLAY] = { { rowX, syncY, bw, sh }, "Play" };
+    m_buttons[BTN_SYNC] = { { rowX + bw + pad, syncY, bw, sh }, "Sync" };
 }
 
 void ScreenMain::enter()
 {
     m_isActive = true;
-    m_lastDrawnBpm = -1;  // Force full redraw
-    m_lastSyncButtonState = -1;  // Force sync button redraw
-    m_lastDrawnExternalBpmSource = 0xFF;  // Force source buttons redraw
+    m_lastBpm = -1;
 }
 
 void ScreenMain::leave()
 {
     m_isActive = false;
+}
+
+// What decides colours and labels, besides the numbers
+uint32_t ScreenMain::stateFlags() const
+{
+    UIManager& ui = UIManager::getInstance();
+    uint32_t f = 0;
+    if (ui.getSyncMode()) f |= 1;
+    if (ui_tempo_running()) f |= 2;
+    if (ui.getExternalBpm() > 0) f |= 4;
+    f |= (uint32_t)ui.getExternalBpmSourceSelection() << 4;
+    for (int i = 0; i < m_sourceCount; i++) {
+        if (ui.getExternalBpmBySource(sourceInterface(m_sourceButtons[i])) > 0) f |= 1u << (8 + i);
+    }
+    return f;
 }
 
 void ScreenMain::update()
@@ -174,294 +178,179 @@ void ScreenMain::update()
 
     UIManager& ui = UIManager::getInstance();
     int64_t now = esp_timer_get_time();
+    int bpm = (int)ui.getBpm();
+    int ext10 = (int)(ui.getExternalBpm() * 10);
+    uint32_t flags = stateFlags();
 
-    // Check for changes that need redraw
-    bool needsFullRedraw = m_needsRedraw;
-    bool needsBpmUpdate = false;
-    bool needsExternalBpmUpdate = false;
-    bool needsBarBeatUpdate = false;
-    bool needsProgressUpdate = false;
-
-    float currentBpm = ui.getBpm();
-    float externalBpm = ui.getExternalBpm();
-    bool syncMode = ui.getSyncMode();
-
-    // Compare on display-significant precision so we don't redraw when the
-    // rendered text would be identical (matters in Sync mode where the
-    // internal BPM tracks micro-fluctuations of the external clock).
-    if ((int)currentBpm != (int)m_lastDrawnBpm || syncMode != m_lastDrawnSyncMode) {
-        needsBpmUpdate = true;
+    bool changed = m_needsRedraw || bpm != m_lastBpm || flags != m_lastFlags;
+    if (!changed && ext10 != m_lastExt10 && now - m_lastExtDrawUs >= EXT_REDRAW_US) {
+        changed = true;
     }
+    if (!changed) return;
 
-    if ((int)(externalBpm * 10) != (int)(m_lastDrawnExternalBpm * 10)) {
-        // Throttle external BPM updates to ~10 FPS
-        const int64_t EXTERNAL_BPM_UPDATE_INTERVAL_US = 100000;  // 100ms = 10 FPS
-        if (now - m_lastExternalBpmDrawTime >= EXTERNAL_BPM_UPDATE_INTERVAL_US) {
-            needsExternalBpmUpdate = true;
-            m_lastExternalBpmDrawTime = now;
-        }
-    }
-
-    if (ui.getBar() != m_lastDrawnBar || ui.getBeat() != m_lastDrawnBeat) {
-        needsBarBeatUpdate = true;
-    }
-
-    if (ui.getBeatProgress() != m_lastDrawnProgress) {
-        needsProgressUpdate = true;
-    }
-
-    if (needsFullRedraw) {
-        ui_strip::repaint_content([&]() { draw(); });
-        m_needsRedraw = false;
-    } else {
-        // Top area renders off-screen through the shared strip, so no outer
-        // startWrite/endWrite is needed (it would only batch sprite pushes
-        // which can confuse the Tab5 DSI framebuffer panel).
-        if (needsBpmUpdate || needsExternalBpmUpdate) {
-            drawTopArea();
-            drawSyncButton();  // visual state may change with BPM/sync changes
-        }
-        if (needsBarBeatUpdate) {
-            drawBarBeat();
-        }
-        if (needsProgressUpdate) {
-            drawBeatProgress();
-        }
-    }
+    m_needsRedraw = false;
+    m_lastExtDrawUs = now;
+    paint();
 }
 
 void ScreenMain::draw()
 {
-    // A full repaint paints everything: drawSyncButton() skips an unchanged
-    // state, which would leave all but the first band of a compose without it.
-    m_lastSyncButtonState = -1;
-    drawTopArea();
-    drawSyncButton();
-    drawBarBeat();
-    drawBeatProgress();
+    // Called once per band of a compose: paint the same picture every time
+    paint();
 }
 
-void ScreenMain::drawTopArea()
+void ScreenMain::paint()
+{
+    UIManager& ui = UIManager::getInstance();
+    m_lastBpm = (int)ui.getBpm();
+    m_lastExt10 = (int)(ui.getExternalBpm() * 10);
+    m_lastFlags = stateFlags();
+
+    auto draw = [this](LovyanGFX* g, int ox, int oy) { render(g, ox, oy); };
+    if (!ui_strip::paint(m_areaX, m_areaY, m_areaW, m_areaH, UI_COLOR_BLACK, draw)) {
+        ui_gfx().fillRect(m_areaX, m_areaY, m_areaW, m_areaH, UI_COLOR_BLACK);
+        render(&ui_gfx(), 0, 0);
+    }
+}
+
+void ScreenMain::render(LovyanGFX* g, int ox, int oy)
 {
     UIManager& ui = UIManager::getInstance();
     float bpm = ui.getBpm();
-    float externalBpm = ui.getExternalBpm();
-    bool syncMode = ui.getSyncMode();
-    midi_interface_t selectedSource = ui.getExternalBpmSourceSelection();
+    float ext = ui.getExternalBpm();
+    bool sync = ui.getSyncMode();
+    midi_interface_t selected = ui.getExternalBpmSourceSelection();
+    g->setTextWrap(false, false);
 
-    // Drawn through the shared strip, band by band (yOffset is the screen row
-    // of the band's top). Without the strip it goes straight to the LCD.
-    auto render = [&](LovyanGFX* canvas, int, int yOffset) {
-        // Disable any text wrap/scroll that might be active on the canvas, just in case
-        // (LovyanGFX defaults to wrap-horizontal=on, which can cause unexpected redraws
-        // if a print() ever spans past the right edge).
-        canvas->setTextWrap(false, false);
+    // ----- BPM (green while the clock runs between Start and Stop) -----
+    char num[8];
+    snprintf(num, sizeof(num), "%d", (int)(bpm + 0.5f));
+    int s = m_bpmTextSize;
+    int ls = s / 3 > 0 ? s / 3 : 1;
+    int numW = (int)strlen(num) * 6 * s;
+    int totalW = numW + 6 * ls + 3 * 6 * ls;
+    int bx = m_bpmRect.x + (m_bpmRect.w - totalW) / 2 - ox;
+    int by = m_bpmRect.y + (m_bpmRect.h - 8 * s) / 2 - oy;
+    uint16_t bpmColor = ui_tempo_running() ? UI_COLOR_GREEN : (sync ? UI_COLOR_CYAN : UI_COLOR_WHITE);
+    g->setTextSize(s);
+    g->setTextColor(bpmColor, UI_COLOR_BLACK);
+    g->setCursor(bx, by);
+    g->print(num);
+    g->setTextSize(ls);
+    g->setCursor(bx + numW + 6 * ls, by + 8 * s - 8 * ls);
+    g->print("BPM");
 
-        // ----- BPM adjustment buttons -----
-        for (int i = BTN_MINUS_10; i <= BTN_PLUS_10; i++) {
-            Button& btn = m_buttons[i];
-            uint16_t bgColor = syncMode ? UI_COLOR_DARKGRAY : UI_COLOR_NAVY;
-            uint16_t textColor = syncMode ? UI_COLOR_GRAY : UI_COLOR_WHITE;
+    // ----- External BPM -----
+    char extStr[24];
+    if (ext > 0) snprintf(extStr, sizeof(extStr), "Ext: %.1f BPM", ext);
+    else snprintf(extStr, sizeof(extStr), "Ext: --- BPM");
+    int es = m_extTextSize;
+    g->setTextSize(es);
+    g->setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+    g->setCursor(m_areaX + (m_areaW - (int)strlen(extStr) * 6 * es) / 2 - ox, m_extY - oy);
+    g->print(extStr);
 
-            if (btn.pressed && !syncMode) {
-                bgColor = ui_lighten_color(bgColor);
-            }
-
-            int sy = btn.y - yOffset;
-            canvas->fillRoundRect(btn.x, sy, btn.w, btn.h, 4, bgColor);
-            canvas->drawRoundRect(btn.x, sy, btn.w, btn.h, 4, UI_COLOR_WHITE);
-
-            canvas->setTextSize(1);
-            canvas->setTextColor(textColor, bgColor);
-            int textW = strlen(btn.label) * 6;
-            canvas->setCursor(btn.x + (btn.w - textW) / 2, sy + (btn.h - 8) / 2);
-            canvas->print(btn.label);
-        }
-
-        // ----- BPM display (number + "BPM" label, both centered as a group) -----
-        char bpmStr[16];
-        snprintf(bpmStr, sizeof(bpmStr), "%3d", (int)bpm);
-
-        int bpmStartX = UI_SCREEN_WIDTH / 2 - BPM_DISPLAY_WIDTH / 2;
-        int bpmSY = BPM_Y - yOffset;
-
-        canvas->setTextSize(BPM_TEXT_SIZE);
-        canvas->setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-        canvas->setCursor(bpmStartX, bpmSY);
-        canvas->print(bpmStr);
-
-        canvas->setTextSize(BPM_LABEL_TEXT_SIZE);
-        canvas->setCursor(bpmStartX + BPM_NUM_WIDTH + 10,
-                          bpmSY + BPM_TEXT_SIZE * 8 / 2 - BPM_LABEL_TEXT_SIZE * 4);
-        canvas->print("BPM");
-
-        // ----- Source selection buttons -----
-        const char* sourceLabels[] = {"USB", "DIN", "BLE"};
-        for (int i = 0; i < 3; i++) {
-            Button& btn = m_buttons[BTN_SOURCE_USB + i];
-            bool isSelected = (selectedSource == (midi_interface_t)i);
-            float sourceBpm = ui.getExternalBpmBySource((midi_interface_t)i);
-
-            uint16_t bgColor = isSelected ? UI_COLOR_BLUE : UI_COLOR_DARKGRAY;
-            uint16_t textColor = (sourceBpm > 0) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
-
-            if (!isSelected && sourceBpm <= 0) {
-                bgColor = UI_COLOR_BLACK;
-            }
-
-            int sy = btn.y - yOffset;
-            canvas->fillRoundRect(btn.x, sy, btn.w, btn.h, 2, bgColor);
-            canvas->drawRoundRect(btn.x, sy, btn.w, btn.h, 2, UI_COLOR_WHITE);
-
-            canvas->setTextSize(1);
-            canvas->setTextColor(textColor, bgColor);
-            int textW = strlen(sourceLabels[i]) * 6;
-            canvas->setCursor(btn.x + (btn.w - textW) / 2, sy + (btn.h - 8) / 2);
-            canvas->print(sourceLabels[i]);
-        }
-
-        // ----- External BPM text -----
-        char extStr[32];
-        if (externalBpm > 0) {
-            snprintf(extStr, sizeof(extStr), "Ext: %.1f BPM", externalBpm);
-        } else {
-            snprintf(extStr, sizeof(extStr), "Ext: --- BPM");
-        }
-        int extTextWidth = strlen(extStr) * 6 * EXTERNAL_BPM_TEXT_SIZE;
-        int extSY = EXTERNAL_BPM_Y - yOffset;
-
-        canvas->setTextSize(EXTERNAL_BPM_TEXT_SIZE);
-        canvas->setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-        canvas->setCursor((UI_SCREEN_WIDTH - extTextWidth) / 2, extSY);
-        canvas->print(extStr);
-    };
-
-    if (!ui_strip::paint(0, TOP_AREA_Y, UI_SCREEN_WIDTH, TOP_AREA_HEIGHT, UI_COLOR_BLACK, render)) {
-        render(&ui_gfx(), 0, 0);
+    // ----- Source buttons -----
+    int ts = m_buttonTextSize;
+    for (int i = 0; i < m_sourceCount; i++) {
+        const Button& b = m_buttons[m_sourceButtons[i]];
+        midi_interface_t src = sourceInterface(m_sourceButtons[i]);
+        bool isSelected = (selected == src);
+        bool hasClock = ui.getExternalBpmBySource(src) > 0;
+        uint16_t bg = isSelected ? UI_COLOR_BLUE : (hasClock ? UI_COLOR_DARKGRAY : UI_COLOR_BLACK);
+        uint16_t fg = hasClock ? UI_COLOR_WHITE : UI_COLOR_GRAY;
+        g->fillRoundRect(b.r.x - ox, b.r.y - oy, b.r.w, b.r.h, 3, bg);
+        g->drawRoundRect(b.r.x - ox, b.r.y - oy, b.r.w, b.r.h, 3, UI_COLOR_WHITE);
+        g->setTextSize(ts);
+        g->setTextColor(fg, bg);
+        g->setCursor(b.r.x + (b.r.w - (int)strlen(b.label) * 6 * ts) / 2 - ox,
+                     b.r.y + (b.r.h - 8 * ts) / 2 - oy);
+        g->print(b.label);
     }
 
-    m_lastDrawnBpm = bpm;
-    m_lastDrawnExternalBpm = externalBpm;
-    m_lastDrawnSyncMode = syncMode;
-    m_lastDrawnExternalBpmSource = selectedSource;
-}
+    renderPlay(g, ox, oy);
 
-void ScreenMain::drawSyncButton()
-{
-    UIManager& ui = UIManager::getInstance();
-    bool syncMode = ui.getSyncMode();
-    float externalBpm = ui.getExternalBpm();
-
-    // Determine visual state: 0=disabled, 1=off, 2=on
-    int8_t newState;
-    if (externalBpm <= 0) {
-        newState = 0;  // disabled
-    } else if (syncMode) {
-        newState = 2;  // on
+    // ----- Sync -----
+    const Button& sb = m_buttons[BTN_SYNC];
+    uint16_t bg, fg = UI_COLOR_WHITE;
+    if (ext <= 0) {
+        bg = UI_COLOR_DARKGRAY;   // No external clock to follow
+        fg = UI_COLOR_GRAY;
     } else {
-        newState = 1;  // off
+        bg = sync ? UI_COLOR_GREEN : UI_COLOR_NAVY;
     }
+    const char* label = sync ? "SYNC" : "Sync";
+    g->fillRoundRect(sb.r.x - ox, sb.r.y - oy, sb.r.w, sb.r.h, 4, bg);
+    g->drawRoundRect(sb.r.x - ox, sb.r.y - oy, sb.r.w, sb.r.h, 4, UI_COLOR_WHITE);
+    g->setTextSize(ts);
+    g->setTextColor(fg, bg);
+    g->setCursor(sb.r.x + (sb.r.w - (int)strlen(label) * 6 * ts) / 2 - ox,
+                 sb.r.y + (sb.r.h - 8 * ts) / 2 - oy);
+    g->print(label);
+}
 
-    // Skip redraw if visual state hasn't changed (prevents flicker from frequent external BPM updates)
-    if (newState == m_lastSyncButtonState) {
-        return;
-    }
-    m_lastSyncButtonState = newState;
+// Play (a triangle) while stopped, Stop (a square) while running
+void ScreenMain::renderPlay(LovyanGFX* g, int ox, int oy)
+{
+    const Button& b = m_buttons[BTN_PLAY];
+    bool running = ui_tempo_running();
+    uint16_t bg = running ? UI_COLOR_GREEN : UI_COLOR_NAVY;
+    uint16_t fg = running ? UI_COLOR_BLACK : UI_COLOR_WHITE;
+    const char* label = running ? "Stop" : "Play";
+    int ts = m_buttonTextSize;
 
-    Button& btn = m_buttons[BTN_SYNC];
+    int x = b.r.x - ox, y = b.r.y - oy;
+    g->fillRoundRect(x, y, b.r.w, b.r.h, 4, bg);
+    g->drawRoundRect(x, y, b.r.w, b.r.h, 4, UI_COLOR_WHITE);
 
-    // Determine button color based on state
-    uint16_t bgColor;
-    uint16_t textColor = UI_COLOR_WHITE;
-
-    if (newState == 0) {
-        // No external clock - gray out
-        bgColor = UI_COLOR_DARKGRAY;
-        textColor = UI_COLOR_GRAY;
-    } else if (newState == 2) {
-        // Sync mode on
-        bgColor = UI_COLOR_GREEN;
+    int icon = 8 * ts;                       // As tall as the text
+    int textW = (int)strlen(label) * 6 * ts;
+    int gap = 3 * ts;
+    int cx = x + (b.r.w - (icon + gap + textW)) / 2;
+    int cy = y + (b.r.h - icon) / 2;
+    if (running) {
+        g->fillRect(cx, cy, icon, icon, fg);
     } else {
-        // Sync mode off
-        bgColor = UI_COLOR_NAVY;
+        g->fillTriangle(cx, cy, cx, cy + icon - 1, cx + icon - 1, cy + icon / 2, fg);
     }
-
-    // Draw button
-    ui_gfx().fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, bgColor);
-    ui_gfx().drawRoundRect(btn.x, btn.y, btn.w, btn.h, 4, UI_COLOR_WHITE);
-
-    // Draw label
-    ui_gfx().setTextSize(1);
-    ui_gfx().setTextColor(textColor, bgColor);
-
-    const char* label = syncMode ? "SYNC" : "Sync";
-    int textW = strlen(label) * 6;
-    ui_gfx().setCursor(btn.x + (btn.w - textW) / 2, btn.y + (btn.h - 8) / 2);
-    ui_gfx().print(label);
+    g->setTextSize(ts);
+    g->setTextColor(fg, bg);
+    g->setCursor(cx + icon + gap, y + (b.r.h - 8 * ts) / 2);
+    g->print(label);
 }
 
-void ScreenMain::drawBarBeat()
+const char* ScreenMain::sourceLabel(int button)
 {
-    UIManager& ui = UIManager::getInstance();
-    uint32_t bar = ui.getBar();
-    uint8_t beat = ui.getBeat();
-
-    // Draw bar/beat (background color overwrites old content)
-    ui_gfx().setTextSize(BAR_BEAT_TEXT_SIZE);
-    ui_gfx().setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
-
-    char barBeatStr[32];
-    snprintf(barBeatStr, sizeof(barBeatStr), "Bar: %3lu  Beat: %d", (unsigned long)bar, beat);
-
-    int barBeatWidth = strlen(barBeatStr) * 6 * BAR_BEAT_TEXT_SIZE;
-    ui_gfx().setCursor((UI_SCREEN_WIDTH - barBeatWidth) / 2, BAR_BEAT_Y);
-    ui_gfx().print(barBeatStr);
-
-    m_lastDrawnBar = bar;
-    m_lastDrawnBeat = beat;
+    switch (button) {
+        case BTN_SOURCE_USB:        return "USB-H";
+        case BTN_SOURCE_USB_DEVICE: return "USB-D";
+        case BTN_SOURCE_DIN:        return "DIN";
+        default:                    return "BLE";
+    }
 }
 
-void ScreenMain::drawBeatProgress()
+midi_interface_t ScreenMain::sourceInterface(int button)
 {
-    UIManager& ui = UIManager::getInstance();
-    uint8_t progress = ui.getBeatProgress();
-
-    int progressX = (UI_SCREEN_WIDTH - PROGRESS_W) / 2;
-
-    // Draw progress bar background
-    ui_gfx().fillRect(progressX, PROGRESS_Y, PROGRESS_W, PROGRESS_H, UI_COLOR_DARKGRAY);
-
-    // Draw progress bar fill
-    int fillWidth = (progress * PROGRESS_W) / 24;
-    if (fillWidth > 0) {
-        ui_gfx().fillRect(progressX, PROGRESS_Y, fillWidth, PROGRESS_H, UI_COLOR_GREEN);
+    switch (button) {
+        case BTN_SOURCE_USB:        return MIDI_INTERFACE_USB;
+        case BTN_SOURCE_USB_DEVICE: return MIDI_INTERFACE_USB_DEVICE;
+        case BTN_SOURCE_DIN:        return MIDI_INTERFACE_DIN;
+        default:                    return MIDI_INTERFACE_BLE;
     }
-
-    // Draw border
-    ui_gfx().drawRect(progressX, PROGRESS_Y, PROGRESS_W, PROGRESS_H, UI_COLOR_WHITE);
-
-    m_lastDrawnProgress = progress;
-}
-
-int ScreenMain::hitTestButton(int x, int y)
-{
-    for (int i = 0; i < BTN_COUNT; i++) {
-        Button& btn = m_buttons[i];
-        if (x >= btn.x && x < btn.x + btn.w &&
-            y >= btn.y && y < btn.y + btn.h) {
-            return i;
-        }
-    }
-    return -1;
 }
 
 void ScreenMain::onTouch(int touchId, int x, int y, bool pressed)
 {
-    (void)touchId;  // Only handle first touch for buttons
-    if (pressed) {
-        int buttonId = hitTestButton(x, y);
-        if (buttonId >= 0) {
-            handleButtonPress(buttonId);
+    (void)touchId;
+    if (!pressed) return;
+    if (m_bpmRect.contains(x, y)) {
+        ui_tempo_tap();
+        return;
+    }
+    for (int i = 0; i < BTN_COUNT; i++) {
+        if (m_buttons[i].r.w > 0 && m_buttons[i].r.contains(x, y)) {
+            handleButtonPress(i);
+            return;
         }
     }
 }
@@ -469,116 +358,20 @@ void ScreenMain::onTouch(int touchId, int x, int y, bool pressed)
 void ScreenMain::handleButtonPress(int buttonId)
 {
     UIManager& ui = UIManager::getInstance();
-    bool syncMode = ui.getSyncMode();
-
-    switch (buttonId) {
-        case BTN_MINUS_10:
-            if (!syncMode) {
-                ui.setBpm(ui.getBpm() - 10);
-            }
-            break;
-
-        case BTN_MINUS_1:
-            if (!syncMode) {
-                ui.setBpm(ui.getBpm() - 1);
-            }
-            break;
-
-        case BTN_PLUS_1:
-            if (!syncMode) {
-                ui.setBpm(ui.getBpm() + 1);
-            }
-            break;
-
-        case BTN_PLUS_10:
-            if (!syncMode) {
-                ui.setBpm(ui.getBpm() + 10);
-            }
-            break;
-
-        case BTN_SYNC:
-            // Only allow sync toggle if external BPM is available
-            if (ui.getExternalBpm() > 0) {
-                ui.setSyncMode(!syncMode);
-                drawSyncButton();
-                drawTopArea();  // Refresh BPM-adjust button enabled state
-            }
-            break;
-
-        case BTN_SOURCE_USB:
-            ui.setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
-            drawTopArea();
-            drawSyncButton();
-            break;
-
-        case BTN_SOURCE_DIN:
-            ui.setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
-            drawTopArea();
-            drawSyncButton();
-            break;
-
-        case BTN_SOURCE_BLE:
-            ui.setExternalBpmSourceSelection(MIDI_INTERFACE_BLE);
-            drawTopArea();
-            drawSyncButton();
-            break;
+    if (buttonId == BTN_SYNC) {
+        // Only with an external clock to follow
+        if (ui.getExternalBpm() > 0) ui.setSyncMode(!ui.getSyncMode());
+    } else if (buttonId == BTN_PLAY) {
+        ui_tempo_set_running(!ui_tempo_running());
+    } else {
+        ui.setExternalBpmSourceSelection(sourceInterface(buttonId));
     }
+    m_needsRedraw = true;
 }
 
 void ScreenMain::onNavCenter()
 {
-    // TAP tempo
-    processTapTempo();
-}
-
-void ScreenMain::processTapTempo()
-{
-    UIManager& ui = UIManager::getInstance();
-
-    // Don't process TAP in sync mode
-    if (ui.getSyncMode()) {
-        return;
-    }
-
-    uint32_t now = esp_timer_get_time() / 1000;  // Convert to ms
-
-    // Check for timeout
-    if (m_tapCount > 0) {
-        uint32_t lastTap = m_tapTimes[(m_tapIndex - 1 + UI_TAP_TEMPO_SAMPLES) % UI_TAP_TEMPO_SAMPLES];
-        if (now - lastTap > UI_TAP_TEMPO_TIMEOUT_MS) {
-            // Reset
-            m_tapCount = 0;
-            m_tapIndex = 0;
-        }
-    }
-
-    // Record this tap
-    m_tapTimes[m_tapIndex] = now;
-    m_tapIndex = (m_tapIndex + 1) % UI_TAP_TEMPO_SAMPLES;
-    if (m_tapCount < UI_TAP_TEMPO_SAMPLES) {
-        m_tapCount++;
-    }
-
-    // Calculate BPM if we have enough samples
-    if (m_tapCount >= 2) {
-        uint32_t totalInterval = 0;
-        int intervals = m_tapCount - 1;
-
-        for (int i = 0; i < intervals; i++) {
-            int curr = (m_tapIndex - 1 - i + UI_TAP_TEMPO_SAMPLES) % UI_TAP_TEMPO_SAMPLES;
-            int prev = (curr - 1 + UI_TAP_TEMPO_SAMPLES) % UI_TAP_TEMPO_SAMPLES;
-            totalInterval += m_tapTimes[curr] - m_tapTimes[prev];
-        }
-
-        float avgInterval = (float)totalInterval / intervals;
-        float newBpm = 60000.0f / avgInterval;
-
-        // Clamp to valid range
-        if (newBpm >= UI_BPM_MIN && newBpm <= UI_BPM_MAX) {
-            ui.setBpm(newBpm);
-            ESP_LOGI(TAG, "TAP tempo: %.1f BPM", newBpm);
-        }
-    }
+    ui_tempo_tap();
 }
 
 const char* ScreenMain::getTitle()
@@ -590,7 +383,8 @@ const char* ScreenMain::getTitle()
 
 void ScreenMain::getTileStatus(char* buf, int len)
 {
-    snprintf(buf, len, "%.0f BPM", (double)UIManager::getInstance().getBpm());
+    snprintf(buf, len, "%.0f BPM%s", (double)UIManager::getInstance().getBpm(),
+             ui_tempo_running() ? " >" : "");
 }
 
 const char* ScreenMain::getNavCenterLabel()

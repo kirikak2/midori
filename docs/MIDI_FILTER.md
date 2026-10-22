@@ -128,6 +128,10 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... } # input: / sync: の代わり（MI
   `MIDI_route_packet()` から分岐するので、**USB Device（PC）と `UI::Keys` からも受け取れる**
 - 外部クロックの BPM は送信元のパーサが測る（USB Host / UART は従来のもの、USB Device には
   クロック計測用のパーサを足した）。画面の鍵盤はクロックを出さないので 0.0
+- 測れるのは入力タスクがその送信元を読んでいる間だけ。ルートも filter も無い送信元を読ませるのが
+  **watch**（`MIDI_route_set_watch()`。持ち主は 2 つ: アプリ = Tempo 画面、スクリプト = `sync_from:`）。
+  `sync_from:` は指定した送信元を watch するので、ルートや `MIDI.on` が無くても同期できる
+  （スクリプト終了時に `MIDI_route_clear()` が外す）。`MIDI.external_bpm(from)` を直接呼ぶだけでは watch しない
 
 ### MIDI::Input の非推奨化
 
@@ -181,6 +185,8 @@ uint16_t MIDI_route_filtered(uint8_t src_bit);                          /* 画�
 uint32_t MIDI_route_filter_overflows(void);
 void     MIDI_route_dispatch(uint8_t src_bit, uint8_t dst_mask, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
 bool     MIDI_route_get(int i, uint8_t *src_bit, uint8_t *dst_mask, int *channel);
+void     MIDI_route_set_watch(int owner, uint8_t src_mask);   /* MIDI_WATCH_APP / MIDI_WATCH_SCRIPT */
+uint8_t  MIDI_route_watched(void);
 
 /* midi.h（port） */
 int  MIDI_Filter_init(void);

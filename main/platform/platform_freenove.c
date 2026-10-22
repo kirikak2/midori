@@ -589,3 +589,35 @@ uint32_t ui_mididev_serial(void)
 void ui_mididev_cleanup(void)
 {
 }
+
+// Tempo stubs (docs/TEMPO.md) - no UI, so no tempo device: UI::Tempo has no
+// transport bit and MIDI.route refuses it like any unregistered transport.
+
+uint8_t ui_tempo_bit(void)
+{
+    return 0;
+}
+
+void ui_tempo_set_running(bool running)
+{
+    (void)running;
+}
+
+bool ui_tempo_running(void)
+{
+    return false;
+}
+
+void ui_tempo_tap(void)
+{
+}
+
+bool ui_tempo_sync(void)
+{
+    return false;
+}
+
+void ui_tempo_set_sync(bool on)
+{
+    (void)on;
+}

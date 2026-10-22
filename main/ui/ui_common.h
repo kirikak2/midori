@@ -345,11 +345,13 @@ typedef enum {
     LOG_SOURCE_MIDI,     // MIDI messages
 } log_source_t;
 
-// MIDI interface type
+// MIDI interface type (external clock sources on the Tempo screen)
 typedef enum {
-    MIDI_INTERFACE_USB,
-    MIDI_INTERFACE_DIN,
+    MIDI_INTERFACE_USB,          // USB-MIDI host
+    MIDI_INTERFACE_DIN,          // UART (SAM2695)
     MIDI_INTERFACE_BLE,
+    MIDI_INTERFACE_USB_DEVICE,   // USB-MIDI device: what the PC sends
+    MIDI_INTERFACE_COUNT
 } midi_interface_t;
 
 // BPM change callback type
@@ -665,6 +667,7 @@ typedef enum {
     UI_WIDGET_XYPAD,      // The XYPad screen's view, drawn in the widget's cell
     UI_WIDGET_TOMBOLA,    // Likewise the Tombola's
     UI_WIDGET_KEYS,       // Likewise the Keys'
+    UI_WIDGET_TEMPO,      // Likewise the Tempo screen's
 } ui_widget_kind_t;
 
 typedef struct {
@@ -720,6 +723,7 @@ void ui_layout_cleanup(void);
 enum {
     UI_MIDIDEV_BUILTIN = 0x01,   // The firmware's: survives scripts, its patches are saved
     UI_MIDIDEV_STANDBY = 0x02,   // Not started yet, no bit (AMY until first used)
+    UI_MIDIDEV_NO_OUT  = 0x04,   // Only sends: no MIDI OUT column (Tempo)
 };
 
 typedef enum {
@@ -747,6 +751,8 @@ int  ui_mididev_register(const char* key, const char* name, uint8_t bit,
 bool ui_mididev_unregister(uint8_t bit);
 // A standby device started and got its bit
 bool ui_mididev_activate(const char* key, uint8_t bit);
+// Mark a built-in as only sending (UI_MIDIDEV_NO_OUT)
+void ui_mididev_set_no_out(const char* key);
 
 // Reading (any task)
 int  ui_mididev_count(void);
@@ -760,10 +766,14 @@ uint32_t ui_mididev_serial(void);                // Bumped on every change
 int  ui_mididev_selected(bool out);
 void ui_mididev_select(bool out, int index, bool save);
 
+// A patch's channel: 0..15, -1 (MIDI_ROUTE_ALL_CHANNELS) for everything, or
+// -2 (MIDI_ROUTE_CLOCK_ONLY) for the clock alone. UI_MIDIDEV_NO_PATCH: none.
+#define UI_MIDIDEV_NO_PATCH (-100)
+
 // Patches from the screen (UI task): toggles the route between two entries,
-// saved when both are built-ins. channel -1 for all.
+// saved when both are built-ins.
 void ui_mididev_toggle_patch(int from, int to, int channel);
-// The channel of the route between two entries: -2 none, -1 all, else 0..15
+// The channel of the route between two entries, or UI_MIDIDEV_NO_PATCH
 int  ui_mididev_patch_channel(int from, int to);
 
 // Saved patches (NVS)
@@ -775,6 +785,22 @@ bool ui_mididev_take_wanted(char* key, int len);
 
 void ui_mididev_tick(void);      // UI task: connection changes -> events
 void ui_mididev_cleanup(void);   // A script ended (any task)
+
+// --- Tempo ------------------------------------------------------------------------
+// The tempo is a MIDI device that sends clock (docs/TEMPO.md): a picoruby-midi
+// transport that only sends, routed like any other source (MIDI.route /
+// the MIDI Devices screen). Its clock runs at ui_get_bpm() -- the external
+// clock's in Sync mode -- while something is routed from it. Implemented in
+// ui_tempo.cpp.
+void    ui_tempo_init(void);          // UIManager::init: registers the transport
+void    ui_tempo_tick(void);          // UI task, every pass: timer on / off, period
+uint8_t ui_tempo_bit(void);           // Its transport bit, 0 if the registry was full
+void    ui_tempo_set_running(bool running);   // Sends Start (FA) / Stop (FC)
+bool    ui_tempo_running(void);
+void    ui_tempo_tap(void);           // One tap of TAP tempo
+bool    ui_tempo_sync(void);          // Following the external clock
+void    ui_tempo_set_sync(bool on);   // Only takes when an external clock is there
+void    ui_tempo_cleanup(void);       // A script ended (any task)
 
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);

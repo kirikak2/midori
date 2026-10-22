@@ -615,6 +615,38 @@ bool picoruby_ui_keys_is_pressed(int note)
     return ui_keys_is_pressed(note);
 }
 
+/* --- Tempo --- */
+
+int picoruby_ui_tempo_bit(void)
+{
+    return ui_tempo_bit();
+}
+
+void picoruby_ui_tempo_set_running(bool running)
+{
+    ui_tempo_set_running(running);
+}
+
+bool picoruby_ui_tempo_running(void)
+{
+    return ui_tempo_running();
+}
+
+void picoruby_ui_tempo_tap(void)
+{
+    ui_tempo_tap();
+}
+
+bool picoruby_ui_tempo_sync(void)
+{
+    return ui_tempo_sync();
+}
+
+void picoruby_ui_tempo_set_sync(bool on)
+{
+    ui_tempo_set_sync(on);
+}
+
 /* --- MIDI Devices --- */
 
 int picoruby_ui_mididev_register(const char *key, const char *name, int bit,

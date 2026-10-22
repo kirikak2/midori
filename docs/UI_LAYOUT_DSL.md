@@ -240,6 +240,7 @@ end
 | `xypad` | **1** | 96x64px | C 側のモデル（5 スロット）がシングルトン |
 | `tombola` | **1** | 96x96px | 物理モデルがシングルトン |
 | `keys` | **1** | 120x48px | 鍵盤のモデルがシングルトン（docs/KEYS.md） |
+| `tempo` | **1** | 120x72px | Tempo 画面（docs/TEMPO.md）をセルに。画面オブジェクトが 1 つ |
 | `sequencer` | 未定（当面 1） | 未定 | 7 章 |
 | `label`（追加候補） | 任意 | — | 静的テキスト / 値の表示用 |
 
@@ -295,6 +296,7 @@ knob  col:, row:, label:, color:, value:, min:, max:, step:, origin:, sensitivit
 xypad col:, row:, **UI::XYPad.new と同じキーワード          # => UI::XYPad
 tombola col:, row:, **UI::Tombola.new と同じキーワード      # => UI::Tombola
 keys  col:, row:, **UI::Keys.new と同じキーワード（keys: で既存を渡す）  # => UI::Keys
+tempo col:, row:                                                       # => UI::Tempo
 grid  col:, row:, cols:, rows:, gap:, padding: { ... }       # 入れ子
 ```
 
@@ -325,6 +327,7 @@ kick.state               # => true / false
 | `xypad` | 既存の `UI::XYPad` インスタンスそのもの（`slot` / `hold=` / `on_touch`） |
 | `tombola` | 既存の `UI::Tombola` インスタンスそのもの |
 | `keys` | 既存の `UI::Keys` インスタンスそのもの（`set_color` / `octave_up` / `on_note` …） |
+| `tempo` | `UI::Tempo`（クラスそのもの。`bpm` / `start` / `stop` …） |
 
 `layout.widgets` は定義順のハンドルの配列。
 

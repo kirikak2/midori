@@ -56,7 +56,7 @@ typedef struct {
                               2 patch / 3 unpatch / 4 connect / 5 disconnect */
     uint8_t mididev_from;  /* ...transport bit (the device for select / connect) */
     uint8_t mididev_to;    /* ...transport bit (patches) */
-    int8_t  mididev_channel; /* ...patches: 0..15, -1 all */
+    int8_t  mididev_channel; /* ...patches: 0..15, -1 all, -2 the clock alone */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -197,6 +197,15 @@ void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3);
 void picoruby_ui_keys_clear_lights(void);
 bool picoruby_ui_keys_is_lit(int note);
 bool picoruby_ui_keys_is_pressed(int note);
+
+/* Tempo (docs/TEMPO.md): a MIDI device that sends clock at the UI BPM.
+ * tempo_bit is its transport bit (0 when the registry was full). */
+int  picoruby_ui_tempo_bit(void);
+void picoruby_ui_tempo_set_running(bool running);
+bool picoruby_ui_tempo_running(void);
+void picoruby_ui_tempo_tap(void);
+bool picoruby_ui_tempo_sync(void);
+void picoruby_ui_tempo_set_sync(bool on);
 
 /* MIDI Devices (docs/UI_MIDI_DEVICES.md): the device list, the program's IN /
  * OUT and the saved patches. Devices are picoruby-midi transport bits; key

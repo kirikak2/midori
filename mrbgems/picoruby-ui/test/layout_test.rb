@@ -109,6 +109,13 @@ check_raises("one xypad per layout", "only one xypad") do
   end
 end
 
+check_raises("one tempo per layout", "only one tempo") do
+  UI::Layout.resolve(CORES3, cols: 2) do
+    tempo col: 0
+    tempo col: 1
+  end
+end
+
 check_raises("one keys per layout", "only one keys") do
   UI::Layout.resolve(CORES3, cols: 2) do
     keys col: 0
@@ -241,6 +248,7 @@ module UI
   def self._layout_add_knob(*a); $calls << [:knob] + a; @next_id += 1; @next_id - 1; end
   def self._layout_add_view(*a); $calls << [:view] + a; @next_id += 1; @next_id - 1; end
   def self._layout_commit; $calls << [:commit]; true; end
+  class Tempo; end
   def self._layout_delete(slot); $calls << [:delete, slot]; end
   def self._lw_knob_value(slot, id); $knob_values[[slot, id]] || 0.0; end
   def self._lw_knob_set_value(slot, id, v)
@@ -290,6 +298,15 @@ end
 check "keys goes over as a view of kind 4", [:view, 4, 0, 110, 320, 90], $calls[2]
 check "a given keyboard is used as is", true, played.widgets[1].equal?(given)
 played.delete
+
+$calls.clear
+clocked = UI.layout("Clock", cols: 2, gap: 0) do
+  tempo col: 0
+  knob col: 1, label: "BPM", min: 40, max: 240 do |v| v end
+end
+check "tempo goes over as a view of kind 5", [:view, 5, 0, 20, 160, 180], $calls[1]
+check "the tempo widget is UI::Tempo", UI::Tempo, clocked.widgets[0]
+clocked.delete
 
 mix = UI.layout("Mix") { |l| l.knob label: "Vol" }
 check "second layout gets slot 1", 1, mix.slot

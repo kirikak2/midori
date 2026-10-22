@@ -83,8 +83,11 @@ module UI
     def _mididev_save; true; end
     def _mididev_take_wanted; $wanted.shift; end
     def _mididev_serial; $serial; end
+    def _tempo_bit; 0x40; end
   end
 end
+
+load File.expand_path("../mrblib/ui_tempo.rb", File.dirname(__FILE__))
 
 load File.expand_path("../mrblib/ui_midi_devices.rb", File.dirname(__FILE__))
 
@@ -180,14 +183,21 @@ kd = M.send(:_device_for_bit, 0x20)
 check "bit transport", 0x20, MIDI.route_bit(kd)
 check "bit transport class", UI::MIDIDevices::BitTransport, kd.transport.class
 
+# The tempo's bit gives a device on UI::Tempo itself
+td = M.send(:_device_for_bit, 0x40)
+check "tempo device", UI::Tempo, td.transport
+check "tempo is routable by its bit", 0x40, MIDI.route_bit(UI::Tempo)
+
 # --- patches -----------------------------------------------------------------------
 
 $up = { 0x01 => true, 0x08 => true }
 M.patch(j6, MIDI::Device.new(AMY))
 MIDI.filter(j6, AMY) { |m| m }
 M.patch(j6, UART, channel: 9)
+M.patch(j6, kd, channel: :clock)
 list = M.patches
-check "patch count", 2, list.size
+check "patch count", 3, list.size
+check "patch clock only", :clock, list[2][:channel]
 check "patch from", j6, list[0][:from]
 check "patch to (amy)", 0x08, MIDI.route_bit(list[0][:to])
 check "patch active", true, list[0][:active]
@@ -196,7 +206,7 @@ check "patch channel", 9, list[1][:channel]
 check "patch inactive (UART down)", false, list[1][:active]
 
 M.unregister(UART)
-check "unregister drops patches to it", 1, M.patches.size
+check "unregister drops patches to it", 2, M.patches.size
 check "unregister drops entry", nil, $devs.index { |d| d[0] == 0x02 }
 
 # --- input follows the selection --------------------------------------------------------

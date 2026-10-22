@@ -18,6 +18,8 @@
 
 extern "C" {
 #include "midi.h"
+#include "midi_route.h"
+#include "midi_transport.h"
 }
 
 static const char* TAG = "UI_MANAGER";
@@ -45,9 +47,6 @@ UIManager::UIManager()
     , m_selectedExternalBpmSource(MIDI_INTERFACE_USB)
     , m_syncMode(false)
     , m_bpmChangeCallback(nullptr)
-    , m_bar(0)
-    , m_beat(0)
-    , m_beatProgress(0)
     , m_padEventCallback(nullptr)
 {
     for (int i = 0; i < UI_SCREEN_COUNT; i++) {
@@ -59,9 +58,10 @@ UIManager::UIManager()
         m_touchStates[i].x = 0;
         m_touchStates[i].y = 0;
     }
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < MIDI_INTERFACE_COUNT; i++) {
         m_externalBpmBySource[i] = 0.0f;
     }
+    m_clockWatch = 0;
 }
 
 UIManager::~UIManager()
@@ -81,6 +81,8 @@ esp_err_t UIManager::init()
     // buffer only fits there if it is taken while the heap is still whole.
     ui_strip::init();
     ui_layout::init();
+    // The tempo's clock is a MIDI device from the start (MIDI Devices, MIDI.route)
+    ui_tempo_init();
 
     // Initialize screens (placeholders for now)
     initScreens();
@@ -131,26 +133,33 @@ void UIManager::update()
     static uint32_t lastBpmUpdate = 0;
     uint32_t now = esp_timer_get_time() / 1000;  // Convert to ms
     if (now - lastBpmUpdate > 100) {
+        updateClockWatch();
+
         float usbBpm = MIDI_Input_get_external_bpm_usb();
         float samBpm = MIDI_Input_get_external_bpm_sam();
+        float devBpm = MIDI_Input_get_external_bpm_from(MIDI_TRANSPORT_USB_DEVICE);
 
         // Track if any source just started receiving BPM
         bool usbStarted = (m_externalBpmBySource[MIDI_INTERFACE_USB] <= 0.0f && usbBpm > 0.0f);
         bool samStarted = (m_externalBpmBySource[MIDI_INTERFACE_DIN] <= 0.0f && samBpm > 0.0f);
+        bool devStarted = (m_externalBpmBySource[MIDI_INTERFACE_USB_DEVICE] <= 0.0f && devBpm > 0.0f);
 
         setExternalBpmSource(MIDI_INTERFACE_USB, usbBpm);
         setExternalBpmSource(MIDI_INTERFACE_DIN, samBpm);
         // BLE not implemented yet
         setExternalBpmSource(MIDI_INTERFACE_BLE, 0.0f);
+        setExternalBpmSource(MIDI_INTERFACE_USB_DEVICE, devBpm);
 
         // Auto-select source if currently selected source has no BPM
         float currentSourceBpm = m_externalBpmBySource[m_selectedExternalBpmSource];
         if (currentSourceBpm <= 0.0f) {
-            // Try to find a source with BPM (prefer DIN > USB > BLE)
+            // Try to find a source with BPM (prefer DIN > USB host > USB device > BLE)
             if (samBpm > 0.0f) {
                 setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
             } else if (usbBpm > 0.0f) {
                 setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+            } else if (devBpm > 0.0f) {
+                setExternalBpmSourceSelection(MIDI_INTERFACE_USB_DEVICE);
             }
         }
         // Also auto-select when a new source starts receiving (prefer DIN)
@@ -158,6 +167,9 @@ void UIManager::update()
             setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
         } else if (usbStarted && m_selectedExternalBpmSource != MIDI_INTERFACE_DIN) {
             setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+        } else if (devStarted && m_selectedExternalBpmSource != MIDI_INTERFACE_DIN
+                   && m_selectedExternalBpmSource != MIDI_INTERFACE_USB) {
+            setExternalBpmSourceSelection(MIDI_INTERFACE_USB_DEVICE);
         }
 
         lastBpmUpdate = now;
@@ -175,6 +187,7 @@ void UIManager::update()
     // another screen.
     ui_tombola_tick();
     ui_mididev_tick();
+    ui_tempo_tick();
 
     // Update current screen. Not when a full repaint is pending (a screen
     // was just switched to, say): update() draws its incremental changes
@@ -560,6 +573,7 @@ void UIManager::scriptCleanup()
     ui_layout_cleanup();
     ui_keys_cleanup();
     ui_mididev_cleanup();
+    ui_tempo_cleanup();
     m_needsRedraw = true;
 }
 
@@ -626,9 +640,34 @@ float UIManager::getExternalBpm() const
     return m_externalBpm;
 }
 
+// The input task reads the USB device and the UART only while something is
+// routed from them, so their clock would go unmeasured. While the Tempo screen
+// is up or Sync is on, ask for every source that is there to be read.
+void UIManager::updateClockWatch()
+{
+    uint8_t want = 0;
+    if (m_currentIndex == UI_SCREEN_MAIN || m_syncMode) {
+#if CONFIG_USB_MIDI_HOST_ENABLED
+        want |= MIDI_TRANSPORT_USB;   // Read once a device is plugged in
+#endif
+        const uint8_t others[] = { MIDI_TRANSPORT_SAM2695, MIDI_TRANSPORT_USB_DEVICE };
+        for (uint8_t bit : others) {
+            const midi_transport_t* t = MIDI_transport_get(bit);
+            if (t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx)) want |= bit;
+        }
+    }
+    if (want == m_clockWatch) return;
+    uint8_t added = want & (uint8_t)~m_clockWatch;
+    m_clockWatch = want;
+    MIDI_route_set_watch(MIDI_WATCH_APP, want);
+    for (uint8_t bit = 1; bit; bit <<= 1) {
+        if (added & bit) MIDI_route_start_source(bit);
+    }
+}
+
 void UIManager::setExternalBpmSource(midi_interface_t source, float bpm)
 {
-    if (source < 0 || source > 2) return;
+    if (source < 0 || source >= MIDI_INTERFACE_COUNT) return;
     m_externalBpmBySource[source] = bpm;
 
     // Update main external BPM if this is the selected source
@@ -641,13 +680,13 @@ void UIManager::setExternalBpmSource(midi_interface_t source, float bpm)
 
 float UIManager::getExternalBpmBySource(midi_interface_t source) const
 {
-    if (source < 0 || source > 2) return 0.0f;
+    if (source < 0 || source >= MIDI_INTERFACE_COUNT) return 0.0f;
     return m_externalBpmBySource[source];
 }
 
 void UIManager::setExternalBpmSourceSelection(midi_interface_t source)
 {
-    if (source < 0 || source > 2) return;
+    if (source < 0 || source >= MIDI_INTERFACE_COUNT) return;
     m_selectedExternalBpmSource = source;
     m_externalBpm = m_externalBpmBySource[source];
     if (m_syncMode && m_currentIndex == UI_SCREEN_MAIN) {
@@ -674,6 +713,8 @@ void UIManager::setSyncMode(bool enabled)
                     setExternalBpmSourceSelection(MIDI_INTERFACE_DIN);
                 } else if (m_externalBpmBySource[MIDI_INTERFACE_USB] > 0.0f) {
                     setExternalBpmSourceSelection(MIDI_INTERFACE_USB);
+                } else if (m_externalBpmBySource[MIDI_INTERFACE_USB_DEVICE] > 0.0f) {
+                    setExternalBpmSourceSelection(MIDI_INTERFACE_USB_DEVICE);
                 } else if (m_externalBpmBySource[MIDI_INTERFACE_BLE] > 0.0f) {
                     setExternalBpmSourceSelection(MIDI_INTERFACE_BLE);
                 }
@@ -696,32 +737,6 @@ void UIManager::setBpmChangeCallback(bpm_change_cb_t cb)
     m_bpmChangeCallback = cb;
 }
 
-void UIManager::setBarBeat(uint32_t bar, uint8_t beat)
-{
-    m_bar = bar;
-    m_beat = beat;
-}
-
-void UIManager::setBeatProgress(uint8_t progress)
-{
-    if (progress > 23) progress = 23;
-    m_beatProgress = progress;
-}
-
-uint32_t UIManager::getBar() const
-{
-    return m_bar;
-}
-
-uint8_t UIManager::getBeat() const
-{
-    return m_beat;
-}
-
-uint8_t UIManager::getBeatProgress() const
-{
-    return m_beatProgress;
-}
 
 void UIManager::setPadEventCallback(pad_event_cb_t cb)
 {
@@ -806,15 +821,6 @@ void ui_set_bpm_change_callback(bpm_change_cb_t cb)
     UIManager::getInstance().setBpmChangeCallback(cb);
 }
 
-void ui_set_bar_beat(uint32_t bar, uint8_t beat)
-{
-    UIManager::getInstance().setBarBeat(bar, beat);
-}
-
-void ui_set_beat_progress(uint8_t progress)
-{
-    UIManager::getInstance().setBeatProgress(progress);
-}
 
 void ui_set_screen(ui_screen_index_t index)
 {

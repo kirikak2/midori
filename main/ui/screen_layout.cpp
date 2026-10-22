@@ -3,6 +3,7 @@
 #include "screen_xypad.h"
 #include "screen_tombola.h"
 #include "screen_keys.h"
+#include "screen_main.h"
 #include "ui_layout.h"
 #include "ui_strip.h"
 #include "ui_widgets.h"
@@ -22,7 +23,8 @@ static constexpr float SWEEP_RAD = UI_KNOB_ANGLE_SWEEP * 3.14159265f / 180.0f;
 
 static bool isView(uint8_t kind)
 {
-    return kind == UI_WIDGET_XYPAD || kind == UI_WIDGET_TOMBOLA || kind == UI_WIDGET_KEYS;
+    return kind == UI_WIDGET_XYPAD || kind == UI_WIDGET_TOMBOLA || kind == UI_WIDGET_KEYS
+        || kind == UI_WIDGET_TEMPO;
 }
 
 ScreenLayout::ScreenLayout()
@@ -32,6 +34,7 @@ ScreenLayout::ScreenLayout()
     , m_hasXYPad(false)
     , m_hasTombola(false)
     , m_hasKeys(false)
+    , m_hasTempo(false)
 {
     m_title[0] = '\0';
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
@@ -51,6 +54,7 @@ void ScreenLayout::attachViews(LayoutDef* def)
     m_hasXYPad = false;
     m_hasTombola = false;
     m_hasKeys = false;
+    m_hasTempo = false;
     if (!def) return;
 
     for (int i = 0; i < def->count; i++) {
@@ -67,6 +71,10 @@ void ScreenLayout::attachViews(LayoutDef* def)
             getScreenKeys().setArea(wd.x, wd.y, wd.w, wd.h);
             getScreenKeys().enter();
             m_hasKeys = true;
+        } else if (wd.kind == UI_WIDGET_TEMPO && !m_hasTempo) {
+            getScreenMain().setArea(wd.x, wd.y, wd.w, wd.h);
+            getScreenMain().enter();
+            m_hasTempo = true;
         }
     }
 }
@@ -89,6 +97,11 @@ void ScreenLayout::detachViews()
         getScreenKeys().leave();
         getScreenKeys().resetArea();
         m_hasKeys = false;
+    }
+    if (m_hasTempo) {
+        getScreenMain().leave();
+        getScreenMain().resetArea();
+        m_hasTempo = false;
     }
 }
 
@@ -184,6 +197,8 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
                 getScreenXYPad().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_KEYS) {
                 getScreenKeys().onTouch(t, m_lastX[t], m_lastY[t], false);
+            } else if (m_ownerKind[t] == UI_WIDGET_TEMPO) {
+                // Acts on press only: nothing held
             } else {
                 getScreenTombola().onTouch(t, m_lastX[t], m_lastY[t], false);
             }
@@ -238,6 +253,7 @@ void ScreenLayout::update()
     if (m_hasXYPad) getScreenXYPad().update();
     if (m_hasTombola) getScreenTombola().update();
     if (m_hasKeys) getScreenKeys().update();
+    if (m_hasTempo) getScreenMain().update();
 }
 
 void ScreenLayout::draw()
@@ -254,6 +270,7 @@ void ScreenLayout::draw()
     if (m_hasXYPad) getScreenXYPad().draw();
     if (m_hasTombola) getScreenTombola().draw();
     if (m_hasKeys) getScreenKeys().draw();
+    if (m_hasTempo) getScreenMain().draw();
 }
 
 // --- Touch ------------------------------------------------------------------
@@ -326,6 +343,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         if (kind == UI_WIDGET_XYPAD) getScreenXYPad().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_TOMBOLA) getScreenTombola().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_KEYS) getScreenKeys().onTouch(touchId, x, y, true);
+        if (kind == UI_WIDGET_TEMPO) getScreenMain().onTouch(touchId, x, y, true);
         return;
     }
 
@@ -346,6 +364,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         getScreenKeys().onTouch(touchId, x, y, false);
         return;
     }
+    if (kind == UI_WIDGET_TEMPO) return;
 
     ui_layout::lock();
     LayoutDef* def = ui_layout::get(m_slot);
@@ -391,6 +410,7 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         getScreenKeys().onTouchMove(touchId, x, y);
         return;
     }
+    if (kind == UI_WIDGET_TEMPO) return;
     if (kind != UI_WIDGET_KNOB) return;
 
     int dx = x - m_lastX[touchId];

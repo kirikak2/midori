@@ -7,6 +7,10 @@
 
 #include <M5Unified.h>
 
+// Tempo (the class keeps the old Main name for compatibility): the BPM, the
+// external clock source, Sync and TAP tempo (docs/TEMPO.md). The BPM itself is
+// set from Ruby (UI::Tempo.bpm) and its clock goes out through routes from the
+// tempo device (ui_tempo.cpp). A layout can show it in a cell (setArea).
 class ScreenMain : public Screen {
 public:
     ScreenMain();
@@ -21,55 +25,67 @@ public:
     const char* getNavCenterLabel() override;
     void getTileStatus(char* buf, int len) override;
 
+    // The rectangle to draw in: the content area on its own screen, a cell
+    // when a layout shows it. The layout sets it before enter() and puts it
+    // back (resetArea) before anything else can show this screen.
+    void setArea(int x, int y, int w, int h);
+    void resetArea();
+
 private:
-    // Button IDs
     enum ButtonId {
-        BTN_MINUS_10 = 0,
-        BTN_MINUS_1,
-        BTN_PLUS_1,
-        BTN_PLUS_10,
-        BTN_SYNC,
+        BTN_SYNC = 0,
+        BTN_PLAY,             // Start / Stop: sends MIDI Start (FA) / Stop (FC)
         BTN_SOURCE_USB,
         BTN_SOURCE_DIN,
         BTN_SOURCE_BLE,
+        BTN_SOURCE_USB_DEVICE,
         BTN_COUNT
     };
 
-    // Button definitions
-    struct Button {
+    struct Rect {
         int x, y, w, h;
-        const char* label;
-        bool pressed;
+        bool contains(int px, int py) const {
+            return px >= x && px < x + w && py >= y && py < y + h;
+        }
     };
 
-    Button m_buttons[BTN_COUNT];
+    struct Button {
+        Rect r;
+        const char* label;
+    };
+
+    int m_areaX, m_areaY, m_areaW, m_areaH;
     bool m_isActive;
     bool m_needsRedraw;
 
-    // TAP tempo state
-    uint32_t m_tapTimes[UI_TAP_TEMPO_SAMPLES];
-    int m_tapIndex;
-    int m_tapCount;
+    // Geometry, from the area (layoutView)
+    Rect m_bpmRect;       // BPM display; a tap there is a TAP tempo tap
+    int m_bpmTextSize;
+    int m_extY;
+    int m_extTextSize;
+    int m_buttonTextSize;
+    Button m_buttons[BTN_COUNT];
 
-    // Last drawn values (for partial updates)
-    float m_lastDrawnBpm;
-    float m_lastDrawnExternalBpm;
-    uint32_t m_lastDrawnBar;
-    uint8_t m_lastDrawnBeat;
-    uint8_t m_lastDrawnProgress;
-    bool m_lastDrawnSyncMode;
-    uint8_t m_lastDrawnExternalBpmSource;  // Track which source was last selected
-    int8_t m_lastSyncButtonState;  // 0=disabled, 1=off, 2=on (for avoiding unnecessary redraws)
-    int64_t m_lastExternalBpmDrawTime;  // For throttling external BPM display updates
+    // Source buttons shown, in order (board-dependent)
+    static constexpr int SOURCE_SLOTS = 4;
+    int m_sourceButtons[SOURCE_SLOTS];
+    int m_sourceCount;
 
-    void initButtons();
-    void drawTopArea();        // BPM buttons + BPM display + source buttons + external BPM (sprite-backed)
-    void drawSyncButton();
-    void drawBarBeat();
-    void drawBeatProgress();
-    int hitTestButton(int x, int y);
+    // What was drawn last, to repaint only on a visible change
+    int m_lastBpm;
+    int m_lastExt10;
+    uint32_t m_lastFlags;
+    int64_t m_lastExtDrawUs;
+
+    static const char* sourceLabel(int button);
+    static midi_interface_t sourceInterface(int button);
+
+    void layoutView();
+    uint32_t stateFlags() const;
+    void paint();
+    void render(LovyanGFX* g, int ox, int oy);
+    void renderPlay(LovyanGFX* g, int ox, int oy);
     void handleButtonPress(int buttonId);
-    void processTapTempo();
 };
 
 // Global instance
