@@ -5,8 +5,9 @@
 //   columns = devices with a MIDI OUT, then "Prog"
 //
 // A cell between two devices is a route in picoruby-midi's table -- tap to
-// patch / unpatch, hold for a channel or the clock alone. The Prog column picks the program's
-// IN, the Prog row its OUT. Hold a device's name for its details.
+// patch / unpatch, hold to pick what it passes (all, or any channels and / or the
+// clock). The Prog column picks the program's IN, the Prog row its OUT. Hold a
+// device's name for its details.
 
 #include "sdkconfig.h"
 #include "screen_midi_devices.h"
@@ -63,11 +64,16 @@ static constexpr uint16_t CELL_BG_A = 0x1082;
 static constexpr uint16_t CELL_BG_B = 0x18E3;
 static constexpr uint16_t PROG_COLOR = UI_COLOR_CYAN;
 
-// Channel picker: "All", "Clock", 1..16, "Off" on a 7 x 3 grid (two slots spare)
+// Channel picker: "All", "Clock", 1..16, "Off", "Done" on a 7 x 3 grid (one
+// slot spare). All and Off pick and close; Clock and the channels toggle, any
+// number of them, until Done (or a tap outside).
 static constexpr int PICK_COLS = 7;
 static constexpr int PICK_ROWS = 3;
+static constexpr int PICK_ALL = -1;
+static constexpr int PICK_CLOCK = -2;
 static constexpr int PICK_OFF = -3;
 static constexpr int PICK_NONE = -4;      // An empty slot
+static constexpr int PICK_DONE = -5;
 
 static void print_fit(const char* text, int maxChars)
 {
@@ -79,6 +85,36 @@ static void print_fit(const char* text, int maxChars)
     memcpy(buf, text, n);
     buf[n] = '\0';
     ui_gfx().print(buf);
+}
+
+// A patch's channels as "1-4,10" (1-based, runs of three or more as ranges),
+// then "clk" for the clock
+static void selection_label(uint32_t sel, char* buf, int len)
+{
+    int pos = 0;
+    buf[0] = '\0';
+    auto put = [&](const char* item) {
+        int n = snprintf(buf + pos, len - pos, "%s%s", pos ? "," : "", item);
+        if (n > 0) pos += n;
+        if (pos > len - 1) pos = len - 1;
+    };
+    char item[24];   // Room for any two ints, as -Wformat-truncation counts
+    for (int ch = 0; ch < 16; ch++) {
+        if (!(sel & (1u << ch))) continue;
+        int end = ch;
+        while (end + 1 < 16 && (sel & (1u << (end + 1)))) end++;
+        if (end - ch >= 2) {
+            snprintf(item, sizeof(item), "%d-%d", ch + 1, end + 1);
+            put(item);
+        } else {
+            for (int c = ch; c <= end; c++) {
+                snprintf(item, sizeof(item), "%d", c + 1);
+                put(item);
+            }
+        }
+        ch = end;
+    }
+    if (sel & MIDI_ROUTE_SEL_CLOCK) put("clk");
 }
 
 // The Prog header, "Prog(input)" / "Prog(output)": on one line when it fits the
@@ -208,9 +244,13 @@ uint32_t ScreenMidiDevices::signature() const
     mix(MIDI_route_sources());
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
         uint8_t src = 0, dst = 0;
-        int ch = 0;
-        if (MIDI_route_get(i, &src, &dst, &ch)) mix(src | (dst << 8) | ((ch & 0xFF) << 16));
-        else mix(0);
+        uint32_t sel = 0;
+        if (MIDI_route_get_selection(i, &src, &dst, &sel)) {
+            mix(src | (dst << 8));
+            mix(sel);
+        } else {
+            mix(0);
+        }
     }
     for (int bit = 1; bit < 0x100; bit <<= 1) mix(MIDI_route_filtered((uint8_t)bit));
     return h;
@@ -370,8 +410,8 @@ void ScreenMidiDevices::drawCell(int row, int col)
         return;
     }
 
-    int ch = ui_mididev_patch_channel(from, to);
-    if (ch == UI_MIDIDEV_NO_PATCH) {
+    uint32_t sel = ui_mididev_patch_selection(from, to);
+    if (sel == 0) {
         gfx.fillCircle(cx, cy, 1, UI_COLOR_DARKGRAY);
         return;
     }
@@ -384,15 +424,20 @@ void ScreenMidiDevices::drawCell(int row, int col)
     } else {
         gfx.drawCircle(cx, cy, r, UI_COLOR_GRAY);   // Patched, but an end is down
     }
-    // The channel (1..16), or "clk" for the clock alone
-    if (ch >= 0 || ch == MIDI_ROUTE_CLOCK_ONLY) {
-        char buf[4];
-        if (ch >= 0) snprintf(buf, sizeof(buf), "%d", (ch & 0x0F) + 1);
-        else snprintf(buf, sizeof(buf), "clk");
+    // The channels (1..16) and "clk" for the clock, unless it passes all
+    if (!(sel & MIDI_ROUTE_SEL_ALL)) {
+        char buf[64];
+        selection_label(sel, buf, sizeof(buf));
+        int maxChars = (g.cellW - 4) / 6;
+        int n = (int)strlen(buf);
+        if (maxChars >= 2 && n > maxChars) {   // Cut short: mark that there is more
+            buf[maxChars - 1] = '+';
+            buf[maxChars] = '\0';
+        }
         gfx.setTextSize(1);
         gfx.setTextColor(UI_COLOR_WHITE);
         gfx.setCursor(x + 2, y + g.cellH - 9);
-        gfx.print(buf);
+        print_fit(buf, maxChars);
         gfx.setTextSize(TEXT_SIZE);
     }
     // A Ruby filter (MIDI.filter) on this route
@@ -416,11 +461,24 @@ static void picker_rect(int* px, int* py, int* pw, int* ph)
 
 static int picker_value(int i)
 {
-    if (i == 0) return MIDI_ROUTE_ALL_CHANNELS;   // All
-    if (i == 1) return MIDI_ROUTE_CLOCK_ONLY;     // Clock (sync messages only)
+    if (i == 0) return PICK_ALL;
+    if (i == 1) return PICK_CLOCK;                // Clock (sync messages only)
     if (i <= 17) return i - 2;                    // 1..16
-    if (i == 18) return PICK_OFF;                 // Off
+    if (i == 18) return PICK_OFF;
+    if (i == PICK_COLS * PICK_ROWS - 1) return PICK_DONE;
     return PICK_NONE;
+}
+
+// Whether picker value v is part of selection sel (0: no patch)
+static bool picker_on(int v, uint32_t sel)
+{
+    switch (v) {
+    case PICK_ALL:   return (sel & MIDI_ROUTE_SEL_ALL) != 0;
+    case PICK_OFF:   return sel == 0;
+    case PICK_DONE:  return false;
+    case PICK_CLOCK: return !(sel & MIDI_ROUTE_SEL_ALL) && (sel & MIDI_ROUTE_SEL_CLOCK);
+    default:         return !(sel & MIDI_ROUTE_SEL_ALL) && (sel & (1u << v));
+    }
 }
 
 void ScreenMidiDevices::drawChannelPicker()
@@ -440,20 +498,22 @@ void ScreenMidiDevices::drawChannelPicker()
     gfx.setCursor(px + MARGIN, py + MARGIN);
     print_fit(title, (pw - 2 * MARGIN) / CHAR_W);
 
-    int current = ui_mididev_patch_channel(m_overlayFrom, m_overlayTo);
+    uint32_t current = ui_mididev_patch_selection(m_overlayFrom, m_overlayTo);
     for (int i = 0; i < PICK_COLS * PICK_ROWS; i++) {
         int bx = px + MARGIN + (i % PICK_COLS) * (PICK_BTN_W + MARGIN);
         int by = py + 2 * MARGIN + CHAR_H + (i / PICK_COLS) * (PICK_BTN_H + MARGIN);
         int v = picker_value(i);
         if (v == PICK_NONE) continue;
-        bool on = (v == PICK_OFF) ? (current == UI_MIDIDEV_NO_PATCH) : (current == v);
+        bool on = picker_on(v, current);
         uint16_t bg = on ? UI_COLOR_GREEN : UI_COLOR_BLACK;
         gfx.fillRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, bg);
-        gfx.drawRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_GRAY);
+        gfx.drawRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4,
+                          v == PICK_DONE ? (uint16_t)UI_COLOR_WHITE : (uint16_t)UI_COLOR_GRAY);
         char label[6];
-        if (v == MIDI_ROUTE_ALL_CHANNELS) snprintf(label, sizeof(label), "All");
-        else if (v == MIDI_ROUTE_CLOCK_ONLY) snprintf(label, sizeof(label), "Clock");
+        if (v == PICK_ALL) snprintf(label, sizeof(label), "All");
+        else if (v == PICK_CLOCK) snprintf(label, sizeof(label), "Clock");
         else if (v == PICK_OFF) snprintf(label, sizeof(label), "Off");
+        else if (v == PICK_DONE) snprintf(label, sizeof(label), "Done");
         else snprintf(label, sizeof(label), "%d", v + 1);
         int n = (int)strlen(label);
         gfx.setTextColor(on ? UI_COLOR_BLACK : UI_COLOR_WHITE, bg);
@@ -577,16 +637,33 @@ bool ScreenMidiDevices::hit(int x, int y, int* row, int* col) const
 void ScreenMidiDevices::tap(int x, int y)
 {
     if (m_overlay == OVERLAY_CHANNEL) {
-        int ch;
-        if (channelPickerHit(x, y, &ch)) {
-            int current = ui_mididev_patch_channel(m_overlayFrom, m_overlayTo);
-            if (ch == PICK_OFF) {
-                if (current != UI_MIDIDEV_NO_PATCH) ui_mididev_toggle_patch(m_overlayFrom, m_overlayTo, current);
-            } else if (current != ch) {
-                ui_mididev_toggle_patch(m_overlayFrom, m_overlayTo, ch);
-            }
+        int v;
+        if (!channelPickerHit(x, y, &v)) {
+            // Between the buttons: nothing; outside the picker: close it
+            int px, py, pw, ph;
+            picker_rect(&px, &py, &pw, &ph);
+            if (x >= px && x < px + pw && y >= py && y < py + ph) return;
+            m_overlay = OVERLAY_NONE;
+            m_needsRedraw = true;
+            return;
         }
-        m_overlay = OVERLAY_NONE;
+        uint32_t current = ui_mididev_patch_selection(m_overlayFrom, m_overlayTo);
+        bool close = true;
+        if (v == PICK_OFF) {
+            if (current != 0) ui_mididev_set_patch(m_overlayFrom, m_overlayTo, 0);
+        } else if (v == PICK_ALL) {
+            if (current != MIDI_ROUTE_SEL_ALL) ui_mididev_set_patch(m_overlayFrom, m_overlayTo, MIDI_ROUTE_SEL_ALL);
+        } else if (v != PICK_DONE) {
+            // Clock / a channel: toggled; All gives way to it. Toggling the
+            // last one off removes the patch.
+            uint32_t bit = (v == PICK_CLOCK) ? MIDI_ROUTE_SEL_CLOCK : (1u << v);
+            uint32_t base = (current & MIDI_ROUTE_SEL_ALL) ? 0 : current;
+            ui_mididev_set_patch(m_overlayFrom, m_overlayTo, base ^ bit);
+            close = false;
+        }
+        if (close) m_overlay = OVERLAY_NONE;
+        rebuild();
+        m_signature = signature();
         m_needsRedraw = true;
         return;
     }
@@ -613,9 +690,7 @@ void ScreenMidiDevices::tap(int x, int y)
         int from = g.rows[row];
         int to = g.cols[col];
         if (from == to) return;
-        int current = ui_mididev_patch_channel(from, to);
-        // A patch comes off whatever its channel; a new one is for all
-        ui_mididev_toggle_patch(from, to, current == UI_MIDIDEV_NO_PATCH ? MIDI_ROUTE_ALL_CHANNELS : current);
+        ui_mididev_toggle_patch(from, to);
     }
     rebuild();
     m_signature = signature();

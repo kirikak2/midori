@@ -1057,6 +1057,10 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
 - 詳細は [docs/AMY_SYNTH.md](docs/AMY_SYNTH.md) の「他デバイスからの入力を AMY へ繋ぐ」
 - `MIDI.route` は `MIDI::Route` を返す（失敗時は false）。`channel: :clock`（C では `MIDI_ROUTE_CLOCK_ONLY` = -2）で
   クロック・Start / Continue / Stop・ソングポジションだけを通す（MIDI Devices の長押しメニューの「Clock」）
+- ルートが通すものは内部では**集合**（`MIDI_ROUTE_SEL_*`: ビット 0〜15 = チャンネル、`SEL_CLOCK`、`SEL_ALL`。
+  ALL は単独）。`channel: [0, 9, :clock]` / `MIDI_route_add_selection()` で 1 件のルートに複数のチャンネルと
+  クロックを載せる。`MIDI_route_get()` の channel は複数なら `MIDI_ROUTE_SEVERAL`（-3）、集合は
+  `MIDI_route_get_selection()`。MIDI Devices の長押しメニューは All / Off 以外を複数選べる（2026-10-24）
 
 ### MIDI.filter / MIDI.on（2026-10-22）
 

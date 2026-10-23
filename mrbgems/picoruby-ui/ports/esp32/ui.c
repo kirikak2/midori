@@ -56,6 +56,7 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->mididev_from = 0;
     event->mididev_to = 0;
     event->mididev_channel = -1;
+    event->mididev_sel = 0;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -135,6 +136,7 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->mididev_from = ui_evt.data.mididev.from;
             event->mididev_to = ui_evt.data.mididev.to;
             event->mididev_channel = ui_evt.data.mididev.channel;
+            event->mididev_sel = ui_evt.data.mididev.sel;
             break;
         default:
             break;

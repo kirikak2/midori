@@ -55,8 +55,9 @@ md.unregister(dev)               # そのデバイスから / へのパッチ（
 md.patch(j6, amy)                # = MIDI.route(j6, amy)
 md.patch(j6, sam, channel: 9)
 md.patch(pc, sam, channel: :clock)  # クロックだけ
+md.patch(j6, amy, channel: [0, 9, :clock])  # チャンネル 1・10 とクロック（ルート 1 件）
 md.unpatch(j6, sam)              # = MIDI.unroute
-md.patches   # => [{from:, to:, channel: nil, active: true, filtered: false}, ...]（channel は 0..15 / nil = 全部 / :clock）
+md.patches   # => [{from:, to:, channel: nil, active: true, filtered: false}, ...]（channel は 0..15 / nil = 全部 / :clock / それらの Array）
 md.save      # 今の内蔵デバイス間のパッチと選択を NVS に保存（スクリプトの初期状態にする）
 
 md.midi_in  = j6                 # プログラムが使うデバイス（スクリプト限り。保存はしない）
@@ -70,7 +71,7 @@ md.active?(j6)                   # => 接続済みか（transport の is_connect
 
 md.on_change do |e|              # UI.process 経由
   # e[:kind] = :select_in / :select_out / :patch / :unpatch / :connect / :disconnect
-  # e[:device]（= e[:from]）/ e[:to] は MIDI::Device、e[:channel] は nil か 0..15
+  # e[:device]（= e[:from]）/ e[:to] は MIDI::Device、e[:channel] は nil / 0..15 / :clock / それらの Array
 end
 md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 ```
@@ -96,10 +97,17 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 
 - 行見出しの丸: 緑 = 接続済み、暗い灰色 = 未接続。列見出しの下の線: 緑 / 灰色 / **黄 = standby**（AMY 起動前）
 - パッチ: 送信元の色で塗った丸。**片端が未接続（または standby）なら灰色の輪**（要件 4 の表示）。
-  チャンネル指定は左下に `1`〜`16`、クロックだけなら `clk`、Ruby の filter があれば右上に黄色の `f`
+  チャンネル指定は左下に `1-4,10,clk` のように（3 つ以上続くチャンネルは範囲、クロックは `clk`。
+  セルに収まらなければ末尾を `+` で切る）、Ruby の filter があれば右上に黄色の `f`
 - **セルをタップ**: パッチの付け外し（新規は全チャンネル）。**長押し**: チャンネル選択
-  （All / **Clock** / 1〜16 / Off）。Clock はタイミングクロック・Start / Continue / Stop・
-  ソングポジションだけを通す（`MIDI.route(from, to, channel: :clock)`、NVS では `from>to:clock`）
+  （All / **Clock** / 1〜16 / Off / Done）。**Clock と 1〜16 は複数選べる**（タップで個別に入り切り。
+  All を選んでいたら外れる。最後の 1 つを切るとパッチごと外れる）。All と Off は選んだら閉じる。
+  Done かピッカーの外をタップで閉じる。変更はその場で反映・保存する。
+  Clock はタイミングクロック・Start / Continue / Stop・ソングポジションだけを通す
+  （`MIDI.route(from, to, channel: :clock)`）。複数選ぶとルート 1 件のチャンネル集合になる
+  （`channel: [0, 9, :clock]`、C では `MIDI_route_add_selection()` / `MIDI_ROUTE_SEL_*`）。
+  NVS では `from>to:clock` / `from>to:0+9+clock`（0 始まりのチャンネルを `+` でつなぐ。旧形式の
+  `from>to:9` もそのまま読める）
 - **Prog(input) 列**のタップで `midi_in`、**Prog(output) 行**で `midi_out` を選ぶ（もう一度タップで解除）。
   画面での選択は NVS に保存する（ユーザーの明示的な操作なので）
 - **見出しを長押し**: デバイス詳細（キー・ビット・状態・USB Host の製品名と EP・USB Device の
@@ -226,7 +234,7 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 ## 制約
 
 - 登録表は 8 ビット（USB Host / UART / USB Device / AMY / Keys で既に 5）。**同時に登録できるのは実質 8 台**
-- ルート表は 8 件（送信元 × チャンネルごとに 1 件、宛先はマスクで束ねる）
+- ルート表は 8 件（送信元 × チャンネル集合ごとに 1 件、宛先はマスクで束ねる）
 - 1 つのトランスポートを複数ケーブル・複数チャンネルに分けて別デバイスとして見せることはできない
 - `UI::MIDIDevices.input` の受信元は Prog(input) の選択 1 つ。スクリプトが自分で張った `MIDI.on(from, ...)` は
   固定の受信元を読み、選択には追従しない

@@ -56,7 +56,9 @@ typedef struct {
                               2 patch / 3 unpatch / 4 connect / 5 disconnect */
     uint8_t mididev_from;  /* ...transport bit (the device for select / connect) */
     uint8_t mididev_to;    /* ...transport bit (patches) */
-    int8_t  mididev_channel; /* ...patches: 0..15, -1 all, -2 the clock alone */
+    int8_t  mididev_channel; /* ...patches: 0..15, -1 all, -2 the clock alone,
+                                -3 several (mididev_sel) */
+    uint32_t mididev_sel;  /* ...patches: channel bits 0..15, 0x10000 the clock */
 } picoruby_ui_event_t;
 
 /* Event type constants */

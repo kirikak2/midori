@@ -446,7 +446,8 @@ typedef struct {
             uint8_t kind;    // For UI_EVENT_MIDI_DEVICES: ui_mididev_event_t
             uint8_t from;    // Transport bit (the device for select / connect)
             uint8_t to;      // Transport bit (patches)
-            int8_t  channel; // Patches: 0..15, or -1 for all
+            int8_t  channel; // Patches: 0..15, -1 all, -2 clock, -3 several (see sel)
+            uint32_t sel;    // Patches: MIDI_ROUTE_SEL_* (0 for the other kinds)
         } mididev;
     } data;
 } ui_event_t;
@@ -766,15 +767,17 @@ uint32_t ui_mididev_serial(void);                // Bumped on every change
 int  ui_mididev_selected(bool out);
 void ui_mididev_select(bool out, int index, bool save);
 
-// A patch's channel: 0..15, -1 (MIDI_ROUTE_ALL_CHANNELS) for everything, or
-// -2 (MIDI_ROUTE_CLOCK_ONLY) for the clock alone. UI_MIDIDEV_NO_PATCH: none.
-#define UI_MIDIDEV_NO_PATCH (-100)
+// What a patch passes is a route selection (midi_route.h): MIDI_ROUTE_SEL_ALL
+// for everything, else any of channels 0..15 (bits 0..15) and the clock
+// (MIDI_ROUTE_SEL_CLOCK). 0: no patch.
 
-// Patches from the screen (UI task): toggles the route between two entries,
-// saved when both are built-ins.
-void ui_mididev_toggle_patch(int from, int to, int channel);
-// The channel of the route between two entries, or UI_MIDIDEV_NO_PATCH
-int  ui_mididev_patch_channel(int from, int to);
+// Patches from the screen (UI task), saved when both are built-ins.
+// set_patch replaces the route between two entries (sel 0 removes it);
+// toggle_patch removes it, or patches everything when there is none.
+void ui_mididev_set_patch(int from, int to, uint32_t sel);
+void ui_mididev_toggle_patch(int from, int to);
+// What the routes between two entries pass, or 0
+uint32_t ui_mididev_patch_selection(int from, int to);
 
 // Saved patches (NVS)
 int  ui_mididev_restore(void);                   // Route them again; how many

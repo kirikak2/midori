@@ -19,7 +19,7 @@ module MIDI
     def _route_sources; 0x07 | 0x20; end   # + the on-screen keys
     def _route_get(i)
       r = $stub[:routes][i]
-      r ? [r[0], r[1], r[2]] : nil
+      r ? [r[0], r[1], r[2], r[3]] : nil
     end
     def _route_filtered(src)
       m = 0
@@ -204,6 +204,10 @@ check "patch active", true, list[0][:active]
 check "patch filtered", true, list[0][:filtered]
 check "patch channel", 9, list[1][:channel]
 check "patch inactive (UART down)", false, list[1][:active]
+M.patch(j6, UART, channel: [0, 9, :clock])
+check "patch several", [0, 9, :clock], M.patches[3][:channel]
+MIDI.unroute(j6, UART)
+M.patch(j6, UART, channel: 9)
 
 M.unregister(UART)
 check "unregister drops patches to it", 2, M.patches.size

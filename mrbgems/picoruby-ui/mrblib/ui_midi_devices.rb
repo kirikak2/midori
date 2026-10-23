@@ -288,8 +288,8 @@ module UI
       end
 
       # Every route between devices, as the screen shows it.
-      # @return [Array<Hash>] from:, to:, channel: (nil = all, :clock = clock only),
-      #   active:, filtered:
+      # @return [Array<Hash>] from:, to:, channel: (nil = all, 0..15, :clock =
+      #   clock only, or an Array of those for several), active:, filtered:
       def patches
         list = []
         i = 0
@@ -302,7 +302,7 @@ module UI
           while b < 0x100
             if (r[1] & b) != 0
               list << { from: _device_for_bit(r[0]), to: _device_for_bit(b),
-                        channel: r[2] == -2 ? :clock : (r[2] < 0 ? nil : r[2]),
+                        channel: MIDI._route_channel(r[2], r[3]),
                         active: MIDI._transport_connected?(r[0]) && MIDI._transport_connected?(b),
                         filtered: (filtered & b) != 0 }
             end
@@ -366,7 +366,8 @@ module UI
       # Selection, patch and connection changes. The block gets a Hash:
       # kind: (:select_in / :select_out / :patch / :unpatch / :connect /
       # :disconnect), device: / from: / to: (MIDI::Device), channel: (patches:
-      # 0..15, nil for all, :clock for the clock alone).
+      # 0..15, nil for all, :clock for the clock alone, an Array of those for
+      # several).
       def on_change(&block)
         UI.on(:midi_devices, &block)
       end

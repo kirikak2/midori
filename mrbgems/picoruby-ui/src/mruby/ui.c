@@ -215,10 +215,23 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             HSET(kind, mrb_symbol_value(kind));
             HSET(from, mrb_fixnum_value(event.mididev_from));
             HSET(to, mrb_fixnum_value(event.mididev_to));
-            /* 0..15, -1 all (nil), -2 the clock alone (:clock) */
-            HSET(channel, event.mididev_channel == -2 ? mrb_symbol_value(MRB_SYM(clock))
-                          : event.mididev_channel < 0 ? mrb_nil_value()
-                          : mrb_fixnum_value(event.mididev_channel));
+            /* 0..15, -1 all (nil), -2 the clock alone (:clock), -3 several
+             * ([0, 9, :clock]) */
+            mrb_value ch;
+            if (event.mididev_channel == -3) {
+                ch = mrb_ary_new(mrb);
+                for (int c = 0; c < 16; c++) {
+                    if (event.mididev_sel & (1u << c)) mrb_ary_push(mrb, ch, mrb_fixnum_value(c));
+                }
+                if (event.mididev_sel & 0x10000u) mrb_ary_push(mrb, ch, mrb_symbol_value(MRB_SYM(clock)));
+            } else if (event.mididev_channel == -2) {
+                ch = mrb_symbol_value(MRB_SYM(clock));
+            } else if (event.mididev_channel < 0) {
+                ch = mrb_nil_value();
+            } else {
+                ch = mrb_fixnum_value(event.mididev_channel);
+            }
+            HSET(channel, ch);
             break;
         }
         default:
