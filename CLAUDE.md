@@ -849,7 +849,7 @@ keys.show
 流用、Ruby は `:midi_devices`）。**実機未確認**。
 
 - 行 = MIDI IN（ルートの送信元）、列 = MIDI OUT のクロスバー。セル = `MIDI.route` のルート
-  （画面はルート表をそのまま読む）。最後の行・列 **Prog** でプログラムの OUT / IN を選ぶ
+  （画面はルート表をそのまま読む）。最後の列 **Prog(input)** / 行 **Prog(output)** でプログラムの IN / OUT を選ぶ
   （`UI::MIDIDevices.midi_out` / `.midi_in`、選択に追従する入力は `.input`）
 - モデルは [main/ui/ui_midi_devices.cpp](main/ui/ui_midi_devices.cpp)（デバイス一覧・選択・NVS `midi_devs`）。
   内蔵デバイスは**どのモードでも起動時に** `main_task_base.rb` の `setup_midi_devices` が登録し、
@@ -857,6 +857,10 @@ keys.show
   ビットではなく `usb_host` / `uart` / `usb_dev` / `amy` / `keys`（AMY と Keys のビットは起動ごとに変わる）
 - **AMY は standby**（ビット 0）で登録し、保存済みパッチ・選択・画面で必要になったとき初めて起動する
   （起動するとオーディオ・I2S・Tab5 の USB パッドに触るため）。画面の鍵盤は C（`ui_keys.cpp`）が自分で登録
+- `midi_out` / `midi_in` が返すのは**その時点で選ばれている機器**。変数やプレイヤに渡すと選び直しに
+  追従しないので、保持するなら `UI::MIDIDevices.output`（OUT に追従する `MIDI::Device`、切り替え時に前の OUT へ
+  All Notes Off）/ `.input` を使う。C から送るもの（`UI::Keys` / `UI::Tombola` の `device:`、`MIDI.route`、
+  `MIDI.start!(output:)` のクロック）はビットを覚えるので `on_change` の `:select_out` で渡し直す
 - 画面で変えたパッチ（両端が内蔵）と選択は即 NVS に保存。スクリプトの `patch` / `midi_in=` は
   スクリプト限り（`UI::MIDIDevices.save` で保存）
 - Ruby のホストテスト: `ruby test/midi_devices_test.rb`（picoruby-ui ディレクトリで）

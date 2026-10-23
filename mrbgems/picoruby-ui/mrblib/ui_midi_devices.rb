@@ -5,7 +5,11 @@
 #   M.patch(j6, amy)                  # MIDI.route, shown on the screen
 #   M.midi_in  = j6                   # the program's IN / OUT; the user may
 #   M.midi_out = amy                  # change them on the screen
-#   M.input.on(:note_on) { |m| M.midi_out&.note_on(m.note + 12, m.velocity) }
+#   M.input.on(:note_on) { |m| M.output.note_on(m.note + 12, m.velocity) }
+#
+# M.input / M.output follow the selection: keep them in a variable or hand
+# them to a player and they still reach whatever is picked later. What
+# midi_in / midi_out return is the device picked now and stays that device.
 #
 # Devices are picoruby-midi transports. The firmware's own (USB host, UART,
 # USB device, AMY, the on-screen keys) are registered at every start
@@ -18,6 +22,8 @@ $ui_mididev_devices = {}
 # built-in key => Proc giving its transport (or MIDI::Device)
 $ui_mididev_factories = {}
 $ui_mididev_input = nil
+$ui_mididev_output = nil
+$ui_mididev_hooked = false
 $ui_mididev_serial = -1
 
 module UI
@@ -119,6 +125,69 @@ module UI
         if bit != 0
           @handlers.each { |h| MIDI.on(bit, h[0], channel: h[1], &h[2]) }
           MIDI.reset_external_clock(bit)
+        end
+      end
+    end
+
+    # The transport of UI::MIDIDevices.output: sends to whichever device is
+    # selected as the OUT at the time of each message (nothing while none is).
+    # When the selection moves, the previous OUT gets All Notes Off on every
+    # channel, so a note started there does not hang when its note off goes
+    # to the new one.
+    class OutputTransport
+      def initialize
+        @serial = nil
+        @device = nil
+      end
+
+      # The OUT now (the selection is read again only when the model changed)
+      def device
+        _sync
+        @device
+      end
+
+      # Its bit: what trigger / trigger_batch and MIDI.route_bit see
+      def transport_id
+        dev = device
+        dev ? MIDI.route_bit(dev) : 0
+      end
+
+      def send_packet(cable, cin, midi1, midi2, midi3)
+        dev = device
+        dev ? dev.transport.send_packet(cable, cin, midi1, midi2, midi3) : 0
+      end
+
+      def connected?
+        dev = device
+        dev ? dev.connected? : false
+      end
+
+      def bytes_available
+        0
+      end
+
+      def read_available
+        nil
+      end
+
+      def device_info
+        dev = device
+        dev ? dev.info : "MIDI OUT (none selected)"
+      end
+
+      # Internal: catch up with the selection
+      def _sync
+        serial = UI._mididev_serial
+        return if serial == @serial
+        @serial = serial
+        dev = MIDIDevices.midi_out
+        old = @device
+        @device = dev
+        return if old.nil? || (dev && MIDI.route_bit(dev) == MIDI.route_bit(old))
+        ch = 0
+        while ch < 16
+          old.all_notes_off(channel: ch)
+          ch += 1
         end
       end
     end
@@ -270,10 +339,28 @@ module UI
       def input
         unless $ui_mididev_input
           $ui_mididev_input = Input.new
-          $__midi_filter_hooks__ << lambda { MIDIDevices._poll }
+          _hook
           $ui_mididev_input._sync
         end
         $ui_mididev_input
+      end
+
+      # The OUT as a MIDI::Device that follows the selection (see
+      # OutputTransport). Unlike midi_out, it can be kept:
+      #
+      #   out = UI::MIDIDevices.output
+      #   player = MIDI::MML::CombinedPlayer.new(out)
+      #   UI.pad(1) { out.trigger(36) }
+      #
+      # Objects that send from C (UI::Keys, UI::Tombola) take the device's bit
+      # when given it, so give those midi_out again from on_change instead.
+      def output
+        unless $ui_mididev_output
+          $ui_mididev_output = MIDI::Device.new(OutputTransport.new)
+          _hook
+          $ui_mididev_output.transport._sync
+        end
+        $ui_mididev_output
       end
 
       # Selection, patch and connection changes. The block gets a Hash:
@@ -297,6 +384,14 @@ module UI
         $ui_mididev_serial = serial
         service
         $ui_mididev_input._sync if $ui_mididev_input
+        $ui_mididev_output.transport._sync if $ui_mididev_output
+      end
+
+      # Follow the model from every run of the MIDI filters (once)
+      def _hook
+        return if $ui_mididev_hooked
+        $ui_mididev_hooked = true
+        $__midi_filter_hooks__ << lambda { MIDIDevices._poll }
       end
 
       def _device_for_bit(bit)

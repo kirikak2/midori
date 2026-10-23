@@ -81,6 +81,31 @@ static void print_fit(const char* text, int maxChars)
     ui_gfx().print(buf);
 }
 
+// The Prog header, "Prog(input)" / "Prog(output)": on one line when it fits the
+// box, else "Prog" over the "(input)" / "(output)". Centred in the box when
+// center, else from its left edge.
+static void print_prog(int x, int y, int w, int h, const char* suffix, bool center)
+{
+    auto& gfx = ui_gfx();
+    char one[24];
+    snprintf(one, sizeof(one), "Prog%s", suffix);
+    int maxChars = w / CHAR_W;
+    const char* lines[2] = { one, nullptr };
+    int count = 1;
+    if ((int)strlen(one) > maxChars) {
+        lines[0] = "Prog";
+        lines[1] = suffix;
+        count = 2;
+    }
+    int top = y + (h - count * CHAR_H) / 2;
+    for (int i = 0; i < count; i++) {
+        int n = (int)strlen(lines[i]);
+        if (n > maxChars) n = maxChars;
+        gfx.setCursor(center ? x + (w - n * CHAR_W) / 2 : x, top + i * CHAR_H);
+        print_fit(lines[i], maxChars);
+    }
+}
+
 ScreenMidiDevices::ScreenMidiDevices()
     : m_isActive(false)
     , m_needsRedraw(false)
@@ -257,14 +282,16 @@ void ScreenMidiDevices::drawGrid()
     // Column headers (OUT)
     for (int c = 0; c <= g.colCount; c++) {
         int x = g.x0 + c * g.cellW;
-        const char* label = "Prog";
-        uint16_t color = PROG_COLOR;
-        if (c < g.colCount) {
-            const ui_mididev_t& d = g.devs[g.cols[c]];
-            displayName(d, name, sizeof(name));
-            label = name;
-            color = isUp(d) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
+        if (c == g.colCount) {
+            // The program as a destination: picks its IN
+            gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
+            print_prog(x + 1, g.y0 - g.headerH, g.cellW - 2, g.headerH, "(input)", true);
+            continue;
         }
+        const ui_mididev_t& d = g.devs[g.cols[c]];
+        displayName(d, name, sizeof(name));
+        const char* label = name;
+        uint16_t color = isUp(d) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
         int n = (int)strlen(label);
         if (n > colChars) n = colChars;
         gfx.setTextColor(color, UI_COLOR_BLACK);
@@ -278,9 +305,9 @@ void ScreenMidiDevices::drawGrid()
         int y = g.y0 + r * g.cellH;
         int ty = y + (g.cellH - CHAR_H) / 2;
         if (r == g.rowCount) {
+            // The program as a source: picks its OUT
             gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
-            gfx.setCursor(MARGIN + 3 * DOT_R, ty);
-            gfx.print("Prog");
+            print_prog(MARGIN + 3 * DOT_R, y, nameChars * CHAR_W, g.cellH, "(output)", false);
             continue;
         }
         const ui_mididev_t& d = g.devs[g.rows[r]];

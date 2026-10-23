@@ -247,6 +247,50 @@ MIDI.run_filters
 check "non-source IN ignored", nil, inp.device
 check "nothing listened", false, $stub[:filters].key?([0x08, MIDI::DST_RUBY])
 
+# --- the OUT that follows the selection ---------------------------------------------------
+
+class RecTransport < FakeTransport
+  attr_reader :sent
+  def initialize(bit, info); super; @sent = []; end
+  def send_packet(cable, cin, b1, b2, b3); @sent << [cin, b1, b2, b3]; 0; end
+end
+
+SYN_A = RecTransport.new(0x40, "Synth A")
+SYN_B = RecTransport.new(0x80, "Synth B")
+M.register(SYN_A)
+M.register(SYN_B)
+
+$sel[1] = -1
+$serial += 1
+out = M.output
+check "output is kept", out, M.output
+check "no OUT: nowhere to send", 0, out.transport.transport_id
+check "no OUT: send is a no-op", 0, out.note_on(60, 100)
+
+$sel[1] = $devs.index { |d| d[0] == 0x40 }
+$serial += 1
+out.note_on(60, 100)
+check "sent to the OUT picked", [[0x9, 0x90, 60, 100]], SYN_A.sent
+check "its bit (trigger / route)", 0x40, MIDI.route_bit(out)
+check "info", "Synth A", out.info
+
+# the user picks another OUT: the kept device follows at once, and the old
+# OUT gets All Notes Off on every channel
+$sel[1] = $devs.index { |d| d[0] == 0x80 }
+$serial += 1
+out.note_off(60)
+check "now sent to the new OUT", [[0x8, 0x80, 60, 0]], SYN_B.sent
+check "old OUT: All Notes Off x16", 16, SYN_A.sent.count { |p| p[0] == 0xB && p[2] == 123 }
+check "old OUT: one per channel", (0..15).to_a, SYN_A.sent.select { |p| p[2] == 123 }.map { |p| p[1] & 0x0F }
+
+# a change found by the hook (no message sent in between) also releases
+SYN_B.sent.clear
+$sel[1] = -1
+$serial += 1
+MIDI.run_filters
+check "deselected: old OUT released from the hook", 16, SYN_B.sent.size
+check "deselected: nothing to send to", 0, out.transport.transport_id
+
 # --- events -----------------------------------------------------------------------------
 
 M.on_change { |e| e }

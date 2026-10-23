@@ -64,6 +64,7 @@ md.midi_out = amy
 md.midi_in                       # => MIDI::Device または nil（画面で変わるので毎回聞き直す）
 md.midi_out                      # standby の AMY が選ばれていればここで起動する
 md.input                         # 選択中の IN に追従する入力（後述）
+md.output                        # 選択中の OUT に追従する MIDI::Device（後述）
 md.devices                       # => 起動済みデバイスの MIDI::Device 配列
 md.active?(j6)                   # => 接続済みか（transport の is_connected）
 
@@ -81,15 +82,16 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 
 ## 画面
 
-クロスバー。行が IN（送信元になれるデバイス）、列が OUT（全デバイス）。最後の行と列が **Prog**。
+クロスバー。行が IN（送信元になれるデバイス）、列が OUT（全デバイス）。最後の列が **Prog(input)**（プログラムの IN を選ぶ）、最後の行が **Prog(output)**（OUT を選ぶ）。
+見出しが 1 行に収まらないとき（CrowPanel / CoreS3 の列幅など）は `Prog` と `(input)` / `(output)` の 2 行にする。
 
 ```
-              J-6  SAM  AMY   PC │Prog
+              J-6  SAM  AMY   PC │Prog(input)
 ● J-6          ─    ●    ●    ·  │ ◉
 ○ PC           ○    ·    ·    ─  │ ○
 ● Keys         ·    ·    ●    ·  │ ○
 ─────────────────────────────────┼────
-  Prog          ·   ◉    ·    ·  │
+  Prog(output)  ·   ◉    ·    ·  │
 ```
 
 - 行見出しの丸: 緑 = 接続済み、暗い灰色 = 未接続。列見出しの下の線: 緑 / 灰色 / **黄 = standby**（AMY 起動前）
@@ -98,7 +100,7 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 - **セルをタップ**: パッチの付け外し（新規は全チャンネル）。**長押し**: チャンネル選択
   （All / **Clock** / 1〜16 / Off）。Clock はタイミングクロック・Start / Continue / Stop・
   ソングポジションだけを通す（`MIDI.route(from, to, channel: :clock)`、NVS では `from>to:clock`）
-- **Prog 列**のタップで `midi_in`、**Prog 行**で `midi_out` を選ぶ（もう一度タップで解除）。
+- **Prog(input) 列**のタップで `midi_in`、**Prog(output) 行**で `midi_out` を選ぶ（もう一度タップで解除）。
   画面での選択は NVS に保存する（ユーザーの明示的な操作なので）
 - **見出しを長押し**: デバイス詳細（キー・ビット・状態・USB Host の製品名と EP・USB Device の
   TinyUSB 診断・filter キューの溢れ件数）。タップで閉じる
@@ -120,6 +122,31 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 ルート表は触らないので、再接続すればそのまま有効に戻る。接続状態は UI タスク
 （`ui_mididev_tick()`、250ms ごと）が見て、変化したら `:connect` / `:disconnect` を発行する。
 `midi_out` は未接続でも nil にしない（抜き差しでスクリプトの分岐が変わらないように）。
+
+## 選択に追従する出力（UI::MIDIDevices.output）
+
+`midi_out` が返すのは**その時点で選ばれている機器**の `MIDI::Device` で、変数に入れたり
+プレイヤに渡したりすると、あとで画面の Prog(output) 行を選び直しても古い機器へ送り続ける
+（2026-10-23 に bach_air.rb で発覚）。保持するなら `output` を使う。
+
+```ruby
+out = UI::MIDIDevices.output         # 何度呼んでも同じオブジェクト
+player = MIDI::MML::CombinedPlayer.new(out)
+UI.pad(1) { out.trigger(36) }
+xy = UI::XYPad.new(device: out)      # XYPad は Ruby から送るのでこれで追従する
+```
+
+- 中身は `OutputTransport`（Ruby）を包んだ `MIDI::Device`。送るたびにモデルの serial を見て、
+  変わっていれば `midi_out` を引き直す。`transport_id` も今の OUT のビットを返すので、
+  `trigger` / `trigger_batch`（C のスケジューラにビットで渡る）も今の OUT へ行く。
+  OUT が未選択の間は何も送らない（`transport_id` は 0）
+- OUT が替わったら、**前の OUT に全チャンネルの All Notes Off** を送る（前の OUT で鳴らした
+  ノートの note off が新しい OUT へ行って、鳴りっぱなしになるのを防ぐ）。何も送らない間の
+  切り替えも `input` と同じフック（`MIDI.run_filters` / `UI.process`）で拾う
+- **C から送る部品には効かない**: `UI::Keys` / `UI::Tombola` の `device:` と `MIDI.route` は、
+  渡された時点のビットを C に覚える。これらは `on_change` の `:select_out` で `midi_out` を
+  渡し直す（examples/keys.rb / tombola.rb）。`MIDI.start!(output:)` のクロックのルートも同じで、
+  examples/bach_air.rb は `MIDI::Clock` のルートを自分で張り直している
 
 ## 選択に追従する入力（UI::MIDIDevices.input）
 
@@ -201,6 +228,6 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 - 登録表は 8 ビット（USB Host / UART / USB Device / AMY / Keys で既に 5）。**同時に登録できるのは実質 8 台**
 - ルート表は 8 件（送信元 × チャンネルごとに 1 件、宛先はマスクで束ねる）
 - 1 つのトランスポートを複数ケーブル・複数チャンネルに分けて別デバイスとして見せることはできない
-- `UI::MIDIDevices.input` の受信元は Prog の選択 1 つ。スクリプトが自分で張った `MIDI.on(from, ...)` は
+- `UI::MIDIDevices.input` の受信元は Prog(input) の選択 1 つ。スクリプトが自分で張った `MIDI.on(from, ...)` は
   固定の受信元を読み、選択には追従しない
 - Freenove（画面なし）では一覧が空で、`midi_in` / `midi_out` は常に nil
