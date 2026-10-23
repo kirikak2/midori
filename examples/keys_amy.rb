@@ -17,10 +17,10 @@
 #   Knobs 画面（[Edit] で移動、ナビの Back で戻る）
 #     Amp A/D/S/R、Filter A/D/S/R、LFO Rate、Vibrato、LFO>Filter、Chorus
 #
-# - 鍵盤は device: に AMY のトランスポートを渡すだけで鳴る。発音は C 側
+# - 鍵盤は device: に OUT（始めは AMY）を渡すだけで鳴る。発音は C 側
 #   （UI タスク）なので、このスクリプトのループの速さに左右されない
-# - USB-MIDI Host に鍵盤を繋ぐと、その演奏も AMY で鳴り、画面の鍵が光る
-#   （MIDI.route で C から転送。Ruby は通らない）
+# - MIDI Devices 画面で選んだ IN（既定は USB-MIDI Host の鍵盤）の演奏も AMY で
+#   鳴り、画面の鍵が光る（MIDI.route で C から転送。Ruby は通らない）
 # - Patch ノブでプリセット（-1 = Init、0..127 = Juno-60）を変えると、
 #   ほかのノブがプリセットの値へ動く
 # - [Scale] で C メジャーペンタトニックの鍵に色を付ける（鍵ごとの色）
@@ -32,7 +32,11 @@ require 'ui'
 raise "AMY is not available on this board" unless MIDIDevices.amy
 
 syn = AMY::Synth.new(channel: 0, voices: 8)
-dev = MIDI::Device.new(syn.transport)
+
+# 鍵盤と CC のノブは MIDI Devices 画面で選ぶ OUT へ送る。始めは AMY。
+# 画面で OUT を別の音源にすると演奏はそちらへ行く（音色のノブは AMY のまま）
+md = UI::MIDIDevices
+md.midi_out = syn.transport
 
 CC_RESO   = 71
 CC_CUTOFF = 74
@@ -82,7 +86,7 @@ end
 # パッドのブロックから参照するので先に作り、レイアウトには keys: で渡す
 kb = UI::Keys.new(octaves: 3, low: 48,     # C3〜C6（37 鍵）
                   velocity: 100,
-                  device: syn.transport,
+                  device: md.midi_out,
                   press: :cyan,            # 指で押している鍵
                   light: :orange)          # 外部鍵盤で押されている鍵
 
@@ -101,11 +105,28 @@ show_scale = Proc.new do |on|
   end
 end
 
-# ---- 外部の USB-MIDI 鍵盤 → AMY と画面の鍵盤 ---------------------------------
-host = MIDIDevices.usb_midi_host
-if host
-  MIDI.route(host, syn.transport, channel: 0)   # ch 1 を AMY へ
-  MIDI.route(host, kb)                          # 全チャンネルで鍵を光らせる
+# ---- MIDI IN（外部の USB-MIDI 鍵盤など）→ AMY と画面の鍵盤 ----------------------
+# IN は MIDI Devices 画面で選ぶ（未選択なら USB-MIDI Host）。選び直したら張り直す
+md.midi_in ||= MIDIDevices.usb_midi_host
+routed_from = nil
+follow_in = Proc.new do
+  if routed_from
+    MIDI.unroute(routed_from, syn.transport)
+    MIDI.unroute(routed_from, kb)
+  end
+  routed_from = md.midi_in
+  if routed_from
+    MIDI.route(routed_from, syn.transport, channel: 0)   # ch 1 を AMY へ
+    MIDI.route(routed_from, kb)                          # 全チャンネルで鍵を光らせる
+  end
+end
+follow_in.call
+
+md.on_change do |e|
+  case e[:kind]
+  when :select_in  then follow_in.call
+  when :select_out then kb.device = md.midi_out
+  end
 end
 
 # ---- レイアウト ----------------------------------------------------------------
@@ -130,10 +151,10 @@ play = UI.layout("AMY Keys", cols: 6, rows: [2, 1, 3]) do
     end
   end
   knob col: 1, id: :cutoff, label: "Cutoff", color: :cyan, value: 100 do |v|
-    dev.control_change(CC_CUTOFF, v.to_i)
+    md.midi_out&.control_change(CC_CUTOFF, v.to_i)
   end
   knob col: 2, id: :reso, label: "Reso", color: :cyan, value: 0 do |v|
-    dev.control_change(CC_RESO, v.to_i)
+    md.midi_out&.control_change(CC_RESO, v.to_i)
   end
   knob col: 3, id: :fenv, label: "Flt Env", color: :cyan, value: 0 do |v|
     syn.filter_env = v / 127.0 * FENV_MAX
@@ -226,8 +247,7 @@ UI.menu(only: [:layout, :knobs, :keys, :tempo])
 play.show
 
 sm = ScriptManager.new
-loop do
-  break if sm.stop_requested?
+until sm.stop_requested?
   UI.process
-  sleep_ms 10
+  MIDI.sleep_ms(10)
 end

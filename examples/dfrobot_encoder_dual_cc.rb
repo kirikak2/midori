@@ -96,9 +96,8 @@ class EncoderChannel
   # @param enc [DFRobotRotaryEncoder]
   # @param params [Array<CCParam>] 1..2 個
   # @param pad_index [Integer] 状態表示に使う UI パッド番号
-  def initialize(enc:, device:, index:, params:, pad_index:, channel:)
+  def initialize(enc:, index:, params:, pad_index:, channel:)
     @enc = enc
-    @device = device
     @index = index
     @params = params
     @pad_index = pad_index
@@ -123,7 +122,7 @@ class EncoderChannel
   def start
     j = 0
     while j < @params.size
-      @device.control_change(@params[j].cc, @params[j].value, channel: @channel)
+      UI::MIDIDevices.midi_out&.control_change(@params[j].cc, @params[j].value, channel: @channel)
       j += 1
     end
     activate
@@ -134,7 +133,7 @@ class EncoderChannel
   # LED リングがそのパラメータの値を指すようになる。
   def activate
     @enc.value = to_value(param.value)
-    @device.control_change(param.cc, param.value, channel: @channel)
+    UI::MIDIDevices.midi_out&.control_change(param.cc, param.value, channel: @channel)
     UI.pad_label(@pad_index, param.label)
     UI.pad_color(@pad_index, color)
   end
@@ -174,22 +173,23 @@ class EncoderChannel
     cc = to_cc(v)
     if cc != param.value
       param.value = cc
-      @device.control_change(param.cc, cc, channel: @channel)
+      UI::MIDIDevices.midi_out&.control_change(param.cc, cc, channel: @channel)
     end
   end
 end
 
-# ---- 出力先 (USB-MIDI Device / USB-C) --------------------------------
-usb = MIDIDevices.usb_midi_device
-unless usb
-  UI.log("USB-MIDI Device not available on this board")
-  exit
+# ---- 出力先 ----------------------------------------------------------
+# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI Device (USB-C)。
+md = UI::MIDIDevices
+md.midi_out ||= MIDIDevices.usb_midi_device
+unless md.midi_out
+  UI.log("No MIDI output available")
+  return
 end
-device = MIDI::Device.new(usb)
 
 unless BoardConfig::HAS_PRIMARY_I2C
   UI.log("primary I2C not available on this board")
-  exit
+  return
 end
 
 # ---- エンコーダ検出 (プライマリ I2C) ---------------------------------------------
@@ -223,7 +223,7 @@ while a < ADDRS.size
     else
       idx = chans.size
       chans << EncoderChannel.new(
-        enc: e, device: device, index: idx,
+        enc: e, index: idx,
         params: params, pad_index: ENC_PAD_BASE + idx, channel: CH
       )
       UI.log(sprintf("0x%02x -> enc%d %d param(s)", ADDRS[a], idx, params.size))
@@ -237,7 +237,7 @@ if N == 0
   UI.log("no encoder found on 0x54-0x57")
   UI.log("-> check DIP switch / wiring (i2c_scan.rb)")
 else
-  UI.log("#{N} encoder(s)  ch#{CH + 1}  -> USB-MIDI")
+  UI.log("#{N} encoder(s)  ch#{CH + 1}  -> #{md.midi_out.info}")
 end
 
 # ---- エンコーダ状態表示パッド (1-4) ----------------------------------
@@ -259,36 +259,39 @@ end
 # パッド 5-12 に C4 から E5 まで。PARAM_COLORS の青/緑はパラメータ表示用に
 # 予約しているので、ここでは使わない。
 UI.pad(5, label: "C4", color: :red, type: :momentary) do |on|
-  on ? device.note_on(60, NOTE_VELOCITY, channel: CH) : device.note_off(60, channel: CH)
+  on ? md.midi_out&.note_on(60, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(60, channel: CH)
 end
 UI.pad(6, label: "D4", color: :orange, type: :momentary) do |on|
-  on ? device.note_on(62, NOTE_VELOCITY, channel: CH) : device.note_off(62, channel: CH)
+  on ? md.midi_out&.note_on(62, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(62, channel: CH)
 end
 UI.pad(7, label: "E4", color: :yellow, type: :momentary) do |on|
-  on ? device.note_on(64, NOTE_VELOCITY, channel: CH) : device.note_off(64, channel: CH)
+  on ? md.midi_out&.note_on(64, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(64, channel: CH)
 end
 UI.pad(8, label: "G4", color: :cyan, type: :momentary) do |on|
-  on ? device.note_on(67, NOTE_VELOCITY, channel: CH) : device.note_off(67, channel: CH)
+  on ? md.midi_out&.note_on(67, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(67, channel: CH)
 end
 UI.pad(9, label: "A4", color: :magenta, type: :momentary) do |on|
-  on ? device.note_on(69, NOTE_VELOCITY, channel: CH) : device.note_off(69, channel: CH)
+  on ? md.midi_out&.note_on(69, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(69, channel: CH)
 end
 UI.pad(10, label: "C5", color: :purple, type: :momentary) do |on|
-  on ? device.note_on(72, NOTE_VELOCITY, channel: CH) : device.note_off(72, channel: CH)
+  on ? md.midi_out&.note_on(72, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(72, channel: CH)
 end
 UI.pad(11, label: "D5", color: :white, type: :momentary) do |on|
-  on ? device.note_on(74, NOTE_VELOCITY, channel: CH) : device.note_off(74, channel: CH)
+  on ? md.midi_out&.note_on(74, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(74, channel: CH)
 end
 UI.pad(12, label: "E5", color: :gray, type: :momentary) do |on|
-  on ? device.note_on(76, NOTE_VELOCITY, channel: CH) : device.note_off(76, channel: CH)
+  on ? md.midi_out&.note_on(76, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(76, channel: CH)
 end
 
 # ---- メインループ ----------------------------------------------------
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
   i = 0
   while i < N
     chans[i].poll
     i += 1
   end
+
+  MIDI.sleep_ms(20)
 end

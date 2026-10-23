@@ -87,8 +87,8 @@ else
 end
 ```
 
-サンプル: [`examples/usb_midi_device_pad.rb`](../examples/usb_midi_device_pad.rb)
-（Tab5 の USB-C を PC に接続し、パッドのタップを MIDI Note として送信）。
+サンプル: [`examples/pad.rb`](../examples/pad.rb)（MIDI Devices 画面で OUT に PC を選ぶと、
+パッドのタップが USB-C の先の PC へ MIDI Note として届く）。
 PC 側の確認例: `aseqdump -p "Midori MIDI"`（Linux）。
 
 ## 従来の方法（互換性のため残存）

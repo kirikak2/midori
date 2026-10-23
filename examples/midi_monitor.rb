@@ -1,31 +1,28 @@
 # midi_monitor.rb
-# USB-MIDI と SAM2695 から入ってくる MIDI 信号をすべてキャプチャして
-# UI ログに出力する汎用モニタ。
+# MIDI Devices 画面で選んだ IN に入ってくる MIDI 信号をキャプチャして
+# UI ログに出力する汎用モニタ。見る機器は画面の Prog(input) 列でいつでも選び直せる。
 #
 # 対応イベント:
 #   Channel Voice   : note_on / note_off / control_change / program_change
 #                     pitch_bend / poly_aftertouch / channel_pressure
-#   System Common   : system_reset
-#   System Real-time: start / stop / continue
-#                     (clock と active_sensing はログが溢れるので既定では抑制)
-#   System Exclusive: sysex — event[:data] に F0..F7 を含む Array<Integer>。
-#                     MIDI_SYSEX_MAX_LEN (512B) を超えた場合は event[:truncated]
-#                     が true で、末尾が切り詰められる。
+#   System Real-time: start / stop / continue / system_reset
+#                     (clock はログが溢れるので既定では抑制)
 
 require 'midi'
 require 'ui'
 
-sam = MIDIDevices.sam2695
-usb = MIDIDevices.usb_midi_host
+md = UI::MIDIDevices
 
-unless sam || usb
-  UI.log("No MIDI input available on this board")
-  exit
-end
+# 未選択ならここで決める（画面で選び直せる）
+md.midi_in ||= MIDIDevices.usb_midi_host || MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
 
 UI.log("MIDI Monitor started")
 UI.log("Board: #{BoardConfig::BOARD_NAME}")
-UI.log("SAM2695: #{sam ? 'ON' : '--'}  USB-MIDI: #{usb ? 'ON' : '--'}")
+UI.log("IN: #{md.midi_in ? md.midi_in.info : '- (select one on the MIDI Devices screen)'}")
+
+md.on_change do |e|
+  UI.log("IN: #{e[:device] ? e[:device].info : '-'}") if e[:kind] == :select_in
+end
 
 # ---- 表示ヘルパ --------------------------------------------------------
 
@@ -35,101 +32,54 @@ def note_label(n)
   "#{NOTE_NAMES[n % 12]}#{(n / 12) - 1}(#{n})"
 end
 
-def hex2(n)
-  s = n.to_s(16).upcase
-  s.length < 2 ? "0#{s}" : s
-end
-
-# SysEx などのバイト列を "F0 7E 7F 06 01 F7" 形式に整形
-def hex_dump(bytes)
-  return "(empty)" if bytes.nil? || bytes.empty?
-  out = ""
-  bytes.each_with_index do |b, i|
-    out << " " unless i == 0
-    out << hex2(b)
-  end
-  out
-end
-
 # ---- ログ用タグ設定 ----------------------------------------------------
 #
 # LOG_CLOCK を true にすると大量の 0xF8 までログに出る（デバッグ用）。
-# Active Sensing は既定で送信側が出力しない想定なので対応不要。
 LOG_CLOCK = false
 
 # ---- ハンドラ ----------------------------------------------------------
+#
+# md.input は選んだ IN に追従する。ハンドラが受け取る m は MIDI::Message で、
+# m.source が受信元（:usb_host / :uart / :usb_dev など）。
 
-def install_handlers(input, tag)
-  input.on(:note_on) do |e|
-    UI.log("#{tag} NoteOn  ch=#{e[:channel]} #{note_label(e[:note])} vel=#{e[:velocity]}")
-  end
+inp = md.input
 
-  input.on(:note_off) do |e|
-    UI.log("#{tag} NoteOff ch=#{e[:channel]} #{note_label(e[:note])} vel=#{e[:velocity]}")
-  end
-
-  input.on(:control_change) do |e|
-    UI.log("#{tag} CC      ch=#{e[:channel]} cc=#{e[:cc]} val=#{e[:value]}")
-  end
-
-  input.on(:program_change) do |e|
-    UI.log("#{tag} PC      ch=#{e[:channel]} program=#{e[:program]}")
-  end
-
-  input.on(:pitch_bend) do |e|
-    UI.log("#{tag} PB      ch=#{e[:channel]} value=#{e[:value]}")
-  end
-
-  input.on(:poly_aftertouch) do |e|
-    UI.log("#{tag} PAT     ch=#{e[:channel]} #{note_label(e[:note])} pressure=#{e[:pressure]}")
-  end
-
-  input.on(:channel_pressure) do |e|
-    UI.log("#{tag} CPress  ch=#{e[:channel]} pressure=#{e[:pressure]}")
-  end
-
-  input.on(:start)    { UI.log("#{tag} >> Start")    }
-  input.on(:stop)     { UI.log("#{tag} >> Stop")     }
-  input.on(:continue) { UI.log("#{tag} >> Continue") }
-
-  input.on(:system_reset) do
-    UI.log("#{tag} >> SystemReset")
-  end
-
-  if LOG_CLOCK
-    input.on(:clock) { UI.log("#{tag} .clock") }
-  end
-
-  # SysEx: event[:data] に F0..F7 の Array<Integer> が入る
-  input.on(:sysex) do |e|
-    bytes = e[:data]
-    mark = e[:truncated] ? " TRUNC" : ""
-    UI.log("#{tag} SysEx#{mark} len=#{bytes ? bytes.length : 0} [#{hex_dump(bytes)}]")
-  end
-
-  # 未知のイベント型が来たら :any で拾ってデバッグ出力
-  input.on(:any) do |e|
-    known = [:note_on, :note_off, :control_change, :program_change,
-             :pitch_bend, :poly_aftertouch, :channel_pressure,
-             :start, :stop, :continue, :system_reset, :sysex]
-    known << :clock if LOG_CLOCK
-    unless known.include?(e[:type])
-      UI.log("#{tag} ?#{e[:type]} #{e.inspect}")
-    end
-  end
+inp.on(:note_on) do |m|
+  UI.log("#{m.source} NoteOn  ch=#{m.channel} #{note_label(m.note)} vel=#{m.velocity}")
 end
 
-sam_input = nil
-usb_input = nil
-
-if sam
-  sam_input = MIDI::Input.new(MIDI::Device.new(sam))
-  install_handlers(sam_input, "SAM")
+inp.on(:note_off) do |m|
+  UI.log("#{m.source} NoteOff ch=#{m.channel} #{note_label(m.note)} vel=#{m.velocity}")
 end
 
-if usb
-  usb_input = MIDI::Input.new(MIDI::Device.new(usb))
-  install_handlers(usb_input, "USB")
+inp.on(:control_change) do |m|
+  UI.log("#{m.source} CC      ch=#{m.channel} cc=#{m.cc} val=#{m.value}")
+end
+
+inp.on(:program_change) do |m|
+  UI.log("#{m.source} PC      ch=#{m.channel} program=#{m.program}")
+end
+
+inp.on(:pitch_bend) do |m|
+  UI.log("#{m.source} PB      ch=#{m.channel} value=#{m.value}")
+end
+
+inp.on(:poly_aftertouch) do |m|
+  UI.log("#{m.source} PAT     ch=#{m.channel} #{note_label(m.note)} pressure=#{m.value}")
+end
+
+inp.on(:channel_pressure) do |m|
+  UI.log("#{m.source} CPress  ch=#{m.channel} pressure=#{m.value}")
+end
+
+# System Real-time は名前を指定したときだけ届く
+inp.on(:start)        { |m| UI.log("#{m.source} >> Start")       }
+inp.on(:stop)         { |m| UI.log("#{m.source} >> Stop")        }
+inp.on(:continue)     { |m| UI.log("#{m.source} >> Continue")    }
+inp.on(:system_reset) { |m| UI.log("#{m.source} >> SystemReset") }
+
+if LOG_CLOCK
+  inp.on(:clock) { |m| UI.log("#{m.source} .clock") }
 end
 
 # ---- UI --------------------------------------------------------------
@@ -141,7 +91,8 @@ end
 
 # ---- メインループ ----------------------------------------------------
 
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
-  # 入力イベントは MIDI.bpm_loop が自動で dispatch する
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
+  MIDI.sleep_ms(10)    # ハンドラはここ（と UI.process）で呼ばれる
 end

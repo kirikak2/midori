@@ -377,7 +377,10 @@ script.
 
 ### Examples
 
-Ready-to-run scripts are in [examples/](examples/):
+Ready-to-run scripts are in [examples/](examples/). They play through the
+OUT and listen to the IN picked on the MIDI Devices screen
+(`UI::MIDIDevices.midi_out` / `.midi_in`), falling back to a board default
+when none is picked, so the same script works with whatever is plugged in.
 
 | Script | What it does |
 |--------|--------------|
@@ -393,8 +396,11 @@ Ready-to-run scripts are in [examples/](examples/):
 | [amy_fm.rb](examples/amy_fm.rb) / [amy_synth.rb](examples/amy_synth.rb) | Play the built-in synth from pads, XY pad, knobs and a USB keyboard |
 | [bach_air.rb](examples/bach_air.rb) | MML playback |
 | [midi_monitor.rb](examples/midi_monitor.rb) | Log every incoming MIDI message |
-| [launch_control_xl.rb](examples/launch_control_xl.rb) / [seaboard_blocks.rb](examples/seaboard_blocks.rb) / [midi_to_lumi.rb](examples/midi_to_lumi.rb) | Device-specific controllers |
-| [dfrobot_encoder_cc.rb](examples/dfrobot_encoder_cc.rb) | Hardware rotary encoders as CC knobs |
+| [midi_devices.rb](examples/midi_devices.rb) | Play through the IN / OUT picked on the MIDI Devices screen |
+| [midi_filter.rb](examples/midi_filter.rb) | Route a keyboard to a synth, rewriting its notes in Ruby |
+| [tempo.rb](examples/tempo.rb) / [tempo_keys.rb](examples/tempo_keys.rb) | Send the tempo as MIDI clock, with a BPM knob |
+| [seaboard_blocks.rb](examples/seaboard_blocks.rb) / [midi_to_lumi.rb](examples/midi_to_lumi.rb) | Device-specific controllers |
+| [dfrobot_encoder_cc.rb](examples/dfrobot_encoder_cc.rb) / [dfrobot_encoder_dual_cc.rb](examples/dfrobot_encoder_dual_cc.rb) | Hardware rotary encoders as CC knobs |
 
 ## Architecture
 

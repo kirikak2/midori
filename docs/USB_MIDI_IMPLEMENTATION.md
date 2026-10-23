@@ -377,7 +377,6 @@ API 一覧は [MIDI_DEVICES.md](MIDI_DEVICES.md) を参照。
 - `mrbgems/picoruby-usb_midi_device/src/mrubyc/usb_midi_device.c`:
   mruby/c バインディング（`USB_MIDI_DEVICE` クラス）
 - `mrbgems/picoruby-usb_midi_device/mrblib/usb_midi_device.rb`: Ruby API
-- `examples/usb_midi_device_pad.rb`: 動作確認サンプル
 
 ## 関連ファイル
 

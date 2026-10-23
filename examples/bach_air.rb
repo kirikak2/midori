@@ -9,14 +9,16 @@ require "ui"
 
 UI.log("Loading Bach Suite No.3 - Air...")
 
-# Use pre-initialized SAM2695 device from MIDIDevices module
-sam = MIDIDevices.sam2695
-unless sam
-  puts "SAM2695 not available on this board"
-  exit
+# 演奏先は MIDI Devices 画面で選んだ OUT（未選択なら SAM2695）。
+# md.output は選択に追従する MIDI::Device なので、演奏中に OUT を選び直すと
+# そちらで鳴る（md.midi_out はその時点の機器のまま変わらない）
+md = UI::MIDIDevices
+md.midi_out ||= MIDIDevices.sam2695
+unless md.midi_out
+  puts "No MIDI output available"
+  return
 end
-
-device = MIDI::Device.new(sam)
+device = md.output
 
 # ===== MML Sequences =====
 
@@ -45,11 +47,29 @@ continuo2_mml = <<~MML
   r2 o2 d8 o3 d8 c+8 o2 c+8 o1 b8 o2 b8 a8 o1 a8 g8 o2 g8 g+8 o1 g+8 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 e8 o1 e8 d+8 o2 d+8 o1 b8 o2 b8 o1 e8 o2 e8 d8 o1 d8 c+8 o2 c+8 o1 g8 o2 a8 d8 o3 d8 c+8 o2 c+8 o1 b8 o2 b8 g+8 e8 a8 d8 e8 o1 e8 a16 b16 o2 c+16 d16 e16 g16 f+16 e16 d8 o3 d8 c+8 o2 c+8 o1 b8 o2 b8 a8 o1 a8 g8 o2 g8 g+8 o1 g+8 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 e8 o1 e8 d+8 o2 d+8 o1 b8 o2 b8 o1 e8 o2 e8 d8 o1 d8 c+8 o2 c+8 o1 g8 o2 a8 d8 o3 d8 c+8 o2 c+8 o1 b8 o2 b8 g+8 e8 a8 d8 e8 o1 e8 a16 b16 o2 c+16 d16 e16 g16 f+16 e16 o1 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 e8 o1 e8 d+8 o2 d+8 f+8 o1 b8 o2 e8 o3 e8 d8 o2 d8 c+8 o3 c+8 o2 b8 o1 b8 a+8 b8 o2 c+8 o1 a+8 b8 o2 g8 e8 f+8 o1 b8 o2 b8 a8 o1 a8 g+8 o2 g+8 f+8 o1 f+8 e8 o2 e8 d8 o1 d8 c+8 o2 c+8 d8 e8 o1 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 g8 o1 g8 g+8 o2 g+8 a8 o1 a8 a+8 o2 a+8 b8 o1 b8 o2 e8 o3 e8 d8 o2 d8 c+8 o3 c+8 o2 a8 o3 c+8 d8 o2 d8 c8 o3 c8 o2 b8 o1 b8 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 e8 o1 e8 d8 o2 d8 c+8 o1 a8 o2 d8 g8 a8 g8 a8 o1 a8 d2 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 e8 o1 e8 d+8 o2 d+8 f+8 o1 b8 o2 e8 o3 e8 d8 o2 d8 c+8 o3 c+8 o2 b8 o1 b8 a+8 b8 o2 c+8 o1 a+8 b8 o2 g8 e8 f+8 o1 b8 o2 b8 a8 o1 a8 g+8 o2 g+8 f+8 o1 f+8 e8 o2 e8 d8 o1 d8 c+8 o2 c+8 d8 e8 o1 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 g8 o1 g8 g+8 o2 g+8 a8 o1 a8 a+8 o2 a+8 b8 o1 b8 o2 e8 o3 e8 d8 o2 d8 c+8 o3 c+8 o2 a8 o3 c+8 d8 o2 d8 c8 o3 c8 o2 b8 o1 b8 a8 o2 a8 g8 o1 g8 f+8 o2 f+8 e8 o1 e8 d8 o2 d8 c+8 o1 a8 o2 d8 g8 a8 g8 a8 o1 a8 d4.&16.&32
 MML
 
-device.program_change(41, channel: 0) # Violin I
-device.program_change(41, channel: 1) # Violin II
-device.program_change(42, channel: 2) # Viola
-device.program_change(44, channel: 3) # Continuo 1 (Acoustic Bass)
-device.program_change(44, channel: 4) # Continuo 2 (Acoustic Bass)
+set_programs = Proc.new do
+  device.program_change(41, channel: 0) # Violin I
+  device.program_change(41, channel: 1) # Violin II
+  device.program_change(42, channel: 2) # Viola
+  device.program_change(44, channel: 3) # Continuo 1 (Acoustic Bass)
+  device.program_change(44, channel: 4) # Continuo 2 (Acoustic Bass)
+end
+set_programs.call
+
+# MIDI クロックも OUT へ送る。MIDI.start! の output: は開始時の OUT にしか
+# ルートを張らないので、選び直したらここで張り直す（音色も設定し直す）
+clock_to = nil
+follow_out = Proc.new do
+  MIDI.unroute(MIDI::Clock, clock_to) if clock_to
+  clock_to = md.midi_out
+  MIDI.route(MIDI::Clock, clock_to) if clock_to
+end
+follow_out.call
+md.on_change do |e|
+  next unless e[:kind] == :select_out
+  follow_out.call
+  set_programs.call
+end
 
 # Create MML sequences
 UI.log("Creating MML sequences...")
@@ -89,8 +109,10 @@ UI.pad(5, label: "Continuo 2", color: :orange, type: :toggle) do |on|
   player.set_sequence_enabled(4, on)
 end
 
-# Main playback loop
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(25, output: device, subdivisions: 24, on_loop: on_loop) do |clock|
+# Main playback loop: the block runs on every clock (24 per quarter note).
+# The clock is already routed to the OUT above, so MIDI.start! leaves that
+# route alone and only sends Start / Stop along it
+MIDI.start!(bpm: 25, output: device, subdivisions: 24) do |clock|
   player.tick(clock)
 end
+

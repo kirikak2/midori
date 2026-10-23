@@ -1,6 +1,7 @@
 # midi_to_lumi.rb
-# SAM2695からのMIDI入力を受け取り、USB-MIDI接続のLUMI Keysに
-# 対応するキーを光らせる信号を送るスクリプト
+# MIDI 入力（MIDI Devices 画面で選んだ IN、未選択なら SAM2695 の MIDI IN）を
+# 受け取り、LUMI Keys（選んだ OUT、未選択なら USB-MIDI Host）の対応する
+# キーを光らせる信号を送るスクリプト
 #
 # LUMI Keys SysExプロトコルは benob/LUMI-lights により解析済み:
 #   https://github.com/benob/LUMI-lights
@@ -8,16 +9,19 @@
 require 'midi'
 require 'ui'
 
-sam = MIDIDevices.sam2695
-usb = MIDIDevices.usb_midi_host
+md = UI::MIDIDevices
 
-unless sam && usb
-  puts "Error: SAM2695 and USB-MIDI host are both required"
-  exit
+# 未選択ならここで決める（画面で選び直せる）
+md.midi_in  ||= MIDIDevices.sam2695
+md.midi_out ||= MIDIDevices.usb_midi_host
+
+# LUMI Keys = OUT。md.output は選択に追従するので、実行中に OUT を選び直すと
+# そちらへ送る（md.midi_out はその時点の機器のまま変わらない）
+lumi = md.output
+unless md.midi_in && md.midi_out
+  puts "Error: select the MIDI IN and the LUMI Keys (OUT) on the MIDI Devices screen"
+  return
 end
-
-lumi       = MIDI::Device.new(usb)
-sam_device = MIDI::Device.new(sam)
 
 # =============================================================================
 # LUMI Keys SysEx ヘルパー
@@ -121,25 +125,30 @@ end
 # =============================================================================
 # LUMI Keys 初期設定
 # =============================================================================
-Lumi.set_color_mode(lumi, 1)            # スケール色モード
-Lumi.set_color(lumi, 0,   0, 150, 255) # 青: スケール音
-Lumi.set_color(lumi, 1, 255,  80,   0) # 橙: ルート音
-Lumi.set_scale(lumi, :chromatic)        # 全ノート対象
-Lumi.set_brightness(lumi, 80)
+setup_lumi = Proc.new do
+  Lumi.set_color_mode(lumi, 1)            # スケール色モード
+  Lumi.set_color(lumi, 0,   0, 150, 255) # 青: スケール音
+  Lumi.set_color(lumi, 1, 255,  80,   0) # 橙: ルート音
+  Lumi.set_scale(lumi, :chromatic)        # 全ノート対象
+  Lumi.set_brightness(lumi, 80)
+end
+setup_lumi.call
 
-puts "LUMI Keys initialized. Forwarding SAM2695 MIDI input..."
+# OUT を選び直したら、新しい LUMI Keys も設定し直す
+md.on_change { |e| setup_lumi.call if e[:kind] == :select_out }
+
+puts "LUMI Keys initialized. Forwarding #{md.midi_in.info} MIDI input..."
 
 # =============================================================================
-# SAM2695 MIDI入力 → LUMI Keys 転送
+# MIDI入力 → LUMI Keys 転送
+# md.input は選んだ IN に追従する（画面で IN を選び直してもハンドラはそのまま）
 # =============================================================================
-sam_input = MIDI::Input.new(sam_device)
-
-sam_input.on(:note_on) do |event|
-  lumi.note_on(event[:note], event[:velocity], channel: event[:channel])
+md.input.on(:note_on) do |m|
+  lumi.note_on(m.note, m.velocity, channel: m.channel)
 end
 
-sam_input.on(:note_off) do |event|
-  lumi.note_off(event[:note], 0, channel: event[:channel])
+md.input.on(:note_off) do |m|
+  lumi.note_off(m.note, 0, channel: m.channel)
 end
 
 # =============================================================================
@@ -180,7 +189,7 @@ UI.pad(2, label: "Wave Dn", color: :orange, type: :trigger) do
 end
 
 # Pad3: 静かなウェーブ (Toggle)
-# bpm_loopのクロックカウンタで音域をping-pong移動
+# MIDI.start! のクロックカウンタで音域をping-pong移動
 # ON時は全ノートオフしてから開始、OFF時は残音を消灯
 ripple_active = false
 
@@ -198,11 +207,9 @@ end
 # =============================================================================
 # メインループ
 # =============================================================================
-# output指定なし → subdivisions: 24 で約20ms間隔ループ
-# on_loop: UI.process でパッド入力を処理
-on_loop = Proc.new { UI.process }
-
-MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
+# output指定なし（クロックは送らない）→ subdivisions: 24 で約20ms間隔ループ
+# Midori の MIDI.start! は毎回 UI.process を呼ぶのでパッド入力も処理される
+MIDI.start!(bpm: 120, subdivisions: 24) do |c|
   next unless ripple_active
 
   # RIPPLE_STEPクロック毎に1音ずつ移動

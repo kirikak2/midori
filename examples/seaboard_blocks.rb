@@ -1,6 +1,9 @@
 # seaboard_blocks.rb
 # ROLI Seaboard BLOCKS からの MPE MIDI 入力（ch 1〜15）を
-# 単一チャンネルに変換して MIDI-DIN（SAM2695）に出力する。
+# 単一チャンネルに変換して出力する。
+#
+# 入力は MIDI Devices 画面で選んだ IN（未選択なら USB-MIDI Host）、
+# 出力は選んだ OUT（未選択なら MIDI-DIN = SAM2695）。
 #
 # ROLI Seaboard BLOCKS は MPE（MIDI Polyphonic Expression）を使用し、
 # 各指を独立したチャンネル（1〜15）に割り当てる。
@@ -13,26 +16,23 @@
 #   Control Change (CC#74)  … Slide（鍵盤上の縦スライド）
 #
 # UI パッド 1〜12：出力 MIDI チャンネル（ch 1〜12）を選択
+#
+# MIDI-DIN の入力もそのまま鳴らしたいときは、MIDI Devices 画面で SAM2695 の
+# 行から音源の列へパッチする（Ruby を通らず C で転送される）。
 
 require 'midi'
 require 'ui'
 
-usb = MIDIDevices.usb_midi_host
-sam = MIDIDevices.sam2695
+md = UI::MIDIDevices
 
-unless usb
-  UI.log("USB-MIDI Host not available")
-  exit
+# 未選択ならここで決める（画面で選び直せる）
+md.midi_in  ||= MIDIDevices.usb_midi_host
+md.midi_out ||= MIDIDevices.sam2695
+
+unless md.midi_in && md.midi_out
+  UI.log("Select the Seaboard (IN) and a synth (OUT) on the MIDI Devices screen")
+  return
 end
-
-unless sam
-  UI.log("SAM2695 (MIDI-DIN) not available")
-  exit
-end
-
-$din    = MIDI::Device.new(sam)
-$usb_in = MIDI::Input.new(MIDI::Device.new(usb))
-$din_in = MIDI::Input.new(MIDI::Device.new(sam))
 
 # 出力チャンネル（0-indexed: 0 = MIDI ch1, 11 = MIDI ch12）
 $out_ch = 0
@@ -57,61 +57,43 @@ def setup_pb_range(device, ch, semitones)
   device.control_change(100, 127,      channel: ch)
 end
 
-setup_pb_range($din, $out_ch, PB_SEMITONES)
+setup_pb_range(md.midi_out, $out_ch, PB_SEMITONES)
 
-UI.log("Seaboard BLOCKS -> MIDI-DIN")
+# OUT を選び直したら、新しい OUT にもピッチベンドレンジを設定する
+md.on_change do |e|
+  if e[:kind] == :select_out && md.midi_out
+    setup_pb_range(md.midi_out, $out_ch, PB_SEMITONES)
+    UI.log("OUT: #{md.midi_out.info}")
+  end
+end
+
+UI.log("Seaboard BLOCKS -> #{md.midi_out.info}")
 UI.log("Output: ch1  PB: +-#{PB_SEMITONES}st")
 
 # ---- MPE → 単チャンネル変換 ------------------------------------------------
+# md.input は選んだ IN に追従する。m は MIDI::Message（チャンネルは捨てて
+# $out_ch に寄せる）。OUT は毎回 md.midi_out を聞き直す
 
-$usb_in.on(:note_on) do |e|
-  $din.note_on(e[:note], e[:velocity], channel: $out_ch)
+inp = md.input
+
+inp.on(:note_on) do |m|
+  md.midi_out&.note_on(m.note, m.velocity, channel: $out_ch)
 end
 
-$usb_in.on(:note_off) do |e|
-  $din.note_off(e[:note], e[:velocity], channel: $out_ch)
+inp.on(:note_off) do |m|
+  md.midi_out&.note_off(m.note, m.velocity, channel: $out_ch)
 end
 
-$usb_in.on(:channel_pressure) do |e|
-  $din.channel_pressure(e[:pressure], channel: $out_ch)
+inp.on(:channel_pressure) do |m|
+  md.midi_out&.channel_pressure(m.value, channel: $out_ch)
 end
 
-$usb_in.on(:pitch_bend) do |e|
-  $din.pitch_bend(e[:value], channel: $out_ch)
+inp.on(:pitch_bend) do |m|
+  md.midi_out&.pitch_bend(m.value, channel: $out_ch)   # -8192..8191
 end
 
-$usb_in.on(:control_change) do |e|
-  $din.control_change(e[:cc], e[:value], channel: $out_ch)
-end
-
-# ---- MIDI-DIN IN → MIDI-DIN OUT パススルー --------------------------------
-
-$din_in.on(:note_on) do |e|
-  $din.note_on(e[:note], e[:velocity], channel: e[:channel])
-end
-
-$din_in.on(:note_off) do |e|
-  $din.note_off(e[:note], e[:velocity], channel: e[:channel])
-end
-
-$din_in.on(:control_change) do |e|
-  $din.control_change(e[:cc], e[:value], channel: e[:channel])
-end
-
-$din_in.on(:program_change) do |e|
-  $din.program_change(e[:program], channel: e[:channel])
-end
-
-$din_in.on(:pitch_bend) do |e|
-  $din.pitch_bend(e[:value], channel: e[:channel])
-end
-
-$din_in.on(:channel_pressure) do |e|
-  $din.channel_pressure(e[:pressure], channel: e[:channel])
-end
-
-$din_in.on(:poly_aftertouch) do |e|
-  $din.poly_aftertouch(e[:note], e[:pressure], channel: e[:channel])
+inp.on(:control_change) do |m|
+  md.midi_out&.control_change(m.cc, m.value, channel: $out_ch)
 end
 
 # ---- 出力チャンネル選択 UI（パッド 1〜12）----------------------------------
@@ -130,14 +112,15 @@ UI.on(:pad_press) do |event|
   idx = event[:index]
   if idx >= 0 && idx < 12
     $out_ch = idx
-    setup_pb_range($din, $out_ch, PB_SEMITONES)
+    setup_pb_range(md.midi_out, $out_ch, PB_SEMITONES) if md.midi_out
     UI.log("Output ch#{idx + 1}  PB: +-#{PB_SEMITONES}st")
   end
 end
 
 # ---- メインループ -----------------------------------------------------------
 
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
-  # MIDI イベントは bpm_loop が自動ディスパッチ
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
+  MIDI.sleep_ms(10)    # MIDI のハンドラはここ（と UI.process）で呼ばれる
 end

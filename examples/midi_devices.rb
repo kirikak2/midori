@@ -2,11 +2,12 @@
 #
 # UI::MIDIDevices（docs/UI_MIDI_DEVICES.md）の例。MIDI Devices 画面で選んだ
 # IN / OUT を使うスクリプト。どの機器で弾き、どの音源を鳴らすかは画面の
-# Prog 列 / Prog 行でいつでも変えられ、スクリプトは書き換えなくてよい。
+# Prog(input) 列 / Prog(output) 行でいつでも変えられ、スクリプトは書き換えなくてよい。
 #
 #   - UI::MIDIDevices.input: 選んだ IN に追従する入力。選び直しても
 #     ハンドラはそのまま
-#   - UI::MIDIDevices.midi_out: 選んだ OUT（毎回聞き直す）
+#   - UI::MIDIDevices.output: 選んだ OUT に追従する出力。選び直しても
+#     そのまま使える（midi_out はその時点の機器なので、保持せず毎回聞き直す）
 #
 # 弾いた音を 3 度上にハモらせて OUT へ送る。IN と OUT の間を画面でパッチ
 # しておけば、元の音は C から直接、ハモりだけがこのスクリプトから届く。
@@ -21,11 +22,12 @@ md.midi_in ||= MIDIDevices.usb_midi_host || MIDIDevices.usb_midi_device
 md.midi_out ||= MIDIDevices.amy || MIDIDevices.sam2695
 
 inp = md.input
+out = md.output
 inp.on(:note_on) do |m|
-  md.midi_out&.note_on(m.note + 4, m.velocity, channel: m.channel)
+  out.note_on(m.note + 4, m.velocity, channel: m.channel)
 end
 inp.on(:note_off) do |m|
-  md.midi_out&.note_off(m.note + 4, channel: m.channel)
+  out.note_off(m.note + 4, channel: m.channel)
 end
 
 md.on_change do |e|

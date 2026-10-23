@@ -1,7 +1,9 @@
 # tempo.rb
 #
-# UI::Tempo（docs/TEMPO.md）の例。テンポを MIDI クロックとして PC（DAW）と
-# SAM2695 へ送り、テンポはノブとパッドで変える。
+# UI::Tempo（docs/TEMPO.md）の例。テンポを MIDI クロックとして MIDI Devices
+# 画面で選んだ OUT（未選択なら PC の DAW）へ送り、テンポはノブとパッドで変える。
+# OUT を選び直すとクロックの送り先も移る。ほかの機器へも送りたいときは、
+# 同じ画面で Tempo の行から機器の列へパッチする。
 #
 #   - Tempo 画面をレイアウトのセルに置く（BPM をタップで TAP tempo）
 #   - BPM ノブ。TAP や Sync でテンポが変わるとノブも追従する
@@ -12,10 +14,22 @@
 require 'midi'
 require 'ui'
 
+md = UI::MIDIDevices
+
+# 未選択ならここで決める（画面で選び直せる）
+md.midi_out ||= MIDIDevices.usb_midi_device || MIDIDevices.sam2695
+
 UI::Tempo.bpm = 120
-[MIDIDevices.usb_midi_device, MIDIDevices.sam2695].each do |dev|
-  MIDI.route(UI::Tempo, dev) if dev
+
+# クロックを OUT へ。OUT を選び直したら張り直す
+clock_to = nil
+follow_out = Proc.new do
+  MIDI.unroute(UI::Tempo, clock_to) if clock_to
+  clock_to = md.midi_out
+  MIDI.route(UI::Tempo, clock_to) if clock_to
 end
+follow_out.call
+md.on_change { |e| follow_out.call if e[:kind] == :select_out }
 
 clock = UI.layout("Clock", cols: 4, rows: 3) do
   tempo col: 0..2, row: 0..1

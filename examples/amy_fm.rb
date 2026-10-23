@@ -1,8 +1,8 @@
 # AMY FM synth on the built-in speaker (Tab5 / CrowPanel)
 #
-# A DX7-style FM synth played from the screen and, if one is plugged in,
-# from a USB-MIDI keyboard on the USB host port (routed to AMY in C with
-# MIDI.route). Use the nav bar arrows to
+# A DX7-style FM synth played from the screen and from the MIDI IN chosen on
+# the MIDI Devices screen (a USB-MIDI keyboard on the USB host port unless
+# another is chosen; routed to AMY in C with MIDI.route). Use the nav bar to
 # move between the three screens.
 #
 #   Pads    12 notes of C major, held for as long as you press (note_on on
@@ -38,7 +38,12 @@ raise "AMY is not available on this board" unless MIDIDevices.amy
 
 FIRST_PATCH = 128   # DX7 presets: 128..255
 fm  = AMY::FM.new(channel: 0, voices: 6, patch: FIRST_PATCH)
-dev = MIDI::Device.new(fm.transport)
+
+# MIDI (pads, XYPad, CC knobs) goes to the OUT chosen on the MIDI Devices
+# screen, which starts out as AMY. Picking another synth there sends the
+# playing to it; the knobs that set AMY parameters directly stay on AMY.
+md = UI::MIDIDevices
+md.midi_out = fm.transport
 
 CC_PORTA    = 5
 CC_PAN      = 10
@@ -70,10 +75,10 @@ end
 # Put the voice-level knobs (filter, volume, pan, glide) back on the new patch.
 # Operator and algorithm knobs are left alone: the preset defines those.
 restore_voice = Proc.new do
-  dev.control_change(CC_CUTOFF, UI.knob_value(K_CUTOFF, bank: 1).to_i)
-  dev.control_change(CC_RESO,   UI.knob_value(K_RESO,   bank: 1).to_i)
-  dev.control_change(CC_PAN,    UI.knob_value(K_PAN,    bank: 1).to_i)
-  dev.control_change(CC_PORTA,  UI.knob_value(K_GLIDE,  bank: 1).to_i)
+  md.midi_out&.control_change(CC_CUTOFF, UI.knob_value(K_CUTOFF, bank: 1).to_i)
+  md.midi_out&.control_change(CC_RESO,   UI.knob_value(K_RESO,   bank: 1).to_i)
+  md.midi_out&.control_change(CC_PAN,    UI.knob_value(K_PAN,    bank: 1).to_i)
+  md.midi_out&.control_change(CC_PORTA,  UI.knob_value(K_GLIDE,  bank: 1).to_i)
   fm.volume = UI.knob_value(K_VOLUME, bank: 1) / 127.0
 end
 
@@ -115,13 +120,13 @@ UI.knob(2, bank: 1, label: "Algo", color: :yellow, min: 1, max: 32, value: 1) do
   fm.algorithm = v.to_i
 end
 UI.knob(3, bank: 1, label: "Feedback", color: :orange, value: 0) do |v|
-  dev.control_change(CC_FEEDBACK, v.to_i)
+  md.midi_out&.control_change(CC_FEEDBACK, v.to_i)
 end
 UI.knob(K_CUTOFF, bank: 1, label: "Cutoff", color: :cyan, value: 127) do |v|
-  dev.control_change(CC_CUTOFF, v.to_i)
+  md.midi_out&.control_change(CC_CUTOFF, v.to_i)
 end
 UI.knob(K_RESO, bank: 1, label: "Reso", color: :cyan, value: 0) do |v|
-  dev.control_change(CC_RESO, v.to_i)
+  md.midi_out&.control_change(CC_RESO, v.to_i)
 end
 UI.knob(K_VOLUME, bank: 1, label: "Volume", color: :green, value: 100) do |v|
   fm.volume = v / 127.0
@@ -133,10 +138,10 @@ UI.knob(8, bank: 1, label: "Chorus", color: :blue, value: 0) do |v|
   fm.chorus = v / 127.0
 end
 UI.knob(K_PAN, bank: 1, label: "Pan", color: :purple, origin: :center, value: 64) do |v|
-  dev.control_change(CC_PAN, v.to_i)
+  md.midi_out&.control_change(CC_PAN, v.to_i)
 end
 UI.knob(K_GLIDE, bank: 1, label: "Glide", color: :purple, value: 0) do |v|
-  dev.control_change(CC_PORTA, v.to_i)
+  md.midi_out&.control_change(CC_PORTA, v.to_i)
 end
 UI.knob(11, bank: 1, label: "Velocity", color: :red, min: 1, max: 127, value: 100) do |v|
   play[:velocity] = v.to_i
@@ -188,9 +193,9 @@ SCALE.each_with_index do |base, i|
     if on
       note = base + 12 * play[:octave]
       held[i] = note
-      dev.note_on(note, play[:velocity])
+      md.midi_out&.note_on(note, play[:velocity])
     elsif held[i]
-      dev.note_off(held[i])
+      md.midi_out&.note_off(held[i])
       held.delete(i)
     end
   end
@@ -209,13 +214,13 @@ xy = UI::XYPad.new(
   y_cc: CC_CUTOFF,
   y_range: 0..127,
   velocity: 100,
-  device: dev
+  device: md.output      # follows the OUT picked on the screen
 )
 
 # ---- Octave (knob 12, bank A) -----------------------------------------------
 # Shifts the pads and the XYPad's scale, and relabels the pads so the screen
 # shows what they now play. A pad held while the knob moves still ends the
-# note it started. The USB keyboard is routed to AMY in C and is not shifted.
+# note it started. The MIDI IN is routed to AMY in C and is not shifted.
 UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
         origin: :center, value: 0) do |v|
   oct = v.to_i
@@ -231,35 +236,42 @@ UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
   end
 end
 
-# ---- USB-MIDI keyboard (optional) ---------------------------------------
+# ---- MIDI IN (optional: a USB-MIDI keyboard, ...) ---------------------------
+# The IN is the one chosen on the MIDI Devices screen; picking another there
+# moves the route below (follow_in) and the md.input handler with it.
 # MIDI.route forwards everything the keyboard sends straight to AMY in C
 # (the input task), so playing it does not wait on this script's loop.
 # Mapped CCs (74 cutoff, 71 reso, ...) land in AMY's CC mappings that way.
 # What AMY cannot map -- the envelopes -- is picked out in Ruby on the side:
 # CC 73 / 72 (attack / release on many keyboards) set operator 1's envelope.
-usb = MIDIDevices.usb_midi_host
-if usb
-  MIDI.route(usb, fm.transport)
-  input = MIDI::Input.new(MIDI::Device.new(usb))
-  input.on(:control_change) do |e|
-    case e[:cc]
-    when 73 then fm.op(1).attack  = AMY.scale(e[:value], 1, 2000, log: true)
-    when 72 then fm.op(1).release = AMY.scale(e[:value], 10, 4000, log: true)
-    end
+md.midi_in ||= MIDIDevices.usb_midi_host
+routed_from = nil
+follow_in = Proc.new do
+  MIDI.unroute(routed_from, fm.transport) if routed_from
+  routed_from = md.midi_in
+  MIDI.route(routed_from, fm.transport) if routed_from
+end
+follow_in.call
+
+md.input.on(:control_change) do |m|
+  case m.cc
+  when 73 then fm.op(1).attack  = AMY.scale(m.value, 1, 2000, log: true)
+  when 72 then fm.op(1).release = AMY.scale(m.value, 10, 4000, log: true)
   end
 end
+
+md.on_change { |e| follow_in.call if e[:kind] == :select_in }
 
 UI.knobs
 puts "AMY FM ready (#{AMY.patch_name(fm.patch)}). Render load is printed every 5 s."
 
-# Main loop. MIDI.bpm_loop, not `loop do`: a bare loop never lets the VM
-# switch tasks, so UI and MIDI events would not be handled. output: nil --
-# there is no clock to send (AMY is not synced to MIDI clock), so the block
-# just runs every subdivision: 120 BPM x 48 = about every 10 ms.
-# Midori's bpm_loop also stops on the Scripts screen's [Stop].
+# Main loop: UI.process delivers the pad / knob / XYPad events, and
+# MIDI.sleep_ms runs the MIDI handlers (md.input) while it waits.
 last_report = 0
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, output: nil, subdivisions: 48, send_start: false, on_loop: on_loop) do |c|
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
+  MIDI.sleep_ms(10)
   now = Machine.uptime_us / 1000
   if now - last_report >= 5000
     last_report = now

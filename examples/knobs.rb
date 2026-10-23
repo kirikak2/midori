@@ -56,55 +56,56 @@ rescue => e
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# エンコーダを使う場合、プライマリ I2C が SAM2695 と競合するので USB を優先する。
-transport = if encoders.empty?
-              MIDIDevices.sam2695 || MIDIDevices.usb_midi_host
-            else
-              MIDIDevices.usb_midi_device || MIDIDevices.usb_midi_host || MIDIDevices.sam2695
-            end
+# MIDI Devices 画面で選んだ OUT へ送る。未選択ならここで決める。エンコーダを
+# 使う場合、プライマリ I2C が SAM2695 と競合するので USB を優先する。
+md = UI::MIDIDevices
+md.midi_out ||= if encoders.empty?
+                  MIDIDevices.sam2695 || MIDIDevices.usb_midi_host
+                else
+                  MIDIDevices.usb_midi_device || MIDIDevices.usb_midi_host
+                end
 
-unless transport
+unless md.midi_out
   puts "No MIDI output available"
   return
 end
 
-dev = MIDI::Device.new(transport)
 CH = 0
 
 # ---- Bank A: filter / amp --------------------------------------------
 UI.knob(1, bank: 1, label: "Cutoff", color: :cyan, value: 100) do |v|
-  dev.control_change(74, v.to_i, channel: CH)
+  md.midi_out&.control_change(74, v.to_i, channel: CH)
 end
 
 UI.knob(2, bank: 1, label: "Reso", color: :magenta, value: 0) do |v|
-  dev.control_change(71, v.to_i, channel: CH)
+  md.midi_out&.control_change(71, v.to_i, channel: CH)
 end
 
 UI.knob(3, bank: 1, label: "Attack", color: :green, value: 64) do |v|
-  dev.control_change(73, v.to_i, channel: CH)
+  md.midi_out&.control_change(73, v.to_i, channel: CH)
 end
 
 UI.knob(4, bank: 1, label: "Release", color: :yellow, value: 64) do |v|
-  dev.control_change(72, v.to_i, channel: CH)
+  md.midi_out&.control_change(72, v.to_i, channel: CH)
 end
 
 # ---- Bank B: effects / mix -------------------------------------------
 UI.knob(1, bank: 2, label: "Reverb", color: :blue, value: 40) do |v|
-  dev.control_change(91, v.to_i, channel: CH)
+  md.midi_out&.control_change(91, v.to_i, channel: CH)
 end
 
 UI.knob(2, bank: 2, label: "Chorus", color: :purple, value: 0) do |v|
-  dev.control_change(93, v.to_i, channel: CH)
+  md.midi_out&.control_change(93, v.to_i, channel: CH)
 end
 
 UI.knob(3, bank: 2, label: "Volume", color: :white, value: 100) do |v|
-  dev.control_change(7, v.to_i, channel: CH)
+  md.midi_out&.control_change(7, v.to_i, channel: CH)
 end
 
 # origin: :center makes the gauge grow either way from 12 o'clock, which is
 # what a pan control should look like.
 UI.knob(4, bank: 2, label: "Pan", color: :orange, value: 64, origin: :center) do |v|
-  dev.control_change(10, v.to_i, channel: CH)
+  md.midi_out&.control_change(10, v.to_i, channel: CH)
 end
 
 UI.knob_bank = 1
@@ -156,9 +157,7 @@ last_encoder_poll = 0
 
 puts "Knobs ready. Turn them, or tap A/B on the right."
 
-loop do
-  break if sm.stop_requested?
-
+until sm.stop_requested?
   UI.process
 
   unless encoders.empty?
@@ -174,5 +173,5 @@ loop do
     end
   end
 
-  sleep_ms 5
+  MIDI.sleep_ms(5)
 end

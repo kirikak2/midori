@@ -3,8 +3,8 @@
 # encoder8_cc.rb の DFRobot 版。
 #
 # プライマリ I2C (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN) にモジュールを接続し、
-# ノブの絶対値 (0-1023) を CC 値 (0-127) にして USB-MIDI Device (USB-C) から
-# ホストへ送る。
+# ノブの絶対値 (0-1023) を CC 値 (0-127) にして、MIDI Devices 画面で選んだ OUT
+# (未選択なら USB-MIDI Device = USB-C の先のホスト) へ送る。
 #
 #   - ノブを回すと CC #(BASE_CC + i) が増減 (LED リングが現在値を表示)
 #   - ノブのボタンを押すと その CC を中央 (64) にリセット
@@ -88,13 +88,14 @@ REL_MARGIN  = GAIN_RELATIVE * 4
 # という 2 つの問題が起きる。
 V_MAX = (1023 / GAIN) * GAIN
 
-# ---- 出力先 (USB-MIDI Device / USB-C) --------------------------------
-usb = MIDIDevices.usb_midi_device
-unless usb
-  UI.log("USB-MIDI Device not available on this board")
-  exit
+# ---- 出力先 ----------------------------------------------------------
+# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI Device (USB-C)。
+md = UI::MIDIDevices
+md.midi_out ||= MIDIDevices.usb_midi_device
+unless md.midi_out
+  UI.log("No MIDI output available")
+  return
 end
-device = MIDI::Device.new(usb)
 
 # ---- 値の変換 --------------------------------------------------------
 # エンコーダ値 (0-V_MAX) -> CC (0-127)
@@ -119,7 +120,7 @@ end
 
 unless BoardConfig::HAS_PRIMARY_I2C
   UI.log("primary I2C not available on this board")
-  exit
+  return
 end
 
 # ---- エンコーダ検出 (プライマリ I2C) ---------------------------------------------
@@ -149,7 +150,7 @@ if N == 0
   UI.log("no encoder found on 0x54-0x57")
   UI.log("-> check DIP switch / wiring (i2c_scan.rb)")
 else
-  UI.log("#{N} enc  #{MODE}  ch#{CH + 1}  -> USB-MIDI")
+  UI.log("#{N} enc  #{MODE}  ch#{CH + 1}  -> #{md.midi_out.info}")
 end
 
 # ---- 状態 ------------------------------------------------------------
@@ -167,40 +168,41 @@ while j < N
     # 起動時: 現在の CC 値をホストへ送って状態を同期
     v = encs[j].value
     value[j] = v ? to_cc(v) : 0
-    device.control_change(BASE_CC + j, value[j], channel: CH)
+    md.midi_out&.control_change(BASE_CC + j, value[j], channel: CH)
   end
   j += 1
 end
 
 # ---- ノートパッド (momentary): 押下で note_on / 離しで note_off -------
 UI.pad(1, label: "C4", color: :red, type: :momentary) do |on|
-  on ? device.note_on(60, NOTE_VELOCITY, channel: CH) : device.note_off(60, channel: CH)
+  on ? md.midi_out&.note_on(60, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(60, channel: CH)
 end
 UI.pad(2, label: "D4", color: :orange, type: :momentary) do |on|
-  on ? device.note_on(62, NOTE_VELOCITY, channel: CH) : device.note_off(62, channel: CH)
+  on ? md.midi_out&.note_on(62, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(62, channel: CH)
 end
 UI.pad(3, label: "E4", color: :yellow, type: :momentary) do |on|
-  on ? device.note_on(64, NOTE_VELOCITY, channel: CH) : device.note_off(64, channel: CH)
+  on ? md.midi_out&.note_on(64, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(64, channel: CH)
 end
 UI.pad(4, label: "G4", color: :green, type: :momentary) do |on|
-  on ? device.note_on(67, NOTE_VELOCITY, channel: CH) : device.note_off(67, channel: CH)
+  on ? md.midi_out&.note_on(67, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(67, channel: CH)
 end
 UI.pad(5, label: "A4", color: :cyan, type: :momentary) do |on|
-  on ? device.note_on(69, NOTE_VELOCITY, channel: CH) : device.note_off(69, channel: CH)
+  on ? md.midi_out&.note_on(69, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(69, channel: CH)
 end
 UI.pad(6, label: "C5", color: :blue, type: :momentary) do |on|
-  on ? device.note_on(72, NOTE_VELOCITY, channel: CH) : device.note_off(72, channel: CH)
+  on ? md.midi_out&.note_on(72, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(72, channel: CH)
 end
 UI.pad(7, label: "D5", color: :purple, type: :momentary) do |on|
-  on ? device.note_on(74, NOTE_VELOCITY, channel: CH) : device.note_off(74, channel: CH)
+  on ? md.midi_out&.note_on(74, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(74, channel: CH)
 end
 UI.pad(8, label: "E5", color: :white, type: :momentary) do |on|
-  on ? device.note_on(76, NOTE_VELOCITY, channel: CH) : device.note_off(76, channel: CH)
+  on ? md.midi_out&.note_on(76, NOTE_VELOCITY, channel: CH) : md.midi_out&.note_off(76, channel: CH)
 end
 
 # ---- メインループ ----------------------------------------------------
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
   i = 0
   while i < N
     enc = encs[i]
@@ -217,7 +219,7 @@ MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
       else
         enc.value = to_value(64)
         value[i] = 64
-        device.control_change(BASE_CC + i, 64, channel: CH)
+        md.midi_out&.control_change(BASE_CC + i, 64, channel: CH)
         UI.log("enc#{i}: reset CC#{BASE_CC + i}=64")
       end
     else
@@ -227,7 +229,7 @@ MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
           # --- 回転量: カウンタ差分 -> ディテント数 -> 2の補数の相対 CC ---
           d = (v - raw[i]) / GAIN
           raw[i] = v
-          device.control_change(BASE_CC + i, to_relative(d * REL_STEP), channel: CH) if d != 0
+          md.midi_out&.control_change(BASE_CC + i, to_relative(d * REL_STEP), channel: CH) if d != 0
           # 端に達すると回せなくなるので、近づいたら中央へ戻す
           if v < REL_MARGIN || v > 1023 - REL_MARGIN
             enc.value = REL_CENTER
@@ -238,7 +240,7 @@ MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
           cc = to_cc(v)
           if cc != value[i]
             value[i] = cc
-            device.control_change(BASE_CC + i, cc, channel: CH)
+            md.midi_out&.control_change(BASE_CC + i, cc, channel: CH)
           end
         end
       end
@@ -246,4 +248,6 @@ MIDI.bpm_loop(120, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
 
     i += 1
   end
+
+  MIDI.sleep_ms(20)
 end

@@ -26,7 +26,7 @@
 #   | 4台目 | bounce     | オクターブ +1  |
 #
 # DFRobot Visual Rotary Encoder（SEN0502）がプライマリ I2C に無ければ 0 台で動く。
-# 出力は USB-MIDI デバイス（USB-C, TinyUSB）。
+# 出力は MIDI Devices 画面で選んだ OUT（未選択なら USB-MIDI デバイス、USB-C）。
 #
 # Tombola 画面と違ってナビバー中央に Start / Stop は無い（スクリプトで start 済み）。
 
@@ -158,15 +158,17 @@ else
 end
 
 # ---- 出力先 ----------------------------------------------------------
-transport = MIDIDevices.usb_midi_device
+# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI デバイス (USB-C)。
+# エンコーダの有無に関係なく使える（プライマリ I2C とは競合しない）。
+md = UI::MIDIDevices
+md.midi_out ||= MIDIDevices.usb_midi_device
 
-unless transport
-  puts "No MIDI output available (USB-MIDI device not enabled on this board)"
-  exit
+unless md.midi_out
+  puts "No MIDI output available"
+  return
 end
 
-device = MIDI::Device.new(transport)
-device.program_change(0, channel: 9)  # Standard drum kit
+md.midi_out.program_change(0, channel: 9)  # Standard drum kit
 
 # ---- Tombola（tombola.rb と同じ設定） ------------------------------------
 t = UI::Tombola.new(
@@ -179,7 +181,7 @@ t = UI::Tombola.new(
   channel: 9,
   duration: 120,
   velocity_range: 40..127,
-  device: device
+  device: md.midi_out
 )
 
 t.scale = [36, 38, 42, 45, 46, 49]
@@ -190,7 +192,12 @@ t.add_ball(color: :cyan)
 t.add_ball(color: :yellow, velocity_scale: 0.7)
 
 t.on_hit do |hit|
-  device.trigger(hit[:note], hit[:velocity], duration: t.duration)
+  md.midi_out&.trigger(hit[:note], hit[:velocity], duration: t.duration)
+end
+
+# OUT を選び直したら Tombola の送信先も差し替える
+md.on_change do |e|
+  t.device = md.midi_out if e[:kind] == :select_out
 end
 
 t.start
@@ -275,7 +282,7 @@ end
 # on_hit の衝突）を配り、エンコーダを読むだけ。
 sm = ScriptManager.new
 last_poll = 0
-loop do
+until sm.stop_requested?
   UI.process
 
   now = Machine.uptime_us / 1000
@@ -284,8 +291,7 @@ loop do
     enc_knobs.each { |ek| ek.poll }
   end
 
-  break if sm.stop_requested?
-  sleep_ms 5
+  MIDI.sleep_ms(5)
 end
 
 t.stop

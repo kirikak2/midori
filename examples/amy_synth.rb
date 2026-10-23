@@ -3,9 +3,9 @@
 # Up to four oscillators through one filter and amplifier, with an LFO and
 # two ADSR envelopes (AMY::Synth). Starts from the Juno-60 presets (0..127)
 # or a plain initial voice, and every knob follows a preset change. Played
-# from the screen and, if one is plugged in, from a USB-MIDI keyboard on the
-# USB host port (routed to AMY in C with MIDI.route). Use the nav bar arrows
-# to move between the three screens.
+# from the screen and from the MIDI IN chosen on the MIDI Devices screen (a
+# USB-MIDI keyboard on the USB host port unless another is chosen; routed to
+# AMY in C with MIDI.route). Use the nav bar to move between the three screens.
 #
 #   Pads    12 notes of C major, held for as long as you press
 #   XYPad   X = pitch on a scale with glide, Y = filter cutoff (CC 74)
@@ -32,7 +32,12 @@ require 'machine'
 raise "AMY is not available on this board" unless MIDIDevices.amy
 
 syn = AMY::Synth.new(channel: 0, voices: 6)   # the initial voice
-dev = MIDI::Device.new(syn.transport)
+
+# MIDI (pads, XYPad, CC knobs) goes to the OUT chosen on the MIDI Devices
+# screen, which starts out as AMY. Picking another synth there sends the
+# playing to it; the knobs that set AMY parameters directly stay on AMY.
+md = UI::MIDIDevices
+md.midi_out = syn.transport
 
 CC_PORTA  = 5
 CC_PAN    = 10
@@ -145,10 +150,10 @@ UI.knob(1, bank: 1, label: "Init", color: :yellow, min: -1, max: 127, value: -1)
   end
 end
 UI.knob(2, bank: 1, label: "Cutoff", color: :cyan, value: 100) do |v|
-  dev.control_change(CC_CUTOFF, v.to_i)
+  md.midi_out&.control_change(CC_CUTOFF, v.to_i)
 end
 UI.knob(3, bank: 1, label: "Reso", color: :cyan, value: 0) do |v|
-  dev.control_change(CC_RESO, v.to_i)
+  md.midi_out&.control_change(CC_RESO, v.to_i)
 end
 UI.knob(4, bank: 1, label: "Flt Env", color: :cyan, value: 0) do |v|
   syn.filter_env = v / 127.0 * FENV_MAX
@@ -166,10 +171,10 @@ UI.knob(8, bank: 1, label: "Chorus", color: :blue, value: 0) do |v|
   syn.chorus = v / 127.0
 end
 UI.knob(9, bank: 1, label: "Pan", color: :purple, origin: :center, value: 64) do |v|
-  dev.control_change(CC_PAN, v.to_i)
+  md.midi_out&.control_change(CC_PAN, v.to_i)
 end
 UI.knob(10, bank: 1, label: "Glide", color: :purple, value: 0) do |v|
-  dev.control_change(CC_PORTA, v.to_i)
+  md.midi_out&.control_change(CC_PORTA, v.to_i)
 end
 UI.knob(11, bank: 1, label: "Velocity", color: :red, min: 1, max: 127, value: 100) do |v|
   play[:velocity] = v.to_i
@@ -294,9 +299,9 @@ SCALE.each_with_index do |base, i|
     if on
       note = base + 12 * play[:octave]
       held[i] = note
-      dev.note_on(note, play[:velocity])
+      md.midi_out&.note_on(note, play[:velocity])
     elsif held[i]
-      dev.note_off(held[i])
+      md.midi_out&.note_off(held[i])
       held.delete(i)
     end
   end
@@ -311,7 +316,7 @@ xy = UI::XYPad.new(
   y_cc: CC_CUTOFF,
   y_range: 0..127,
   velocity: 100,
-  device: dev
+  device: md.output      # follows the OUT picked on the screen
 )
 
 # ---- Octave (knob 12, bank A) -------------------------------------------------
@@ -330,30 +335,40 @@ UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
   end
 end
 
-# ---- USB-MIDI keyboard (optional) -------------------------------------------
+# ---- MIDI IN (optional: a USB-MIDI keyboard, ...) ---------------------------
+# The IN is the one chosen on the MIDI Devices screen; picking another there
+# moves the route (follow_in) and the md.input handler with it.
 # Routed to AMY in C; mapped CCs (74 cutoff, 71 reso, 10 pan, 5 glide) work
 # from the keyboard's knobs too. CC 73 / 72 (attack / release on many
 # keyboards) set the amp envelope from Ruby.
-usb = MIDIDevices.usb_midi_host
-if usb
-  MIDI.route(usb, syn.transport)
-  input = MIDI::Input.new(MIDI::Device.new(usb))
-  input.on(:control_change) do |e|
-    case e[:cc]
-    when 73 then syn.amp_attack  = AMY.scale(e[:value], ATTACK[0], ATTACK[1], log: true)
-    when 72 then syn.amp_release = AMY.scale(e[:value], DECAY[0], DECAY[1], log: true)
-    end
+md.midi_in ||= MIDIDevices.usb_midi_host
+routed_from = nil
+follow_in = Proc.new do
+  MIDI.unroute(routed_from, syn.transport) if routed_from
+  routed_from = md.midi_in
+  MIDI.route(routed_from, syn.transport) if routed_from
+end
+follow_in.call
+
+md.input.on(:control_change) do |m|
+  case m.cc
+  when 73 then syn.amp_attack  = AMY.scale(m.value, ATTACK[0], ATTACK[1], log: true)
+  when 72 then syn.amp_release = AMY.scale(m.value, DECAY[0], DECAY[1], log: true)
   end
 end
+
+md.on_change { |e| follow_in.call if e[:kind] == :select_in }
 
 UI.knobs
 puts "AMY Synth ready. Render load is printed every 5 s."
 
-# Main loop: MIDI.bpm_loop, not `loop do` (a bare loop never lets the VM
-# switch tasks, so UI and MIDI events would not be handled).
+# Main loop: UI.process delivers the pad / knob / XYPad events, and
+# MIDI.sleep_ms runs the MIDI handlers (md.input) while it waits.
 last_report = 0
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, output: nil, subdivisions: 48, send_start: false, on_loop: on_loop) do |c|
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
+  MIDI.sleep_ms(10)
   now = Machine.uptime_us / 1000
   if now - last_report >= 5000
     last_report = now

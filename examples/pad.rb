@@ -1,17 +1,23 @@
+# pad.rb
+#
+# 画面のパッドでドラムを叩く。音は MIDI Devices 画面で選んだ OUT
+# （UI::MIDIDevices.midi_out）へ送るので、どの音源で鳴らすかは画面の
+# Prog(output) 行でいつでも変えられる。
+
 require 'midi'
 require 'ui'
 
-# Use pre-initialized SAM2695 device from MIDIDevices module
-# This works on any board without needing to specify pin numbers
-sam = MIDIDevices.sam2695
-unless sam
-  puts "SAM2695 not available on this board"
-  exit
+md = UI::MIDIDevices
+
+# OUT が未選択なら SAM2695（なければ PC）にする。画面で選び直せる
+md.midi_out ||= MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
+unless md.midi_out
+  puts "No MIDI output available"
+  return
 end
 
-device = MIDI::Device.new(sam)
-
-device.program_change(1, channel: 9)
+DRUM_CH = 9   # General MIDI のドラムは ch 10
+md.midi_out.program_change(1, channel: DRUM_CH)
 
 # General MIDI Drum Notes
 KICK = 36
@@ -21,38 +27,35 @@ OPEN_HH = 46
 CYMBAL = 49
 TOM = 45
 
-# Pad 1: Kick
+# OUT は画面で変わるので、叩くたびに md.midi_out を聞き直す
 UI.pad(1, label: "Kick", color: :red, type: :trigger) do
-  device.trigger(KICK, 127, channel: 9, duration: 100)
+  md.midi_out&.trigger(KICK, 127, channel: DRUM_CH, duration: 100)
 end
 
-# Pad 2: Snare
 UI.pad(2, label: "Snare", color: :yellow, type: :trigger) do
-  device.trigger(SNARE, 127, channel: 9, duration: 100)
+  md.midi_out&.trigger(SNARE, 127, channel: DRUM_CH, duration: 100)
 end
 
-# Pad 3: Closed Hi-Hat
 UI.pad(3, label: "CH", color: :cyan, type: :trigger) do
-  device.trigger(CLOSED_HH, 100, channel: 9, duration: 100)
+  md.midi_out&.trigger(CLOSED_HH, 100, channel: DRUM_CH, duration: 100)
 end
 
-# Pad 4: Open Hi-Hat
 UI.pad(4, label: "OH", color: :blue, type: :trigger) do
-  device.trigger(OPEN_HH, 100, channel: 9, duration: 150)
+  md.midi_out&.trigger(OPEN_HH, 100, channel: DRUM_CH, duration: 150)
 end
 
-# Pad 5: Cymbal
 UI.pad(5, label: "Cymbal", color: :orange, type: :trigger) do
-  device.trigger(CYMBAL, 127, channel: 9, duration: 200)
+  md.midi_out&.trigger(CYMBAL, 127, channel: DRUM_CH, duration: 200)
 end
 
-# Pad 6: Tom
 UI.pad(6, label: "Tom", color: :purple, type: :trigger) do
-  device.trigger(TOM, 110, channel: 9, duration: 200)
+  md.midi_out&.trigger(TOM, 110, channel: DRUM_CH, duration: 200)
 end
 
-# Main loop - process UI events
-on_loop = Proc.new { UI.process }
-MIDI.bpm_loop(120, output: device, subdivisions: 24, send_start: false, on_loop: on_loop) do |c|
-  # Empty - just keep processing UI events
+UI.pads
+
+sm = ScriptManager.new
+until sm.stop_requested?
+  UI.process
+  MIDI.sleep_ms(10)
 end

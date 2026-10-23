@@ -5,9 +5,9 @@
 # sounds every hit the moment it happens, so the timing does not depend on how
 # often this script polls.
 #
-# Output always goes to the USB-MIDI device port (USB-C, TinyUSB), regardless
-# of whether any encoders are attached -- the primary I2C bus is free either
-# way.
+# Output goes to the OUT chosen on the MIDI Devices screen (the USB-MIDI
+# device port, USB-C, when none is chosen), whether or not any encoders are
+# attached -- the primary I2C bus is free either way.
 #
 # The variable parameters (rotation, sides, gravity, bounce) are Knobs, so they
 # can be touched on the Knobs screen or turned from a physical encoder. If
@@ -177,16 +177,17 @@ else
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# エンコーダの有無に関係なく USB-MIDI デバイス (USB-C) を使う。
-transport = MIDIDevices.usb_midi_device
+# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI デバイス (USB-C)。
+# エンコーダの有無に関係なく使える（プライマリ I2C とは競合しない）。
+md = UI::MIDIDevices
+md.midi_out ||= MIDIDevices.usb_midi_device
 
-unless transport
-  puts "No MIDI output available (USB-MIDI device not enabled on this board)"
-  exit
+unless md.midi_out
+  puts "No MIDI output available"
+  return
 end
 
-device = MIDI::Device.new(transport)
-device.program_change(0, channel: 9)  # Standard drum kit
+md.midi_out.program_change(0, channel: 9)  # Standard drum kit
 
 t = UI::Tombola.new(
   sides: 6,
@@ -198,7 +199,7 @@ t = UI::Tombola.new(
   channel: 9,
   duration: 120,
   velocity_range: 40..127,
-  device: device
+  device: md.midi_out
 )
 
 # General MIDI drums, one per side of the hexagon
@@ -212,7 +213,12 @@ t.add_ball(color: :yellow, velocity_scale: 0.7)
 # Optional: watch the hits from Ruby. The C++ side sounds them too, so this
 # doubles every note unless you set t.sound = false.
 t.on_hit do |hit|
-  device.trigger(hit[:note], hit[:velocity], duration: t.duration)
+  md.midi_out&.trigger(hit[:note], hit[:velocity], duration: t.duration)
+end
+
+# OUT を選び直したら Tombola の送信先も差し替える
+md.on_change do |e|
+  t.device = md.midi_out if e[:kind] == :select_out
 end
 
 t.start
@@ -317,7 +323,7 @@ end
 # reads the encoders.
 sm = ScriptManager.new
 last_poll = 0
-loop do
+until sm.stop_requested?
   UI.process
 
   now = Machine.uptime_us / 1000
@@ -330,8 +336,7 @@ loop do
     end
   end
 
-  break if sm.stop_requested?
-  sleep_ms 5
+  MIDI.sleep_ms(5)
 end
 
 t.stop
