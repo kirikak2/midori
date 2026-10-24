@@ -668,6 +668,11 @@ void ScreenMidiDevices::drawDetail()
         };
         snprintf(lines[n++], sizeof(lines[0]), "mnt %d susp %d dtr %d  rst %lu",
                  st.mounted, st.suspended, st.cdc_connected, (unsigned long)st.ev_bus_reset);
+        // Per bus reset: a host that gives up early leaves only a few SETUPs,
+        // one that finishes enumerating (then drops us) leaves dozens
+        snprintf(lines[n++], sizeof(lines[0]), "setup %lu xfer %lu susp %lu res %lu",
+                 (unsigned long)st.ev_setup, (unsigned long)st.ev_xfer,
+                 (unsigned long)st.ev_suspend, (unsigned long)st.ev_resume);
         snprintf(lines[n++], sizeof(lines[0]), "MIDI rx %lu tx %lu fail %lu drop %lu",
                  (unsigned long)st.midi_rx_pkts, (unsigned long)st.midi_tx_ok,
                  (unsigned long)st.midi_tx_fail, (unsigned long)st.midi_tx_drop);
