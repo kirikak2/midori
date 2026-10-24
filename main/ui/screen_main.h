@@ -9,7 +9,7 @@
 
 // Tempo (the class keeps the old Main name for compatibility): the BPM, the
 // external clock source, Sync and TAP tempo (docs/TEMPO.md). The BPM itself is
-// set from Ruby (UI::Tempo.bpm) and its clock goes out through routes from the
+// set with a swipe on it or from Ruby (UI::Tempo.bpm) and its clock goes out through routes from the
 // tempo device (ui_tempo.cpp). A layout can show it in a cell (setArea).
 class ScreenMain : public Screen {
 public:
@@ -20,6 +20,7 @@ public:
     void update() override;
     void draw() override;
     void onTouch(int touchId, int x, int y, bool pressed) override;
+    void onTouchMove(int touchId, int x, int y) override;
     void onNavCenter() override;
     const char* getTitle() override;
     const char* getNavCenterLabel() override;
@@ -76,6 +77,13 @@ private:
     int m_lastExt10;
     uint32_t m_lastFlags;
     int64_t m_lastExtDrawUs;
+
+    // A swipe on the BPM changes it (onTouchMove)
+    int m_swipeTouch;     // The touch that pressed the BPM, -1 if none
+    bool m_swiping;       // It has moved far enough to be a swipe, not a tap
+    bool m_swipeVertical; // The axis it started along
+    int m_swipeX, m_swipeY;
+    float m_swipeBpm;     // The internal BPM before the press
 
     static const char* sourceLabel(int button);
     static midi_interface_t sourceInterface(int button);

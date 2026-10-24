@@ -2,12 +2,14 @@
 // TAP tempo, laid out inside its area so a layout can show it in a cell.
 //
 //   [ 120 BPM ]            <- tap: TAP tempo (also the nav bar's TAP)
+//                             swipe up / right: faster, down / left: slower
 //   Ext: 120.0 BPM
 //   [USB-H][USB-D][DIN][BLE]
 //   [ > Play ][ Sync ]     <- Play / Stop sends MIDI Start / Stop
 //
-// The BPM is set from Ruby (UI::Tempo.bpm, a knob, a pad) rather than with
-// buttons here, and the clock goes out through routes from the tempo device.
+// Fine changes are a swipe on the BPM (1 BPM a step); the BPM can also be set
+// from Ruby (UI::Tempo.bpm, a knob, a pad). The clock goes out through routes
+// from the tempo device.
 
 #include "sdkconfig.h"
 #include "screen_main.h"
@@ -33,6 +35,8 @@ static constexpr int SOURCE_BTN_H_MAX = 56;
 static constexpr int SYNC_BTN_W_MAX = 260;
 static constexpr int SYNC_BTN_H_MAX = 64;
 static constexpr int GAP = 12;
+static constexpr int SWIPE_START_PX = 16;   // Further than this from the press: a swipe
+static constexpr int SWIPE_STEP_PX = 12;    // 1 BPM
 #else
 static constexpr int BPM_TEXT_MAX = 6;
 static constexpr int SOURCE_BTN_W_MAX = 48;
@@ -40,6 +44,8 @@ static constexpr int SOURCE_BTN_H_MAX = 24;
 static constexpr int SYNC_BTN_W_MAX = 110;
 static constexpr int SYNC_BTN_H_MAX = 30;
 static constexpr int GAP = 4;
+static constexpr int SWIPE_START_PX = 8;
+static constexpr int SWIPE_STEP_PX = 6;
 #endif
 
 // Which external clock sources this board's USB mode has
@@ -76,6 +82,12 @@ ScreenMain::ScreenMain()
     , m_lastExt10(-1)
     , m_lastFlags(0)
     , m_lastExtDrawUs(0)
+    , m_swipeTouch(-1)
+    , m_swiping(false)
+    , m_swipeVertical(true)
+    , m_swipeX(0)
+    , m_swipeY(0)
+    , m_swipeBpm(0)
 {
     static const struct { int button; bool available; } order[SOURCE_SLOTS] = {
         { BTN_SOURCE_USB,        CLOCK_FROM_USB_HOST },
@@ -150,11 +162,15 @@ void ScreenMain::enter()
 {
     m_isActive = true;
     m_lastBpm = -1;
+    m_swipeTouch = -1;
+    m_swiping = false;
 }
 
 void ScreenMain::leave()
 {
     m_isActive = false;
+    m_swipeTouch = -1;
+    m_swiping = false;
 }
 
 // What decides colours and labels, besides the numbers
@@ -165,6 +181,7 @@ uint32_t ScreenMain::stateFlags() const
     if (ui.getSyncMode()) f |= 1;
     if (ui_tempo_running()) f |= 2;
     if (ui.getExternalBpm() > 0) f |= 4;
+    if (m_swiping) f |= 8;
     f |= (uint32_t)ui.getExternalBpmSourceSelection() << 4;
     for (int i = 0; i < m_sourceCount; i++) {
         if (ui.getExternalBpmBySource(sourceInterface(m_sourceButtons[i])) > 0) f |= 1u << (8 + i);
@@ -231,7 +248,8 @@ void ScreenMain::render(LovyanGFX* g, int ox, int oy)
     int totalW = numW + 6 * ls + 3 * 6 * ls;
     int bx = m_bpmRect.x + (m_bpmRect.w - totalW) / 2 - ox;
     int by = m_bpmRect.y + (m_bpmRect.h - 8 * s) / 2 - oy;
-    uint16_t bpmColor = ui_tempo_running() ? UI_COLOR_GREEN : (sync ? UI_COLOR_CYAN : UI_COLOR_WHITE);
+    uint16_t bpmColor = m_swiping ? UI_COLOR_YELLOW
+                      : ui_tempo_running() ? UI_COLOR_GREEN : (sync ? UI_COLOR_CYAN : UI_COLOR_WHITE);
     g->setTextSize(s);
     g->setTextColor(bpmColor, UI_COLOR_BLACK);
     g->setCursor(bx, by);
@@ -341,9 +359,26 @@ midi_interface_t ScreenMain::sourceInterface(int button)
 
 void ScreenMain::onTouch(int touchId, int x, int y, bool pressed)
 {
-    (void)touchId;
-    if (!pressed) return;
+    if (!pressed) {
+        if (touchId == m_swipeTouch) {
+            m_swipeTouch = -1;
+            if (m_swiping) {
+                m_swiping = false;
+                m_needsRedraw = true;   // Back from the swipe colour
+            }
+        }
+        return;
+    }
     if (m_bpmRect.contains(x, y)) {
+        // The tap counts on the press, where its timing is. Should the touch
+        // turn into a swipe, onTouchMove takes the tap back.
+        if (m_swipeTouch < 0) {
+            m_swipeTouch = touchId;
+            m_swiping = false;
+            m_swipeX = x;
+            m_swipeY = y;
+            m_swipeBpm = UIManager::getInstance().getInternalBpm();
+        }
         ui_tempo_tap();
         return;
     }
@@ -353,6 +388,32 @@ void ScreenMain::onTouch(int touchId, int x, int y, bool pressed)
             return;
         }
     }
+}
+
+// A swipe from the BPM: up or right is faster, 1 BPM every SWIPE_STEP_PX
+// along the axis it started on, counted from the BPM before the press
+void ScreenMain::onTouchMove(int touchId, int x, int y)
+{
+    if (touchId != m_swipeTouch) return;
+    UIManager& ui = UIManager::getInstance();
+    if (ui.getSyncMode()) return;   // The tempo is the external clock's
+
+    int dx = x - m_swipeX;
+    int dy = m_swipeY - y;   // Up is positive
+    if (!m_swiping) {
+        int adx = dx < 0 ? -dx : dx;
+        int ady = dy < 0 ? -dy : dy;
+        if (adx < SWIPE_START_PX && ady < SWIPE_START_PX) return;
+        m_swiping = true;
+        m_swipeVertical = ady >= adx;
+        // Not a tap after all: forget it, and the tempo it may have set
+        ui_tempo_tap_reset();
+        m_swipeBpm = (float)(int)(m_swipeBpm + 0.5f);
+        m_needsRedraw = true;
+    }
+
+    int steps = (m_swipeVertical ? dy : dx) / SWIPE_STEP_PX;
+    ui.setBpm(m_swipeBpm + (float)steps);
 }
 
 void ScreenMain::handleButtonPress(int buttonId)

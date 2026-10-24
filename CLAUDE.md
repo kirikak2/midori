@@ -839,8 +839,9 @@ keys.show
   `bpm` を省略すると現在のクロックのテンポに従い、指定するとクロックのテンポを設定する。`output:` なしは従来どおり
   Ruby の計時（`60000/bpm/subdivisions`）でブロックを呼ぶ（テンポの変化には追従）。ホストテスト:
   `ruby host_test/clock_test.rb`（picoruby-midi ディレクトリで）
-- 画面の -10 / -1 / +1 / +10 ボタンと Bar / Beat 表示・拍のバーは削除。BPM は `UI::Tempo.bpm` / `bpm=`
-  （ノブ・パッドからはスクリプトでつなぐ）。TAP は BPM 表示のタップかナビバー
+- 画面の -10 / -1 / +1 / +10 ボタンと Bar / Beat 表示・拍のバーは削除。BPM は BPM 表示のスワイプ（1 BPM 刻み、
+  2026-10-24）か `UI::Tempo.bpm` / `bpm=`（ノブ・パッドからはスクリプトでつなぐ）。TAP は BPM 表示のタップかナビバー
+  （押下で TAP を数え、スワイプになったらその TAP を取り消す）
 - 画面は `setArea()` の矩形に収まるよう配置を計算し、レイアウト DSL の `tempo`（`UI_WIDGET_TEMPO`）でセルに置ける
 
 ## MIDI Devices 画面（UI::MIDIDevices / 2026-10-22）

@@ -118,6 +118,12 @@ void ui_tempo_tap(void)
     }
 }
 
+void ui_tempo_tap_reset(void)
+{
+    s_tapCount = 0;
+    s_tapIndex = 0;
+}
+
 bool ui_tempo_sync(void)
 {
     return ui_get_sync_mode();

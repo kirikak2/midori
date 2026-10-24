@@ -802,6 +802,7 @@ uint8_t ui_tempo_bit(void);           // The clock's transport bit, 0 if there i
 void    ui_tempo_set_running(bool running);   // Sends Start (FA) / Stop (FC)
 bool    ui_tempo_running(void);
 void    ui_tempo_tap(void);           // One tap of TAP tempo
+void    ui_tempo_tap_reset(void);     // Forget the taps so far
 bool    ui_tempo_sync(void);          // Following the external clock
 void    ui_tempo_set_sync(bool on);   // Only takes when an external clock is there
 

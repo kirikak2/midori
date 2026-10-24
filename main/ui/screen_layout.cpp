@@ -364,7 +364,10 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         getScreenKeys().onTouch(touchId, x, y, false);
         return;
     }
-    if (kind == UI_WIDGET_TEMPO) return;
+    if (kind == UI_WIDGET_TEMPO) {
+        getScreenMain().onTouch(touchId, x, y, false);
+        return;
+    }
 
     ui_layout::lock();
     LayoutDef* def = ui_layout::get(m_slot);
@@ -410,7 +413,12 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         getScreenKeys().onTouchMove(touchId, x, y);
         return;
     }
-    if (kind == UI_WIDGET_TEMPO) return;
+    if (kind == UI_WIDGET_TEMPO) {
+        m_lastX[touchId] = x;
+        m_lastY[touchId] = y;
+        getScreenMain().onTouchMove(touchId, x, y);
+        return;
+    }
     if (kind != UI_WIDGET_KNOB) return;
 
     int dx = x - m_lastX[touchId];
