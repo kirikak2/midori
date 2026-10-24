@@ -893,8 +893,8 @@ Back は Home を除いた直前の画面で、押すたびに 2 画面を往復
 
 詳細は [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) を参照。
 
-pad / knob / XYPad / Tombola / Keys / Tempo を 1 画面にグリッドで並べる。最大 4 レイアウト、それぞれが
-Home のタイル。**列・行は 0 始まり**、範囲は Range（`col: 0..2`）。
+pad / knob / XYPad / Tombola / Keys / Tempo を 1 画面にグリッドで並べる。レイアウトの数に上限はなく
+（2026-10-24 まで 4）、それぞれが Home のタイル（多ければ Home を縦にスクロール）。**列・行は 0 始まり**、範囲は Range（`col: 0..2`）。
 
 ```ruby
 UI.layout("Perform", cols: 4, rows: 3) do

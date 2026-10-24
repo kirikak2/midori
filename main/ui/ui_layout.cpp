@@ -10,9 +10,12 @@ static const char* TAG = "UI_LAYOUT";
 
 // Registry of layouts (docs/UI_LAYOUT_DSL.md). Layouts are heap-allocated on
 // commit (~2.5KB each) rather than kept in .bss: large static buffers in this
-// UI have broken the display before (docs/MEMORY_ALLOCATION.md).
+// UI have broken the display before (docs/MEMORY_ALLOCATION.md). The table is
+// indexed by layout id and grows as ids get larger; there is no fixed number
+// of layouts.
 
-static LayoutDef* s_layouts[UI_LAYOUT_MAX_LAYOUTS];
+static LayoutDef** s_layouts = nullptr;
+static int s_capacity = 0;
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lockBuf;
 
@@ -51,7 +54,7 @@ void unlock(void)
 
 LayoutDef* get(int slot)
 {
-    if (slot < 0 || slot >= UI_LAYOUT_MAX_LAYOUTS) return nullptr;
+    if (slot < 0 || slot >= s_capacity) return nullptr;
     LayoutDef* def = s_layouts[slot];
     if (!def || def->gen != s_gen) return nullptr;
     return def;
@@ -71,16 +74,15 @@ void set_last_shown(int slot)
 
 void collect(void)
 {
-    LayoutDef* dead[UI_LAYOUT_MAX_LAYOUTS] = {};
+    if (!s_lock) return;
     lock();
-    for (int i = 0; i < UI_LAYOUT_MAX_LAYOUTS; i++) {
+    for (int i = 0; i < s_capacity; i++) {
         if (s_layouts[i] && s_layouts[i]->gen != s_gen) {
-            dead[i] = s_layouts[i];
+            free(s_layouts[i]);
             s_layouts[i] = nullptr;
         }
     }
     unlock();
-    for (int i = 0; i < UI_LAYOUT_MAX_LAYOUTS; i++) free(dead[i]);
 }
 
 }  // namespace ui_layout
@@ -101,10 +103,34 @@ bool ui_layout_exists(int slot)
 int ui_layout_last_shown(void)
 {
     if (ui_layout_exists(s_lastShown)) return s_lastShown;
-    for (int i = 0; i < UI_LAYOUT_MAX_LAYOUTS; i++) {
-        if (ui_layout_exists(i)) return i;
+    return ui_layout_next(-1);
+}
+
+int ui_layout_next(int after)
+{
+    if (!s_lock) return -1;
+    int found = -1;
+    lock();
+    for (int i = after < 0 ? 0 : after + 1; i < s_capacity; i++) {
+        if (get(i)) {
+            found = i;
+            break;
+        }
     }
-    return -1;
+    unlock();
+    return found;
+}
+
+int ui_layout_count(void)
+{
+    if (!s_lock) return 0;
+    int n = 0;
+    lock();
+    for (int i = 0; i < s_capacity; i++) {
+        if (get(i)) n++;
+    }
+    unlock();
+    return n;
 }
 
 void ui_layout_title(int slot, char* buf, int len)
@@ -129,7 +155,7 @@ void ui_layout_cleanup(void)
 
 bool ui_layout_begin(int slot, const char* title)
 {
-    if (slot < 0 || slot >= UI_LAYOUT_MAX_LAYOUTS) return false;
+    if (slot < 0 || slot > UI_LAYOUT_MAX_ID) return false;
 
     free(s_building);
     s_building = (LayoutDef*)calloc(1, sizeof(LayoutDef));
@@ -220,6 +246,20 @@ bool ui_layout_commit(void)
     s_buildingSlot = -1;
 
     lock();
+    if (slot >= s_capacity) {
+        int cap = s_capacity ? s_capacity : 8;
+        while (cap <= slot) cap *= 2;
+        LayoutDef** grown = (LayoutDef**)realloc(s_layouts, sizeof(LayoutDef*) * cap);
+        if (!grown) {
+            unlock();
+            ESP_LOGE(TAG, "Failed to grow the layout table to %d", cap);
+            free(def);
+            return false;
+        }
+        memset(grown + s_capacity, 0, sizeof(LayoutDef*) * (cap - s_capacity));
+        s_layouts = grown;
+        s_capacity = cap;
+    }
     LayoutDef* old = s_layouts[slot];
     def->gen = s_gen;
     def->version = ++s_versionCounter;
@@ -233,7 +273,7 @@ bool ui_layout_commit(void)
 
 void ui_layout_delete(int slot)
 {
-    if (slot < 0 || slot >= UI_LAYOUT_MAX_LAYOUTS || !s_lock) return;
+    if (slot < 0 || slot >= s_capacity || !s_lock) return;
     lock();
     LayoutDef* old = s_layouts[slot];
     s_layouts[slot] = nullptr;

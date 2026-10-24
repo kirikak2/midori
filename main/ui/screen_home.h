@@ -32,9 +32,12 @@ private:
 
     // The menu as last drawn. Rebuilt every status poll; a change in which
     // tiles exist (a layout defined, a screen hidden) repaints everything.
-    MenuItem m_items[MENU_MAX_ITEMS];
+    // Heap arrays of m_capacity items, grown when layouts are added (there is
+    // no fixed number of them)
+    MenuItem* m_items;
     int m_itemCount;
-    char m_status[MENU_MAX_ITEMS][STATUS_LEN];
+    char (*m_status)[STATUS_LEN];
+    int m_capacity;
     int64_t m_lastPollUs;
 
     // First visible row, when there are more tiles than fit (CoreS3 with
@@ -56,7 +59,7 @@ private:
     void tileRect(int slot, int& x, int& y, int& w, int& h) const;  // slot = on-screen position
     int hitTest(int x, int y) const;   // Item index, or -1
 
-    void refreshItems(MenuItem* items, int& count);
+    bool reserve(int capacity);
     void tileLabel(const MenuItem& item, char* buf, int len) const;
     void tileStatus(const MenuItem& item, char* buf, int len) const;
 

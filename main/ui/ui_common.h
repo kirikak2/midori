@@ -403,7 +403,7 @@ typedef struct {
             uint8_t index;   // For UI_EVENT_SCREEN_CHANGE (ui_screen_index_t)
             uint8_t from;
             uint8_t source;  // ui_screen_source_t
-            int8_t  layout;  // Layout slot when index is UI_SCREEN_LAYOUT, else -1
+            int16_t layout;  // Layout id when index is UI_SCREEN_LAYOUT, else -1
         } screen;
         struct {
             uint8_t ball;    // For UI_EVENT_TOMBOLA_HIT
@@ -428,7 +428,7 @@ typedef struct {
             float   y;
         } xypad;
         struct {
-            uint8_t layout;  // For UI_EVENT_WIDGET: layout slot
+            uint16_t layout; // For UI_EVENT_WIDGET: layout id
             uint8_t id;      // Widget index within the layout
             uint8_t kind;    // ui_widget_kind_t
             uint8_t phase;   // ui_widget_phase_t
@@ -656,9 +656,10 @@ void ui_keys_cleanup(void);
 
 // --- Layouts ----------------------------------------------------------------
 // Script-defined screens of pads, knobs, XYPad... placed on a grid by Ruby
-// (docs/UI_LAYOUT_DSL.md). Up to UI_LAYOUT_MAX_LAYOUTS live at once, each a
-// Home tile, all shown through UI_SCREEN_LAYOUT. Implemented in ui_layout.cpp.
-#define UI_LAYOUT_MAX_LAYOUTS  4
+// (docs/UI_LAYOUT_DSL.md). Any number live at once (memory permitting), each a
+// Home tile, all shown through UI_SCREEN_LAYOUT. A layout is known by its id,
+// 0..UI_LAYOUT_MAX_ID, which Ruby picks. Implemented in ui_layout.cpp.
+#define UI_LAYOUT_MAX_ID    0x7FFF
 #define UI_LAYOUT_MAX_WIDGETS 32
 #define UI_LAYOUT_TITLE_LEN   24
 
@@ -704,10 +705,14 @@ bool  ui_layout_knob_set_value(int slot, int id, float value);
 bool  ui_layout_knob_reset(int slot, int id);
 
 // Queues a layout knob change, coalesced per knob like ui_knob_event_post
-void ui_widget_knob_event_post(uint8_t layout, uint8_t id, float value, bool final);
+void ui_widget_knob_event_post(int layout, uint8_t id, float value, bool final);
 
 bool ui_layout_exists(int slot);
 int  ui_layout_last_shown(void);                 // -1 before any was shown
+// The next live layout id after `after` (-1 for the first), or -1. Ids go up
+// in the order Ruby defined the layouts.
+int  ui_layout_next(int after);
+int  ui_layout_count(void);
 void ui_layout_title(int slot, char* buf, int len);
 // The script that defined them is gone: drop every layout. Any task.
 void ui_layout_cleanup(void);

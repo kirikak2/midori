@@ -19,7 +19,8 @@
 #   end.show
 
 $ui_layouts = {}            # title => UI::Layout
-$ui_widget_callbacks = {}   # slot * UI::Layout::KEY_STRIDE + id => handle
+$ui_widget_callbacks = {}   # layout id * UI::Layout::KEY_STRIDE + widget id => handle
+$ui_layout_next_id = 0
 
 module UI
   # A fixed-size grid track, as opposed to a weight: cols: [UI.px(60), 1, 1]
@@ -191,7 +192,9 @@ module UI
   end
 
   class Layout
-    MAX_LAYOUTS = 4
+    # Layouts are known to the C side by an id (there is no fixed number of
+    # them): handed out in definition order, so the Home tiles keep that order
+    MAX_ID = 0x7FFF
     MAX_WIDGETS = 32
     KEY_STRIDE = 64
 
@@ -424,10 +427,7 @@ module UI
 
       layout = $ui_layouts[title]
       unless layout
-        if $ui_layouts.size >= MAX_LAYOUTS
-          raise ArgumentError, "too many layouts (max #{MAX_LAYOUTS})"
-        end
-        layout = Layout.new(title, free_slot)
+        layout = Layout.new(title, next_id)
         $ui_layouts[title] = layout
       end
       warnings.each { |w| UI.log("layout #{title}: #{w}") }
@@ -435,11 +435,15 @@ module UI
       layout
     end
 
-    def self.free_slot
+    # A fresh id: one more than the last, so a deleted layout's id (and any
+    # event still on its way for it) does not land on a new layout soon
+    def self.next_id
       used = $ui_layouts.values.map { |l| l.slot }
-      i = 0
-      i += 1 while used.include?(i)
-      i
+      raise ArgumentError, "too many layouts" if used.size > MAX_ID
+      id = $ui_layout_next_id
+      id = (id + 1) % (MAX_ID + 1) while used.include?(id)
+      $ui_layout_next_id = (id + 1) % (MAX_ID + 1)
+      id
     end
 
     attr_reader :title, :slot

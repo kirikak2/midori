@@ -309,7 +309,7 @@ check "the tempo widget is UI::Tempo", UI::Tempo, clocked.widgets[0]
 clocked.delete
 
 mix = UI.layout("Mix") { |l| l.knob label: "Vol" }
-check "second layout gets slot 1", 1, mix.slot
+check "a new layout gets the next id", 3, mix.slot
 
 $calls.clear
 again = UI.layout("Perform", cols: 1, gap: 0) { pad label: "Snare" }
@@ -318,16 +318,19 @@ check "redefinition replaces the widgets", 1, again.widgets.size
 UI.dispatch_widget_event(widget_event(again, 1, :change, value: 1.0))
 check "old widgets' callbacks are gone", [], hits
 
-check_raises("layout limit", "too many layouts") do
-  UI.layout("C") {}
-  UI.layout("D") {}
-  UI.layout("E") {}
-end
+many = (0...10).map { |i| UI.layout("Many #{i}") {} }
+check "no fixed number of layouts", 10, many.size
+check "ids go up in definition order", (4..13).to_a, many.map { |l| l.slot }
+many.each { |l| l.delete }
 
 mix.delete
-check "delete frees the slot", [:delete, 1], $calls.last
+check "delete removes that id", [:delete, 3], $calls.last
 check "deleted layout cannot be shown", nil, mix.layout_slot
-check "freed slot is reused", 1, UI.layout("E") {}.slot
+check "a deleted id is not handed out again at once", 14, UI.layout("E") {}.slot
+
+$ui_layout_next_id = UI::Layout::MAX_ID
+check "ids wrap past MAX_ID", UI::Layout::MAX_ID, UI.layout("F") {}.slot
+check "...skipping the ids in use", 1, UI.layout("G") {}.slot
 
 check_raises("errors leave the old layout alone", "outside") do
   UI.layout("Perform", cols: 1) { pad col: 1 }

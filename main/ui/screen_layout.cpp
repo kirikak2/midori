@@ -153,7 +153,7 @@ void ScreenLayout::paintWidget(LayoutDef* def, int id)
 
 void ScreenLayout::onShowArg(int arg)
 {
-    if (arg >= 0 && arg < UI_LAYOUT_MAX_LAYOUTS) m_slot = arg;
+    if (arg >= 0 && arg <= UI_LAYOUT_MAX_ID) m_slot = arg;
 }
 
 void ScreenLayout::enter()
@@ -210,7 +210,7 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
         if (wd.kind == UI_WIDGET_PAD && !isHeld(id, -1)) {
             padPress(def, id, false);
         } else if (wd.kind == UI_WIDGET_KNOB && m_moved[t] && wd.knob.notify) {
-            ui_widget_knob_event_post((uint8_t)m_slot, (uint8_t)id, wd.knob.value, true);
+            ui_widget_knob_event_post(m_slot, (uint8_t)id, wd.knob.value, true);
         }
         m_moved[t] = false;
     }
@@ -292,7 +292,7 @@ void ScreenLayout::padPress(LayoutDef* def, int id, bool pressed)
 
     ui_event_t event;
     event.type = UI_EVENT_WIDGET;
-    event.data.widget.layout = (uint8_t)m_slot;
+    event.data.widget.layout = (uint16_t)m_slot;
     event.data.widget.id = (uint8_t)id;
     event.data.widget.kind = UI_WIDGET_PAD;
     event.data.widget.phase = pressed ? UI_WIDGET_PRESS : UI_WIDGET_RELEASE;
@@ -380,7 +380,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
             // The value left behind has to reach the script even if it
             // dropped every intermediate one
             if (m_moved[touchId] && wd.knob.notify) {
-                ui_widget_knob_event_post((uint8_t)m_slot, (uint8_t)id, wd.knob.value, true);
+                ui_widget_knob_event_post(m_slot, (uint8_t)id, wd.knob.value, true);
             }
         }
     }
@@ -451,7 +451,7 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         m_moved[touchId] = true;
         paintWidget(def, id);
         if (k.notify) {
-            ui_widget_knob_event_post((uint8_t)m_slot, (uint8_t)id, k.value, false);
+            ui_widget_knob_event_post(m_slot, (uint8_t)id, k.value, false);
         }
     }
     ui_layout::unlock();

@@ -371,15 +371,20 @@ bool UIManager::isAvailable(ui_screen_index_t index, int arg) const
     return true;
 }
 
+int UIManager::menuCapacity() const
+{
+    return (int)(sizeof(MENU_ORDER) / sizeof(MENU_ORDER[0])) + ui_layout_count();
+}
+
 int UIManager::buildMenu(MenuItem* out, int max) const
 {
     int n = 0;
     for (const auto& e : MENU_ORDER) {
         if (e.screen == UI_SCREEN_LAYOUT) {
-            for (int slot = 0; slot < UI_LAYOUT_MAX_LAYOUTS; slot++) {
+            for (int id = ui_layout_next(-1); id >= 0; id = ui_layout_next(id)) {
                 if (n >= max) return n;
-                if (!isAvailable(UI_SCREEN_LAYOUT, slot)) continue;
-                out[n++] = { UI_SCREEN_LAYOUT, slot, e.group };
+                if (!isAvailable(UI_SCREEN_LAYOUT, id)) continue;
+                out[n++] = { UI_SCREEN_LAYOUT, id, e.group };
             }
             continue;
         }
@@ -449,7 +454,7 @@ void UIManager::setScreen(ui_screen_index_t index, int arg, ui_screen_source_t s
     event.data.screen.index = (uint8_t)index;
     event.data.screen.from = (uint8_t)from;
     event.data.screen.source = (uint8_t)source;
-    event.data.screen.layout = (int8_t)m_currentArg;
+    event.data.screen.layout = (int16_t)m_currentArg;
     ui_event_push(&event);
 
     ESP_LOGD(TAG, "Switched to screen %d (arg %d)", m_currentIndex, arg);
@@ -476,9 +481,14 @@ void UIManager::goBack()
 
 bool UIManager::resolveStep(int dir, ui_screen_index_t& index, int& arg) const
 {
-    MenuItem items[MENU_MAX_ITEMS];
-    int n = buildMenu(items, MENU_MAX_ITEMS);
-    if (n == 0) return false;
+    int cap = menuCapacity();
+    MenuItem* items = (MenuItem*)malloc(sizeof(MenuItem) * cap);
+    if (!items) return false;
+    int n = buildMenu(items, cap);
+    if (n == 0) {
+        free(items);
+        return false;
+    }
 
     int pos = -1;
     for (int i = 0; i < n; i++) {
@@ -498,6 +508,7 @@ bool UIManager::resolveStep(int dir, ui_screen_index_t& index, int& arg) const
     }
     index = items[next].screen;
     arg = items[next].arg;
+    free(items);
     return true;
 }
 

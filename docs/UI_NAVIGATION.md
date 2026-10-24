@@ -58,7 +58,7 @@ Main → Pads → MIDI Info → Logs → Scripts → Settings → Tombola → Kn
 
 | グループ | 画面（シンボル） | タイルの表示 |
 |---|---|---|
-| 演奏 | `:pads` `:knobs` `:xypad` `:tombola` `:sequencer`（将来）、スクリプトが定義したレイアウト（1 つにつき 1 枚、最大 4） | 画面名（レイアウトは title）+ 状態（Tombola 再生中、Knobs の現在バンクなど） |
+| 演奏 | `:pads` `:knobs` `:xypad` `:tombola` `:sequencer`（将来）、スクリプトが定義したレイアウト（1 つにつき 1 枚、数の上限なし） | 画面名（レイアウトは title）+ 状態（Tombola 再生中、Knobs の現在バンクなど） |
 | テンポ / 状態 | `:tempo` `:midi_devices` | Tempo は BPM、MIDI Devices は機器の一覧とパッチ（docs/UI_MIDI_DEVICES.md） |
 | システム | `:scripts` `:logs` `:settings` | Scripts は実行中のスクリプト名 |
 
@@ -346,7 +346,7 @@ README / M5STACK_UI_DESIGN.md の画面遷移の説明を更新する。
 | D4 | Main の名前 | **Tempo に改名**。`:main` / `UI::SCREEN_MAIN` / `UI.main` は別名として残す | 3.1 / 4.1 / 4.2 / 6.2 / 7 章 |
 | D5 | Home の中央ボタン | **何も置かない** | 3.2 |
 | D6 | タイルの長押し | **何もしない** | 3.1 |
-| D7 | スクリプトが Home に足せる項目 | **レイアウトのみ**（1 レイアウト 1 タイル、最大 4） | 3.1 |
+| D7 | スクリプトが Home に足せる項目 | **レイアウトのみ**（1 レイアウト 1 タイル。2026-10-24 から数の上限なし） | 3.1 |
 | D8 | MIDI 入力からの切り替え | **従来の `MIDI::Input#on` を流用**。専用ヘルパは作らない | 5 章 |
 
 ## 10. 実装メモ

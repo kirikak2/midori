@@ -60,7 +60,7 @@ public:
 // (each script-defined layout is a tile of its own).
 struct MenuItem {
     ui_screen_index_t screen;
-    int arg;          // Layout slot, or -1
+    int arg;          // Layout id, or -1
     uint8_t group;    // MENU_GROUP_*
 };
 
@@ -70,8 +70,6 @@ enum {
     MENU_GROUP_SYSTEM,
 };
 
-// Upper bound of the menu: the fixed screens plus every layout slot
-static constexpr int MENU_MAX_ITEMS = 16;
 
 // UIManager singleton class
 class UIManager {
@@ -110,6 +108,8 @@ public:
     uint32_t getMenuHidden() const;
     bool isAvailable(ui_screen_index_t index, int arg) const;
     int buildMenu(MenuItem* out, int max) const;   // Visible items, menu order
+    // Room buildMenu needs right now: the fixed screens plus every live layout
+    int menuCapacity() const;
 
     // Script ended: put the menu back to its defaults. Any task.
     void scriptCleanup();

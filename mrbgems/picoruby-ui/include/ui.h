@@ -25,7 +25,7 @@ typedef struct {
     uint8_t screen;      /* For screen change events: the new screen */
     uint8_t screen_from;   /* ...the screen left */
     uint8_t screen_source; /* ...0 touch / 1 script / 2 system */
-    int8_t  screen_layout; /* ...layout slot when screen is the layout screen, else -1 */
+    int16_t screen_layout; /* ...layout id when screen is the layout screen, else -1 */
     uint8_t hit_ball;    /* For tombola hit events */
     uint8_t hit_side;    /* For tombola hit events */
     uint8_t hit_note;    /* For tombola hit events */
@@ -41,7 +41,7 @@ typedef struct {
     float xypad_bend;      /* Meaningful when the slot's x_mode is :note */
     float xypad_x;         /* Meaningful when the slot's x_mode is :cc */
     float xypad_y;
-    uint8_t widget_layout; /* For layout widget events: layout slot */
+    uint16_t widget_layout; /* For layout widget events: layout id */
     uint8_t widget_id;     /* ...widget index within the layout */
     uint8_t widget_kind;   /* ...0 pad / 1 knob */
     uint8_t widget_phase;  /* ...0 press / 1 release / 2 change */

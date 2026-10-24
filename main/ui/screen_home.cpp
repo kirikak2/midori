@@ -58,7 +58,10 @@ static const char* screenName(ui_screen_index_t screen)
 
 ScreenHome::ScreenHome()
     : m_isActive(false)
+    , m_items(nullptr)
     , m_itemCount(0)
+    , m_status(nullptr)
+    , m_capacity(0)
     , m_lastPollUs(0)
     , m_scrollRow(0)
     , m_touchId(-1)
@@ -67,7 +70,6 @@ ScreenHome::ScreenHome()
     , m_scrolled(false)
     , m_pressedTile(-1)
 {
-    memset(m_status, 0, sizeof(m_status));
 }
 
 // --- Geometry --------------------------------------------------------------
@@ -115,9 +117,18 @@ int ScreenHome::hitTest(int x, int y) const
 
 // --- Content ---------------------------------------------------------------
 
-void ScreenHome::refreshItems(MenuItem* items, int& count)
+bool ScreenHome::reserve(int capacity)
 {
-    count = UIManager::getInstance().buildMenu(items, MENU_MAX_ITEMS);
+    if (capacity <= m_capacity) return true;
+    MenuItem* items = (MenuItem*)realloc(m_items, sizeof(MenuItem) * capacity);
+    if (!items) return false;
+    m_items = items;
+    char (*status)[STATUS_LEN] = (char (*)[STATUS_LEN])realloc(m_status, STATUS_LEN * capacity);
+    if (!status) return false;
+    memset(status + m_capacity, 0, STATUS_LEN * (capacity - m_capacity));
+    m_status = status;
+    m_capacity = capacity;
+    return true;
 }
 
 void ScreenHome::tileLabel(const MenuItem& item, char* buf, int len) const
@@ -219,9 +230,14 @@ void ScreenHome::drawAll()
 
 void ScreenHome::poll(bool force)
 {
-    MenuItem items[MENU_MAX_ITEMS];
-    int count;
-    refreshItems(items, count);
+    UIManager& ui = UIManager::getInstance();
+    int cap = ui.menuCapacity();
+    MenuItem* items = (MenuItem*)malloc(sizeof(MenuItem) * cap);
+    if (!items || !reserve(cap)) {
+        free(items);
+        return;
+    }
+    int count = ui.buildMenu(items, cap);
 
     bool sameItems = (count == m_itemCount);
     for (int i = 0; sameItems && i < count; i++) {
@@ -230,6 +246,7 @@ void ScreenHome::poll(bool force)
 
     if (!sameItems || force) {
         memcpy(m_items, items, sizeof(MenuItem) * count);
+        free(items);
         m_itemCount = count;
         int maxScroll = totalRows() - ROWS;
         if (maxScroll < 0) maxScroll = 0;
@@ -242,6 +259,7 @@ void ScreenHome::poll(bool force)
         return;
     }
 
+    free(items);
     for (int i = 0; i < count; i++) {
         char st[STATUS_LEN];
         tileStatus(m_items[i], st, STATUS_LEN);
