@@ -10,6 +10,8 @@ load File.join(midi, "mrblib/midi_constants.rb")
 load File.join(midi, "mrblib/midi_device.rb")
 load File.join(midi, "mrblib/midi_filter.rb")
 load File.join(midi, "mrblib/midi_route.rb")
+load File.join(midi, "mrblib/midi_clock.rb")
+load File.join(midi, "mrblib/midi_filter_class.rb")
 
 $up = {}   # bit => connected?
 
@@ -84,12 +86,19 @@ module UI
     def _mididev_take_wanted; $wanted.shift; end
     def _mididev_serial; $serial; end
     def _tempo_bit; 0x40; end
+    # Named filters (test/midi_filters_test.rb covers them)
+    def _filter_define(name, label, params); true; end
+    def _filter_undefine(name); true; end
+    def _filter_serial; 0; end
+    def _filter_chains; []; end
+    def _filter_chain_set(src, dst, text, save); 1; end
   end
 end
 
 load File.expand_path("../mrblib/ui_tempo.rb", File.dirname(__FILE__))
 
 load File.expand_path("../mrblib/ui_midi_devices.rb", File.dirname(__FILE__))
+load File.expand_path("../mrblib/ui_midi_filters.rb", File.dirname(__FILE__))
 
 $passed = 0
 $failed = 0

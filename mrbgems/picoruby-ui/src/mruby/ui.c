@@ -1196,6 +1196,65 @@ mrb_ui_mididev_serial(mrb_state *mrb, mrb_value self)
     return mrb_fixnum_value(picoruby_ui_mididev_serial());
 }
 
+/* --- Named filters (docs/MIDI_FILTER_REGISTRY.md) --- */
+
+/* UI._filter_define(name, label, params) -> bool */
+static mrb_value
+mrb_ui_filter_define(mrb_state *mrb, mrb_value self)
+{
+    mrb_value name, label, params;
+    mrb_get_args(mrb, "ooo", &name, &label, &params);
+    return mrb_bool_value(picoruby_ui_filter_define(str_arg(mrb, name), str_arg(mrb, label),
+                                                    str_arg(mrb, params)));
+}
+
+/* UI._filter_undefine(name) -> bool */
+static mrb_value
+mrb_ui_filter_undefine(mrb_state *mrb, mrb_value self)
+{
+    mrb_value name;
+    mrb_get_args(mrb, "o", &name);
+    return mrb_bool_value(picoruby_ui_filter_undefine(str_arg(mrb, name)));
+}
+
+/* UI._filter_serial -> Integer */
+static mrb_value
+mrb_ui_filter_serial(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_filter_serial());
+}
+
+/* UI._filter_chains -> [[src, dst, rev, text], ...] (the live chains) */
+static mrb_value
+mrb_ui_filter_chains(mrb_state *mrb, mrb_value self)
+{
+    mrb_value list = mrb_ary_new(mrb);
+    int n = picoruby_ui_filter_live_count();
+    char *text = (char *)mrb_malloc(mrb, 512);
+    for (int i = 0; i < n; i++) {
+        int src, dst, rev;
+        if (!picoruby_ui_filter_live_get(i, &src, &dst, &rev, text, 512)) continue;
+        mrb_value e = mrb_ary_new_capa(mrb, 4);
+        mrb_ary_push(mrb, e, mrb_fixnum_value(src));
+        mrb_ary_push(mrb, e, mrb_fixnum_value(dst));
+        mrb_ary_push(mrb, e, mrb_fixnum_value(rev));
+        mrb_ary_push(mrb, e, mrb_str_new_cstr(mrb, text));
+        mrb_ary_push(mrb, list, e);
+    }
+    mrb_free(mrb, text);
+    return list;
+}
+
+/* UI._filter_chain_set(src, dst, text, save) -> revision (0: table full) */
+static mrb_value
+mrb_ui_filter_chain_set(mrb_state *mrb, mrb_value self)
+{
+    mrb_value src, dst, text, save;
+    mrb_get_args(mrb, "oooo", &src, &dst, &text, &save);
+    return mrb_fixnum_value(picoruby_ui_filter_chain_set(val_to_i(src), val_to_i(dst),
+                                                         str_arg(mrb, text), mrb_test(save) ? 1 : 0));
+}
+
 void
 mrb_picoruby_ui_gem_init(mrb_state *mrb)
 {
@@ -1297,6 +1356,11 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_mididev_take_wanted,    mrb_ui_mididev_take_wanted,    MRB_ARGS_NONE());
     DEF(_mididev_connected_mask, mrb_ui_mididev_connected_mask, MRB_ARGS_NONE());
     DEF(_mididev_serial,         mrb_ui_mididev_serial,         MRB_ARGS_NONE());
+    DEF(_filter_define,          mrb_ui_filter_define,          MRB_ARGS_REQ(3));
+    DEF(_filter_undefine,        mrb_ui_filter_undefine,        MRB_ARGS_REQ(1));
+    DEF(_filter_serial,          mrb_ui_filter_serial,          MRB_ARGS_NONE());
+    DEF(_filter_chains,          mrb_ui_filter_chains,          MRB_ARGS_NONE());
+    DEF(_filter_chain_set,       mrb_ui_filter_chain_set,       MRB_ARGS_REQ(4));
 
     /* Layouts */
     DEF(_display,          mrb_ui_display,          MRB_ARGS_NONE());

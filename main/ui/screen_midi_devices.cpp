@@ -6,8 +6,10 @@
 //
 // A cell between two devices is a route in picoruby-midi's table -- tap to
 // patch / unpatch, hold to pick what it passes (all, or any channels and / or the
-// clock). The Prog column picks the program's IN, the Prog row its OUT. Hold a
-// device's name for its details.
+// clock), or -- on the picker's Filters tab -- the named filters chained on it
+// (docs/MIDI_FILTER_REGISTRY.md) and, holding one, its parameters. The Prog
+// column picks the program's IN, the Prog row its OUT. Hold a device's name
+// for its details.
 
 #include "sdkconfig.h"
 #include "screen_midi_devices.h"
@@ -22,6 +24,7 @@
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 // Global instance
 static ScreenMidiDevices s_screenMidiDevices;
@@ -74,6 +77,22 @@ static constexpr int PICK_CLOCK = -2;
 static constexpr int PICK_OFF = -3;
 static constexpr int PICK_NONE = -4;      // An empty slot
 static constexpr int PICK_DONE = -5;
+static constexpr int PICK_SLOTS = PICK_COLS * PICK_ROWS;
+
+// The picker's header row: the patch's name, then the Channel / Filters tabs
+static constexpr int TAB_H = PICK_BTN_H * 2 / 3;
+
+// Parameter page: rows of label, then -/value/+ (or one button for an enum
+// or a bool); Prev / Next when they do not fit, Reset and Done at the bottom
+static constexpr int PARAM_ROW_H = PICK_BTN_H * 2 / 3;
+static constexpr int PARAM_MINUS = 0;
+static constexpr int PARAM_PLUS = 1;
+static constexpr int PARAM_CYCLE = 2;
+static constexpr int PARAM_RESET = 1000;
+static constexpr int PARAM_DONE = 1001;
+static constexpr int PARAM_PREV = 1002;
+static constexpr int PARAM_NEXT = 1003;
+static constexpr uint32_t REPEAT_MS = 100;   // A held -/+
 
 static void print_fit(const char* text, int maxChars)
 {
@@ -158,6 +177,12 @@ ScreenMidiDevices::ScreenMidiDevices()
     , m_overlayFrom(-1)
     , m_overlayTo(-1)
     , m_overlayDev(-1)
+    , m_pickTab(TAB_CHANNEL)
+    , m_scratch(nullptr)
+    , m_paramStage(-1)
+    , m_paramPage(0)
+    , m_repeatHit(-1)
+    , m_repeatMs(0)
 {
 }
 
@@ -166,6 +191,7 @@ void ScreenMidiDevices::enter()
     m_isActive = true;
     m_overlay = OVERLAY_NONE;
     m_touchId = -1;
+    m_repeatHit = -1;
     rebuild();
     m_signature = signature();
 }
@@ -238,6 +264,7 @@ uint32_t ScreenMidiDevices::signature() const
         }
     };
     mix(ui_mididev_serial());
+    mix(ui_filter_serial());
     mix(ui_mididev_connected_mask());
     mix((uint32_t)ui_mididev_selected(false) + 1);
     mix((uint32_t)ui_mididev_selected(true) + 1);
@@ -265,6 +292,13 @@ void ScreenMidiDevices::update()
     if (m_touchId >= 0 && !m_longFired && now - m_touchMs >= LONG_PRESS_MS) {
         m_longFired = true;
         longPress(m_touchX, m_touchY);
+    }
+
+    // A -/+ held down on the parameter page steps on
+    if (m_repeatHit >= 0 && m_touchId >= 0 && now - m_repeatMs >= REPEAT_MS) {
+        m_repeatMs = now;
+        applyParamHit(m_repeatHit);
+        m_needsRedraw = true;
     }
 
     if (now - m_lastCheckMs >= CHECK_MS) {
@@ -300,6 +334,7 @@ void ScreenMidiDevices::draw()
     drawGrid();
     if (m_overlay == OVERLAY_CHANNEL) drawChannelPicker();
     if (m_overlay == OVERLAY_DETAIL) drawDetail();
+    if (m_overlay == OVERLAY_PARAMS) drawParams();
 }
 
 void ScreenMidiDevices::drawGrid()
@@ -440,12 +475,18 @@ void ScreenMidiDevices::drawCell(int row, int col)
         print_fit(buf, maxChars);
         gfx.setTextSize(TEXT_SIZE);
     }
-    // A Ruby filter (MIDI.filter) on this route
-    if (a.bit && b.bit && (MIDI_route_filtered(a.bit) & b.bit)) {
+    // Named filters chained on it ("f2": two of them), or a Ruby filter
+    // (MIDI.filter) of a script's
+    int chained = (a.bit && b.bit) ? ui_filter_chain_len(a.bit, b.bit)
+                                   : ui_filter_saved_len(a.key, b.key);
+    if (chained > 0 || (a.bit && b.bit && (MIDI_route_filtered(a.bit) & b.bit))) {
+        char f[16];
+        if (chained > 0) snprintf(f, sizeof(f), "f%d", chained);
+        else snprintf(f, sizeof(f), "f");
         gfx.setTextSize(1);
         gfx.setTextColor(UI_COLOR_YELLOW);
-        gfx.setCursor(x + g.cellW - 8, y + 2);
-        gfx.print("f");
+        gfx.setCursor(x + g.cellW - 2 - 6 * (int)strlen(f), y + 2);
+        gfx.print(f);
         gfx.setTextSize(TEXT_SIZE);
     }
 }
@@ -454,7 +495,7 @@ void ScreenMidiDevices::drawCell(int row, int col)
 static void picker_rect(int* px, int* py, int* pw, int* ph)
 {
     *pw = PICK_COLS * PICK_BTN_W + (PICK_COLS + 1) * MARGIN;
-    *ph = PICK_ROWS * PICK_BTN_H + (PICK_ROWS + 1) * MARGIN + CHAR_H + MARGIN;
+    *ph = PICK_ROWS * PICK_BTN_H + (PICK_ROWS + 1) * MARGIN + TAB_H + MARGIN;
     *px = (UI_SCREEN_WIDTH - *pw) / 2;
     *py = UI_CONTENT_Y + (UI_CONTENT_HEIGHT - *ph) / 2;
 }
@@ -481,6 +522,58 @@ static bool picker_on(int v, uint32_t sel)
     }
 }
 
+// The tabs' boxes, right-aligned in the header row
+static void tab_rect(int px, int py, int pw, int tab, int* x, int* y, int* w, int* h)
+{
+    *w = PICK_BTN_W + PICK_BTN_W / 2;
+    *h = TAB_H;
+    *x = px + pw - MARGIN - (2 - tab) * (*w + MARGIN) + MARGIN;
+    *y = py + MARGIN;
+}
+
+static void slot_rect(int px, int py, int i, int* x, int* y)
+{
+    *x = px + MARGIN + (i % PICK_COLS) * (PICK_BTN_W + MARGIN);
+    *y = py + 2 * MARGIN + TAB_H + (i / PICK_COLS) * (PICK_BTN_H + MARGIN);
+}
+
+void ScreenMidiDevices::drawPickerHeader(int px, int py, int pw, bool tabs)
+{
+    auto& gfx = ui_gfx();
+    char from[24], to[24], title[64];
+    displayName(m_grid.devs[m_overlayFrom], from, sizeof(from));
+    displayName(m_grid.devs[m_overlayTo], to, sizeof(to));
+    if (m_overlay == OVERLAY_PARAMS && m_scratch) {
+        snprintf(title, sizeof(title), "%s  %s > %s", m_scratch->def.label, from, to);
+    } else {
+        snprintf(title, sizeof(title), "%s > %s", from, to);
+    }
+    int titleW = pw - 2 * MARGIN;
+    if (tabs) {
+        int tx, ty, tw, th;
+        tab_rect(px, py, pw, 0, &tx, &ty, &tw, &th);
+        titleW = tx - px - 2 * MARGIN;
+        static const char* const NAMES[2] = { "Ch", "Filters" };
+        for (int t = 0; t < 2; t++) {
+            tab_rect(px, py, pw, t, &tx, &ty, &tw, &th);
+            bool on = (int)m_pickTab == t;
+            uint16_t bg = on ? (uint16_t)UI_COLOR_WHITE : (uint16_t)UI_COLOR_BLACK;
+            gfx.fillRoundRect(tx, ty, tw, th, 4, bg);
+            gfx.drawRoundRect(tx, ty, tw, th, 4, UI_COLOR_GRAY);
+            int n = (int)strlen(NAMES[t]);
+            int fit = (tw - 4) / CHAR_W;
+            if (n > fit) n = fit;
+            gfx.setTextColor(on ? UI_COLOR_BLACK : UI_COLOR_WHITE, bg);
+            gfx.setCursor(tx + (tw - n * CHAR_W) / 2, ty + (th - CHAR_H) / 2);
+            print_fit(NAMES[t], fit);
+        }
+    }
+    gfx.setTextSize(TEXT_SIZE);
+    gfx.setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
+    gfx.setCursor(px + MARGIN, py + MARGIN + (TAB_H - CHAR_H) / 2);
+    print_fit(title, titleW / CHAR_W);
+}
+
 void ScreenMidiDevices::drawChannelPicker()
 {
     auto& gfx = ui_gfx();
@@ -488,20 +581,17 @@ void ScreenMidiDevices::drawChannelPicker()
     picker_rect(&px, &py, &pw, &ph);
     gfx.fillRoundRect(px, py, pw, ph, 6, UI_COLOR_DARKGRAY);
     gfx.drawRoundRect(px, py, pw, ph, 6, UI_COLOR_WHITE);
-
-    char from[24], to[24], title[64];
-    displayName(m_grid.devs[m_overlayFrom], from, sizeof(from));
-    displayName(m_grid.devs[m_overlayTo], to, sizeof(to));
-    snprintf(title, sizeof(title), "%s > %s", from, to);
     gfx.setTextSize(TEXT_SIZE);
-    gfx.setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
-    gfx.setCursor(px + MARGIN, py + MARGIN);
-    print_fit(title, (pw - 2 * MARGIN) / CHAR_W);
+    drawPickerHeader(px, py, pw, true);
+    if (m_pickTab == TAB_FILTERS) {
+        drawFilterButtons(px, py);
+        return;
+    }
 
     uint32_t current = ui_mididev_patch_selection(m_overlayFrom, m_overlayTo);
     for (int i = 0; i < PICK_COLS * PICK_ROWS; i++) {
-        int bx = px + MARGIN + (i % PICK_COLS) * (PICK_BTN_W + MARGIN);
-        int by = py + 2 * MARGIN + CHAR_H + (i / PICK_COLS) * (PICK_BTN_H + MARGIN);
+        int bx, by;
+        slot_rect(px, py, i, &bx, &by);
         int v = picker_value(i);
         if (v == PICK_NONE) continue;
         bool on = picker_on(v, current);
@@ -527,8 +617,8 @@ bool ScreenMidiDevices::channelPickerHit(int x, int y, int* channel) const
     int px, py, pw, ph;
     picker_rect(&px, &py, &pw, &ph);
     for (int i = 0; i < PICK_COLS * PICK_ROWS; i++) {
-        int bx = px + MARGIN + (i % PICK_COLS) * (PICK_BTN_W + MARGIN);
-        int by = py + 2 * MARGIN + CHAR_H + (i / PICK_COLS) * (PICK_BTN_H + MARGIN);
+        int bx, by;
+        slot_rect(px, py, i, &bx, &by);
         if (x >= bx && x < bx + PICK_BTN_W && y >= by && y < by + PICK_BTN_H) {
             if (picker_value(i) == PICK_NONE) return false;
             *channel = picker_value(i);
@@ -636,6 +726,14 @@ bool ScreenMidiDevices::hit(int x, int y, int* row, int* col) const
 
 void ScreenMidiDevices::tap(int x, int y)
 {
+    if (m_overlay == OVERLAY_PARAMS) {
+        tapParams(x, y);
+        return;
+    }
+    if (m_overlay == OVERLAY_CHANNEL && (tabHit(x, y) >= 0 || m_pickTab == TAB_FILTERS)) {
+        tapPicker(x, y);
+        return;
+    }
     if (m_overlay == OVERLAY_CHANNEL) {
         int v;
         if (!channelPickerHit(x, y, &v)) {
@@ -699,6 +797,30 @@ void ScreenMidiDevices::tap(int x, int y)
 
 void ScreenMidiDevices::longPress(int x, int y)
 {
+    // Filters tab: hold a chained filter for its parameters
+    if (m_overlay == OVERLAY_CHANNEL && m_pickTab == TAB_FILTERS) {
+        int slot = filterSlotHit(x, y);
+        if (slot < 0 || !scratch() || slot >= m_scratch->itemCount) return;
+        const FilterItem& it = m_scratch->items[slot];
+        int pos = chainPosition(it.name);
+        if (pos < 0 || !it.registered || !loadDef(it.name)) return;
+        m_overlay = OVERLAY_PARAMS;
+        m_paramStage = pos;
+        m_paramPage = 0;
+        m_needsRedraw = true;
+        return;
+    }
+    // Parameter page: a held -/+ repeats
+    if (m_overlay == OVERLAY_PARAMS) {
+        int code = paramHit(x, y);
+        if (code >= 0 && code < PARAM_RESET && (code & 3) != PARAM_CYCLE) {
+            m_repeatHit = code;
+            m_repeatMs = (uint32_t)(esp_timer_get_time() / 1000);
+            applyParamHit(code);
+            m_needsRedraw = true;
+        }
+        return;
+    }
     if (m_overlay != OVERLAY_NONE) return;
     const Grid& g = m_grid;
     int row, col;
@@ -735,6 +857,7 @@ void ScreenMidiDevices::onTouch(int touchId, int x, int y, bool pressed)
     }
     if (touchId != m_touchId) return;
     m_touchId = -1;
+    m_repeatHit = -1;
     if (!m_longFired) tap(m_touchX, m_touchY);
 }
 
@@ -746,6 +869,469 @@ void ScreenMidiDevices::onTouchMove(int touchId, int x, int y)
     if (dx * dx + dy * dy > MOVE_SLOP * MOVE_SLOP) {
         m_longFired = true;   // A drag: neither a tap nor a hold
     }
+}
+
+// --- Filters tab and parameter page -----------------------------------------------------
+
+bool ScreenMidiDevices::scratch()
+{
+    if (!m_scratch) m_scratch = (Scratch*)calloc(1, sizeof(Scratch));
+    return m_scratch != nullptr;
+}
+
+bool ScreenMidiDevices::loadChain()
+{
+    if (!scratch()) return false;
+    const ui_mididev_t& a = m_grid.devs[m_overlayFrom];
+    const ui_mididev_t& b = m_grid.devs[m_overlayTo];
+    if (a.bit && b.bit) ui_filter_chain_get(a.bit, b.bit, &m_scratch->chain);
+    else ui_filter_saved_get(a.key, b.key, &m_scratch->chain);   // An end on standby
+    return true;
+}
+
+// The scratch chain onto the patch: patched first if it is not, saved when
+// both ends are built-ins
+void ScreenMidiDevices::saveChain()
+{
+    const ui_mididev_t& a = m_grid.devs[m_overlayFrom];
+    const ui_mididev_t& b = m_grid.devs[m_overlayTo];
+    const ui_filter_chain_t& c = m_scratch->chain;
+    if (c.len > 0 && ui_mididev_patch_selection(m_overlayFrom, m_overlayTo) == 0) {
+        ui_mididev_set_patch(m_overlayFrom, m_overlayTo, MIDI_ROUTE_SEL_ALL);
+    }
+    if (a.bit && b.bit) {
+        ui_filter_chain_set(a.bit, b.bit, &c, UI_FILTER_SAVE_NOW);
+    } else if ((a.flags & UI_MIDIDEV_BUILTIN) && (b.flags & UI_MIDIDEV_BUILTIN)) {
+        // Put on the patch when the standby end starts (ui_filter_restore)
+        ui_filter_saved_set(a.key, b.key, &c);
+    }
+}
+
+void ScreenMidiDevices::loadItems()
+{
+    Scratch& sc = *m_scratch;
+    int n = 0;
+    int count = ui_filter_count();
+    for (int i = 0; i < count && n < FILTER_ITEMS; i++) {
+        if (!ui_filter_get(i, &sc.def)) continue;
+        FilterItem& it = sc.items[n++];
+        snprintf(it.name, sizeof(it.name), "%s", sc.def.name);
+        snprintf(it.label, sizeof(it.label), "%s", sc.def.label);
+        it.registered = true;
+    }
+    // Names in the chain that nothing registers (a file taken off /sd/filters)
+    for (int i = 0; i < sc.chain.len && n < FILTER_ITEMS; i++) {
+        if (ui_filter_find(sc.chain.stages[i].name) >= 0) continue;
+        FilterItem& it = sc.items[n++];
+        snprintf(it.name, sizeof(it.name), "%s", sc.chain.stages[i].name);
+        snprintf(it.label, sizeof(it.label), "%s", sc.chain.stages[i].name);
+        it.registered = false;
+    }
+    sc.itemCount = n;
+}
+
+int ScreenMidiDevices::chainPosition(const char* name) const
+{
+    const ui_filter_chain_t& c = m_scratch->chain;
+    for (int i = 0; i < c.len; i++) {
+        if (strcmp(c.stages[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
+bool ScreenMidiDevices::loadDef(const char* name)
+{
+    int i = ui_filter_find(name);
+    return i >= 0 && ui_filter_get(i, &m_scratch->def);
+}
+
+int ScreenMidiDevices::tabHit(int x, int y) const
+{
+    int px, py, pw, ph;
+    picker_rect(&px, &py, &pw, &ph);
+    for (int t = 0; t < 2; t++) {
+        int tx, ty, tw, th;
+        tab_rect(px, py, pw, t, &tx, &ty, &tw, &th);
+        if (x >= tx && x < tx + tw && y >= ty && y < ty + th) return t;
+    }
+    return -1;
+}
+
+int ScreenMidiDevices::filterSlotHit(int x, int y) const
+{
+    int px, py, pw, ph;
+    picker_rect(&px, &py, &pw, &ph);
+    for (int i = 0; i < PICK_SLOTS; i++) {
+        int bx, by;
+        slot_rect(px, py, i, &bx, &by);
+        if (x >= bx && x < bx + PICK_BTN_W && y >= by && y < by + PICK_BTN_H) return i;
+    }
+    return -1;
+}
+
+void ScreenMidiDevices::drawFilterButtons(int px, int py)
+{
+    auto& gfx = ui_gfx();
+    if (!loadChain()) return;
+    loadItems();
+    const Scratch& sc = *m_scratch;
+    int fit = (PICK_BTN_W - 4) / CHAR_W;
+    for (int i = 0; i < PICK_SLOTS; i++) {
+        int bx, by;
+        slot_rect(px, py, i, &bx, &by);
+        if (i == PICK_SLOTS - 1) {
+            gfx.fillRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_BLACK);
+            gfx.drawRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_WHITE);
+            gfx.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+            gfx.setCursor(bx + (PICK_BTN_W - 4 * CHAR_W) / 2, by + (PICK_BTN_H - CHAR_H) / 2);
+            gfx.print("Done");
+            continue;
+        }
+        if (i >= sc.itemCount) continue;
+        const FilterItem& it = sc.items[i];
+        int pos = chainPosition(it.name);
+        bool on = pos >= 0;
+        uint16_t bg = on ? (it.registered ? (uint16_t)UI_COLOR_GREEN : (uint16_t)UI_COLOR_GRAY)
+                         : (uint16_t)UI_COLOR_BLACK;
+        uint16_t fg = on ? (uint16_t)UI_COLOR_BLACK
+                         : (it.registered ? (uint16_t)UI_COLOR_WHITE : (uint16_t)UI_COLOR_GRAY);
+        gfx.fillRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, bg);
+        gfx.drawRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_GRAY);
+        int n = (int)strlen(it.label);
+        if (n > fit) n = fit;
+        gfx.setTextColor(fg, bg);
+        gfx.setCursor(bx + (PICK_BTN_W - n * CHAR_W) / 2, by + (PICK_BTN_H - CHAR_H) / 2);
+        print_fit(it.label, fit);
+        if (on) {
+            // Its place in the chain, in the corner
+            char num[12];
+            snprintf(num, sizeof(num), "%d", pos + 1);
+            gfx.setTextSize(1);
+            gfx.setTextColor(UI_COLOR_BLACK, bg);
+            gfx.setCursor(bx + PICK_BTN_W - 8, by + 2);
+            gfx.print(num);
+            gfx.setTextSize(TEXT_SIZE);
+        }
+    }
+    if (sc.itemCount == 0) {
+        int bx, by;
+        slot_rect(px, py, 0, &bx, &by);
+        gfx.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
+        gfx.setCursor(bx, by + (PICK_BTN_H - CHAR_H) / 2);
+        gfx.print("No filters (put them in /sd/filters)");
+    }
+}
+
+void ScreenMidiDevices::tapPicker(int x, int y)
+{
+    int t = tabHit(x, y);
+    if (t >= 0) {
+        m_pickTab = (PickTab)t;
+        m_needsRedraw = true;
+        return;
+    }
+    int slot = filterSlotHit(x, y);
+    if (slot < 0) {
+        // Between the buttons: nothing; outside the picker: close it
+        int px, py, pw, ph;
+        picker_rect(&px, &py, &pw, &ph);
+        if (x >= px && x < px + pw && y >= py && y < py + ph) return;
+        m_overlay = OVERLAY_NONE;
+        m_needsRedraw = true;
+        return;
+    }
+    if (slot == PICK_SLOTS - 1) {
+        m_overlay = OVERLAY_NONE;
+        m_needsRedraw = true;
+        return;
+    }
+    if (!loadChain()) return;
+    loadItems();
+    if (slot >= m_scratch->itemCount) return;
+    FilterItem it = m_scratch->items[slot];
+    ui_filter_chain_t& c = m_scratch->chain;
+    int pos = chainPosition(it.name);
+    if (pos >= 0) {
+        // Off the chain; the ones after it move up
+        for (int i = pos; i < c.len - 1; i++) c.stages[i] = c.stages[i + 1];
+        c.len--;
+    } else {
+        // On at the end, with the filter's defaults
+        if (c.len >= UI_FILTER_CHAIN_MAX || !it.registered || !loadDef(it.name)) return;
+        ui_filter_stage_t& st = c.stages[c.len];
+        memset(&st, 0, sizeof(st));
+        snprintf(st.name, sizeof(st.name), "%s", it.name);
+        const ui_filter_def_t& d = m_scratch->def;
+        for (int i = 0; i < d.nparams; i++) {
+            snprintf(st.pnames[i], sizeof(st.pnames[i]), "%s", d.params[i].name);
+            st.values[i] = d.params[i].def;
+        }
+        st.nvalues = d.nparams;
+        c.len++;
+    }
+    saveChain();
+    rebuild();
+    m_signature = signature();
+    m_needsRedraw = true;
+}
+
+// The parameter page fills the content area, as wide as the picker
+static void params_rect(int* px, int* py, int* pw, int* ph)
+{
+    *pw = PICK_COLS * PICK_BTN_W + (PICK_COLS + 1) * MARGIN;
+    *ph = UI_CONTENT_HEIGHT - 2 * MARGIN;
+    *px = (UI_SCREEN_WIDTH - *pw) / 2;
+    *py = UI_CONTENT_Y + MARGIN;
+}
+
+int ScreenMidiDevices::paramRows() const
+{
+    int px, py, pw, ph;
+    params_rect(&px, &py, &pw, &ph);
+    int top = py + 2 * MARGIN + TAB_H;
+    int bottom = py + ph - 2 * MARGIN - PICK_BTN_H;
+    int rows = (bottom - top) / (PARAM_ROW_H + MARGIN);
+    return rows < 1 ? 1 : rows;
+}
+
+static int16_t stage_value(const ui_filter_stage_t& st, const ui_filter_param_t& p)
+{
+    for (int i = 0; i < st.nvalues; i++) {
+        if (strcmp(st.pnames[i], p.name) == 0) return st.values[i];
+    }
+    return p.def;
+}
+
+static void param_text(const ui_filter_param_t& p, int v, char* buf, int len)
+{
+    static const char* const NOTES[12] = { "C", "C#", "D", "D#", "E", "F",
+                                           "F#", "G", "G#", "A", "A#", "B" };
+    switch (p.kind) {
+    case UI_FILTER_ENUM:
+        snprintf(buf, len, "%s", (v >= 0 && v < p.nchoices) ? p.choices[v] : "?");
+        break;
+    case UI_FILTER_BOOL:
+        snprintf(buf, len, "%s", v ? "on" : "off");
+        break;
+    case UI_FILTER_NOTE:
+        snprintf(buf, len, "%s%d", NOTES[((v % 12) + 12) % 12], v / 12 - 1);
+        break;
+    case UI_FILTER_CHANNEL:
+        if (v < 0) snprintf(buf, len, "-");
+        else snprintf(buf, len, "%d", v + 1);
+        break;
+    default:
+        snprintf(buf, len, "%d", v);
+        break;
+    }
+}
+
+// A row's boxes: the -, the value and the + (an enum / bool: one button, as wide
+// as all three)
+static void param_row(int px, int py, int pw, int r, int* lx, int* cx, int* cw, int* ry)
+{
+    *ry = py + 2 * MARGIN + TAB_H + r * (PARAM_ROW_H + MARGIN);
+    *lx = px + MARGIN;
+    int labelW = (pw - 2 * MARGIN) * 2 / 5;
+    *cx = *lx + labelW + MARGIN;
+    *cw = px + pw - MARGIN - *cx;
+}
+
+static constexpr int PARAM_BTN_W = PARAM_ROW_H * 3 / 2;
+
+// Bottom row: Prev / Next on the left, Reset / Done on the right
+static void param_button(int px, int py, int pw, int ph, int which, int* bx, int* by)
+{
+    *by = py + ph - MARGIN - PICK_BTN_H;
+    switch (which) {
+    case PARAM_PREV:  *bx = px + MARGIN; break;
+    case PARAM_NEXT:  *bx = px + 2 * MARGIN + PICK_BTN_W; break;
+    case PARAM_RESET: *bx = px + pw - 2 * (MARGIN + PICK_BTN_W); break;
+    default:          *bx = px + pw - MARGIN - PICK_BTN_W; break;   // Done
+    }
+}
+
+void ScreenMidiDevices::drawParams()
+{
+    auto& gfx = ui_gfx();
+    if (!loadChain()) return;
+    if (m_paramStage < 0 || m_paramStage >= m_scratch->chain.len ||
+        strcmp(m_scratch->chain.stages[m_paramStage].name, m_scratch->def.name) != 0) {
+        // The chain changed under the page (a script, Ruby): back to the tab
+        m_overlay = OVERLAY_CHANNEL;
+        drawChannelPicker();
+        return;
+    }
+    const ui_filter_stage_t& st = m_scratch->chain.stages[m_paramStage];
+    const ui_filter_def_t& d = m_scratch->def;
+
+    int px, py, pw, ph;
+    params_rect(&px, &py, &pw, &ph);
+    gfx.fillRoundRect(px, py, pw, ph, 6, UI_COLOR_DARKGRAY);
+    gfx.drawRoundRect(px, py, pw, ph, 6, UI_COLOR_WHITE);
+    gfx.setTextSize(TEXT_SIZE);
+    drawPickerHeader(px, py, pw, false);
+
+    int rows = paramRows();
+    int pages = (d.nparams + rows - 1) / rows;
+    if (pages < 1) pages = 1;
+    if (m_paramPage >= pages) m_paramPage = pages - 1;
+
+    for (int r = 0; r < rows; r++) {
+        int idx = m_paramPage * rows + r;
+        if (idx >= d.nparams) break;
+        const ui_filter_param_t& p = d.params[idx];
+        int lx, cx, cw, ry;
+        param_row(px, py, pw, r, &lx, &cx, &cw, &ry);
+        int ty = ry + (PARAM_ROW_H - CHAR_H) / 2;
+        gfx.setTextColor(UI_COLOR_WHITE, UI_COLOR_DARKGRAY);
+        gfx.setCursor(lx, ty);
+        print_fit(p.label, (cx - lx - MARGIN) / CHAR_W);
+
+        char text[16];
+        param_text(p, stage_value(st, p), text, sizeof(text));
+        int n = (int)strlen(text);
+        if (p.kind == UI_FILTER_ENUM || p.kind == UI_FILTER_BOOL) {
+            gfx.fillRoundRect(cx, ry, cw, PARAM_ROW_H, 4, UI_COLOR_BLACK);
+            gfx.drawRoundRect(cx, ry, cw, PARAM_ROW_H, 4, UI_COLOR_GRAY);
+            gfx.setTextColor(UI_COLOR_CYAN, UI_COLOR_BLACK);
+            gfx.setCursor(cx + (cw - n * CHAR_W) / 2, ty);
+            print_fit(text, (cw - 4) / CHAR_W);
+            continue;
+        }
+        static const char* const SIGNS[2] = { "-", "+" };
+        for (int k = 0; k < 2; k++) {
+            int bx = k == 0 ? cx : cx + cw - PARAM_BTN_W;
+            gfx.fillRoundRect(bx, ry, PARAM_BTN_W, PARAM_ROW_H, 4, UI_COLOR_BLACK);
+            gfx.drawRoundRect(bx, ry, PARAM_BTN_W, PARAM_ROW_H, 4, UI_COLOR_GRAY);
+            gfx.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+            gfx.setCursor(bx + (PARAM_BTN_W - CHAR_W) / 2, ty);
+            gfx.print(SIGNS[k]);
+        }
+        gfx.setTextColor(UI_COLOR_CYAN, UI_COLOR_DARKGRAY);
+        gfx.setCursor(cx + (cw - n * CHAR_W) / 2, ty);
+        print_fit(text, (cw - 2 * PARAM_BTN_W) / CHAR_W);
+    }
+
+    struct { int code; const char* label; } buttons[4] = {
+        { PARAM_PREV, "<" }, { PARAM_NEXT, ">" }, { PARAM_RESET, "Reset" }, { PARAM_DONE, "Done" },
+    };
+    for (const auto& b : buttons) {
+        if ((b.code == PARAM_PREV || b.code == PARAM_NEXT) && pages <= 1) continue;
+        int bx, by;
+        param_button(px, py, pw, ph, b.code, &bx, &by);
+        gfx.fillRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_BLACK);
+        gfx.drawRoundRect(bx, by, PICK_BTN_W, PICK_BTN_H, 4, UI_COLOR_WHITE);
+        int n = (int)strlen(b.label);
+        gfx.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+        gfx.setCursor(bx + (PICK_BTN_W - n * CHAR_W) / 2, by + (PICK_BTN_H - CHAR_H) / 2);
+        print_fit(b.label, (PICK_BTN_W - 2) / CHAR_W);
+    }
+}
+
+int ScreenMidiDevices::paramHit(int x, int y) const
+{
+    if (!m_scratch) return -1;
+    const ui_filter_def_t& d = m_scratch->def;
+    int px, py, pw, ph;
+    params_rect(&px, &py, &pw, &ph);
+    int rows = paramRows();
+    int pages = (d.nparams + rows - 1) / rows;
+    static const int CODES[4] = { PARAM_PREV, PARAM_NEXT, PARAM_RESET, PARAM_DONE };
+    for (int code : CODES) {
+        if ((code == PARAM_PREV || code == PARAM_NEXT) && pages <= 1) continue;
+        int bx, by;
+        param_button(px, py, pw, ph, code, &bx, &by);
+        if (x >= bx && x < bx + PICK_BTN_W && y >= by && y < by + PICK_BTN_H) return code;
+    }
+    for (int r = 0; r < rows; r++) {
+        int idx = m_paramPage * rows + r;
+        if (idx >= d.nparams) break;
+        int lx, cx, cw, ry;
+        param_row(px, py, pw, r, &lx, &cx, &cw, &ry);
+        if (y < ry || y >= ry + PARAM_ROW_H || x < cx || x >= cx + cw) continue;
+        const ui_filter_param_t& p = d.params[idx];
+        if (p.kind == UI_FILTER_ENUM || p.kind == UI_FILTER_BOOL) return (idx << 2) | PARAM_CYCLE;
+        if (x < cx + PARAM_BTN_W) return (idx << 2) | PARAM_MINUS;
+        if (x >= cx + cw - PARAM_BTN_W) return (idx << 2) | PARAM_PLUS;
+        return -1;
+    }
+    return -1;
+}
+
+void ScreenMidiDevices::applyParamHit(int code)
+{
+    if (!loadChain() || m_paramStage < 0 || m_paramStage >= m_scratch->chain.len) return;
+    ui_filter_stage_t& st = m_scratch->chain.stages[m_paramStage];
+    const ui_filter_def_t& d = m_scratch->def;
+    const ui_mididev_t& a = m_grid.devs[m_overlayFrom];
+    const ui_mididev_t& b = m_grid.devs[m_overlayTo];
+
+    switch (code) {
+    case PARAM_PREV:
+        if (m_paramPage > 0) m_paramPage--;
+        return;
+    case PARAM_NEXT:
+        m_paramPage++;
+        return;
+    case PARAM_DONE:
+        m_overlay = OVERLAY_CHANNEL;
+        return;
+    case PARAM_RESET:
+        // Back to the values the filter was registered with
+        for (int i = 0; i < d.nparams; i++) {
+            snprintf(st.pnames[i], sizeof(st.pnames[i]), "%s", d.params[i].name);
+            st.values[i] = d.params[i].def;
+        }
+        st.nvalues = d.nparams;
+        saveChain();
+        return;
+    default:
+        break;
+    }
+
+    int idx = code >> 2;
+    if (idx < 0 || idx >= d.nparams) return;
+    const ui_filter_param_t& p = d.params[idx];
+    int v = stage_value(st, p);
+    switch (code & 3) {
+    case PARAM_MINUS: v -= p.step; break;
+    case PARAM_PLUS:  v += p.step; break;
+    default:
+        if (p.kind == UI_FILTER_BOOL) v = v ? 0 : 1;
+        else v = (v >= p.max) ? p.min : v + 1;   // An enum steps round
+        break;
+    }
+    if (v < p.min) v = p.min;
+    if (v > p.max) v = p.max;
+    if (a.bit && b.bit) {
+        ui_filter_set_value(a.bit, b.bit, m_paramStage, p.name, (int16_t)v);
+    } else {
+        int k = 0;
+        while (k < st.nvalues && strcmp(st.pnames[k], p.name) != 0) k++;
+        if (k == st.nvalues && k < UI_FILTER_PARAM_MAX) {
+            snprintf(st.pnames[k], sizeof(st.pnames[k]), "%s", p.name);
+            st.nvalues++;
+        }
+        if (k < st.nvalues) st.values[k] = (int16_t)v;
+        saveChain();
+    }
+}
+
+void ScreenMidiDevices::tapParams(int x, int y)
+{
+    int code = paramHit(x, y);
+    if (code < 0) {
+        // Outside the page: back to the Filters tab
+        int px, py, pw, ph;
+        params_rect(&px, &py, &pw, &ph);
+        if (x >= px && x < px + pw && y >= py && y < py + ph) return;
+        m_overlay = OVERLAY_CHANNEL;
+        m_needsRedraw = true;
+        return;
+    }
+    applyParamHit(code);
+    m_needsRedraw = true;
 }
 
 const char* ScreenMidiDevices::getTitle()

@@ -229,6 +229,20 @@ bool picoruby_ui_mididev_take_wanted(char *key, int len);
 int  picoruby_ui_mididev_connected_mask(void);
 int  picoruby_ui_mididev_serial(void);
 
+/* Named filters (docs/MIDI_FILTER_REGISTRY.md): the filters registered in
+ * Ruby, as the MIDI Devices screen lists them, and the chain on each patch.
+ * params: one line per parameter, "name|label|kind|min|max|default|step|
+ * choice;choice". Chains go over as text: "name(param:value,...),name2". */
+bool picoruby_ui_filter_define(const char *name, const char *label, const char *params);
+bool picoruby_ui_filter_undefine(const char *name);
+int  picoruby_ui_filter_serial(void);
+int  picoruby_ui_filter_live_count(void);
+/* Live chain `index`: false when that slot is unused */
+bool picoruby_ui_filter_live_get(int index, int *src, int *dst, int *rev, char *text, int len);
+/* save: 0 a script's, 1 a panel's value (saved later, if saved at all).
+ * Returns the chain's revision, 0 when the table is full. */
+int  picoruby_ui_filter_chain_set(int src, int dst, const char *text, int save);
+
 #ifdef __cplusplus
 }
 #endif

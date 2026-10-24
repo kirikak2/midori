@@ -1086,6 +1086,34 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   外部クロックの BPM もそのときしか測れない。Tempo 画面は表示中か Sync 中に使える送信元を watch し
   （`UIManager::updateClockWatch`、送信元ボタンは USB-H / USB-D / DIN / BLE）、`sync_from:` も指定元を watch する
 
+### 名前付き filter（MIDI::Filter / register_filter / /sd/filters / 2026-10-24）
+
+詳細は [docs/MIDI_FILTER_REGISTRY.md](docs/MIDI_FILTER_REGISTRY.md)。ホストのテストのみで**実機未確認**。
+
+- `MIDI::Filter` の派生クラスで書き、インスタンスを `MIDI.register_filter(:name, Klass.new)` で登録する
+  （`unregister_filter`）。登録したインスタンスはプロトタイプで、ルートに付けるときは
+  **ルートごとに `instantiate` した別のインスタンス**（状態・パラメータはパッチごと）
+- 宣言は `label` / `types`（`types []` で何も Ruby に回さない）/ `channel` / `param name, kind, ...`
+  （`:int` `:enum` `:bool` `:note` `:channel`、8 個まで）/ `clock :internal`（`MIDI::Clock` の F8 で `on_clock`）。
+  インスタンスでは `setup` / `call(m)` / `teardown` / `param_changed` / `layout(ui)` / `emit` / `every(ms)` / `output`
+- チェーン: `MIDI.route(a, b).chain(:chord, [:arp, { rate: :"1/8" }])` / `MIDI.chain(a, b, ...)`。選んだ順に通る。
+  C の filter 表は 1 件（チェーン全体の types の和集合）。チェーンは出口で鳴らしたノートを覚え、外すときに止める
+- 実装は picoruby-midi `mrblib/midi_filter_class.rb`（**mruby 専用**。mrbgem.rake が mruby/c のビルドから外す）。
+  ホストテスト: `ruby host_test/filter_class_test.rb`（gem ディレクトリで。mruby は cat で連結、ファイル先頭参照）
+- `/sd/filters/*.rb` を**どのモードでも起動時に** `load_filters`（`main_task_base.rb`）が名前順に読む
+  （`_` で始まるファイルとサブディレクトリは読まない）。`setup_midi_devices` の前なので保存済みチェーンが見つかる
+- MIDI Devices 画面の長押しメニューに **Ch / Filters タブ**。Filters で選んだ順にチェーン、選んだものを長押しで
+  パラメータ画面。セルには `f2`（チェーンの長さ）。モデルは [main/ui/ui_filters.cpp](main/ui/ui_filters.cpp)
+  （登録済み filter の宣言とパッチごとのチェーン。Ruby とは `name(param:value,...)` のテキストでやりとり）、
+  Ruby 側の同期は picoruby-ui `mrblib/ui_midi_filters.rb`（`UI::MIDIDevices._poll` で画面の変更を適用。
+  ホストテスト `ruby test/midi_filters_test.rb`）。両端が内蔵デバイスのチェーンは NVS `midi_devs/chains`
+- **UI タスク（= main タスク）のスタックは 3.5KB**。チェーン（約 530 byte）や filter の宣言（約 800 byte）を
+  UI タスクのローカルに置かない（画面はヒープの Scratch を使う。`ui_filters.cpp` の UI タスクから呼ばれる関数も同様）
+- filter の `layout(ui)` は**チェーンで使われている間だけ**のレイアウト（Home のタイル）。外れたら消す
+  （表示中なら MIDI Devices 画面へ戻ってから）。UI モードのループは `UI.process` + `MIDI.sleep_ms(100)` に変えた
+  （以前の素の `sleep_ms` では filter もパネルも動かない）
+- サンプル: [examples/filters/](examples/filters/)（chord / arp / lumi。`/sd/filters/` にコピー）
+
 ## 既知の課題
 
 ### USB MIDIデバイスの電源ON順序問題（2026-03-18）

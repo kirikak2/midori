@@ -231,6 +231,39 @@ rescue => e
   puts "MIDI devices setup failed: #{e.message}"
 end
 
+# Named MIDI filters kept on the SD card (docs/MIDI_FILTER_REGISTRY.md):
+# every /sd/filters/*.rb, by name, each expected to MIDI.register_filter
+# what it defines. Subdirectories and files starting with "_" are left for
+# the filters to load themselves. Every mode does this before
+# setup_midi_devices, so the saved chains find their filters; a broken file
+# is reported and skipped.
+FILTER_DIR = "/sd/filters"
+
+def load_filters
+  return unless $sd_available
+  names = []
+  begin
+    Dir.open(FILTER_DIR) do |dir|
+      while entry = dir.read
+        next if entry == "." || entry == ".."
+        next if entry.start_with?("_") || !entry.end_with?(".rb")
+        names << entry
+      end
+    end
+  rescue => e
+    return   # No /sd/filters
+  end
+  names.sort.each do |name|
+    path = "#{FILTER_DIR}/#{name}"
+    begin
+      Kernel.load(path)
+    rescue => e
+      puts "[Filter] #{path}: #{e.message}"
+    end
+  end
+  puts "Filters: #{MIDI.filters.keys.join(', ')}" if MIDI.filters.size > 0
+end
+
 # Scan SD card for Ruby scripts and notify C side
 def notify_scripts_to_c
   sm = ScriptManager.new
@@ -456,6 +489,7 @@ if sm.irb_requested?
     $sd_available = try_init_sd_card
   end
 
+  load_filters
   setup_midi_devices
   run_irb_session
   puts "irb finished, exiting to supervisor"
@@ -484,6 +518,7 @@ elsif script_to_run
   # The built-in MIDI devices start here (setup_midi_devices); AMY and the
   # rest of MIDIDevices stay lazy
 
+  load_filters
   setup_midi_devices
   run_script(script_to_run)
   puts "Script completed, exiting to supervisor"
@@ -546,7 +581,9 @@ else
   notify_scripts_to_c
 
   # The built-in MIDI devices start here (setup_midi_devices), so the MIDI
-  # Devices screen can patch between them; AMY stays lazy
+  # Devices screen can patch between them; AMY stays lazy. The filters
+  # come first so the saved chains find theirs.
+  load_filters
   setup_midi_devices
 
   GC.start
@@ -609,6 +646,7 @@ else
       $sd_available = try_init_sd_card
       if $sd_available
         notify_scripts_to_c
+        load_filters
         puts "SD card re-initialized successfully"
       else
         puts "SD card not available"
@@ -616,10 +654,11 @@ else
       end
     end
 
-    # A device the MIDI Devices screen asked for (AMY on standby)
-    UI::MIDIDevices._poll
-
-    sleep_ms 100
+    # Filters, their panels (layouts) and what the MIDI Devices screen
+    # changed (UI.process runs MIDI.run_filters and UI::MIDIDevices._poll);
+    # MIDI.sleep_ms wakes as soon as a filter has something to do
+    UI.process
+    MIDI.sleep_ms(100)
   end
 
   puts "Exiting UI loop"

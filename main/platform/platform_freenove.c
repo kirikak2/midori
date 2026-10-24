@@ -590,6 +590,60 @@ void ui_mididev_cleanup(void)
 {
 }
 
+// Named filter stubs (docs/MIDI_FILTER_REGISTRY.md) - no screen to pick them
+// on: nothing is listed or saved. MIDI::Filter and MIDI.chain work as
+// everywhere (they live in Ruby).
+
+bool ui_filter_define(const char *name, const char *label, const char *params)
+{
+    (void)name; (void)label; (void)params;
+    return false;
+}
+
+bool ui_filter_undefine(const char *name)
+{
+    (void)name;
+    return false;
+}
+
+uint32_t ui_filter_serial(void)
+{
+    return 0;
+}
+
+int ui_filter_live_count(void)
+{
+    return 0;
+}
+
+bool ui_filter_live_get(int index, uint8_t *src, uint8_t *dst, uint32_t *rev,
+                        ui_filter_chain_t *out)
+{
+    (void)index; (void)src; (void)dst; (void)rev; (void)out;
+    return false;
+}
+
+int ui_filter_chain_format(const ui_filter_chain_t *chain, char *buf, int len)
+{
+    (void)chain;
+    if (len > 0) buf[0] = '\0';
+    return 0;
+}
+
+bool ui_filter_chain_parse(const char *text, ui_filter_chain_t *out)
+{
+    (void)text;
+    out->len = 0;
+    return true;
+}
+
+uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t *chain,
+                             ui_filter_save_t save)
+{
+    (void)src; (void)dst; (void)chain; (void)save;
+    return 1;
+}
+
 // Tempo stubs (docs/TEMPO.md) - no UI, so no tempo device: UI::Tempo has no
 // transport bit and MIDI.route refuses it like any unregistered transport.
 

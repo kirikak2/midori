@@ -364,8 +364,11 @@ bool ui_mididev_activate(const char* key, uint8_t bit)
     }
     portEXIT_CRITICAL(&s_mux);
     // Its saved patches could not be routed without a bit: route them now,
-    // and only them (the others are as the script left them)
-    if (was_standby) route_saved(key);
+    // and only them (the others are as the script left them), and their chains
+    if (was_standby) {
+        route_saved(key);
+        ui_filter_restore(key);
+    }
     if (found) bump();
     return found;
 }
@@ -396,6 +399,28 @@ bool ui_mididev_get(int index, ui_mididev_t* out)
     }
     portEXIT_CRITICAL(&s_mux);
     return ok;
+}
+
+bool ui_mididev_builtin_key(uint8_t bit, char* key, int len)
+{
+    bool ok = false;
+    portENTER_CRITICAL(&s_mux);
+    int i = find_bit_locked(bit);
+    if (i >= 0 && (s_devs[i].pub.flags & UI_MIDIDEV_BUILTIN)) {
+        copy_str(key, s_devs[i].pub.key, (size_t)len);
+        ok = true;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    return ok;
+}
+
+uint8_t ui_mididev_bit_of_key(const char* key)
+{
+    portENTER_CRITICAL(&s_mux);
+    int i = find_key_locked(key);
+    uint8_t bit = i >= 0 ? s_devs[i].pub.bit : 0;
+    portEXIT_CRITICAL(&s_mux);
+    return bit;
 }
 
 int ui_mididev_find_bit(uint8_t bit)
@@ -490,6 +515,8 @@ void ui_mididev_set_patch(int from, int to, uint32_t sel)
 
     if (a.bit && b.bit) {
         MIDI_route_remove(a.bit, b.bit);
+        // The patch's filters go with it (Ruby takes them down, notes off)
+        if (!add) ui_filter_drop(a.bit, b.bit, saveable);
         if (add) {
             if (MIDI_route_add_selection(a.bit, b.bit, sel) != 0) {
                 ESP_LOGW(TAG, "Route table full");
@@ -499,6 +526,9 @@ void ui_mididev_set_patch(int from, int to, uint32_t sel)
             }
         }
     }
+
+    // A standby end: only the saved chain there is to take off
+    if (!add && saveable && !(a.bit && b.bit)) ui_filter_saved_drop(a.key, b.key);
 
     if (saveable) {
         portENTER_CRITICAL(&s_mux);
@@ -588,6 +618,7 @@ int ui_mididev_restore(void)
     }
     portEXIT_CRITICAL(&s_mux);
     int applied = route_saved_count(nullptr);
+    ui_filter_restore(nullptr);
     bump();
     return applied;
 }
@@ -639,6 +670,7 @@ bool ui_mididev_save(void)
     }
     portEXIT_CRITICAL(&s_mux);
     save_now();
+    ui_filter_save_live();
     return true;
 }
 
@@ -662,6 +694,7 @@ bool ui_mididev_take_wanted(char* key, int len)
 
 void ui_mididev_tick(void)
 {
+    ui_filter_tick();
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     if (now - s_lastTickMs < TICK_MS) return;
     s_lastTickMs = now;
@@ -704,5 +737,7 @@ void ui_mididev_cleanup(void)
     s_sel[0] = s_savedSel[0];
     s_sel[1] = s_savedSel[1];
     portEXIT_CRITICAL(&s_mux);
+    // The script's filters went with its VM
+    ui_filter_cleanup();
     bump();
 }

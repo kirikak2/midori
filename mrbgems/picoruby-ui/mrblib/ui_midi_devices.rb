@@ -245,8 +245,10 @@ module UI
       # Route the saved patches and pick the saved IN / OUT (main_task.rb,
       # after register_builtin).
       def boot
+        MIDIFilters.install
         UI._mididev_restore
         service
+        MIDIFilters._poll
       end
 
       # Start the standby devices something asked for (a saved patch, the
@@ -277,9 +279,12 @@ module UI
         bit != 0 && MIDI._transport_connected?(bit)
       end
 
-      # = MIDI.route(from, to, channel:), shown on the screen
-      def patch(from, to, channel: nil)
-        MIDI.route(from, to, channel: channel)
+      # = MIDI.route(from, to, channel:), shown on the screen. filters: puts
+      # named filters on it (MIDI.chain): [:chord, [:arp, { rate: 2 }]]
+      def patch(from, to, channel: nil, filters: nil)
+        r = MIDI.route(from, to, channel: channel)
+        MIDI.chain(from, to, *filters) if r && filters && !filters.empty?
+        r
       end
 
       # = MIDI.unroute(from, to)
@@ -304,7 +309,8 @@ module UI
               list << { from: _device_for_bit(r[0]), to: _device_for_bit(b),
                         channel: MIDI._route_channel(r[2], r[3]),
                         active: MIDI._transport_connected?(r[0]) && MIDI._transport_connected?(b),
-                        filtered: (filtered & b) != 0 }
+                        filtered: (filtered & b) != 0,
+                        filters: _chain_names(r[0], b) }
             end
             b = b << 1
           end
@@ -380,6 +386,7 @@ module UI
 
       # Once per run of the MIDI filters: catch up when the model changed
       def _poll
+        MIDIFilters._poll
         serial = UI._mididev_serial
         return if serial == $ui_mididev_serial
         $ui_mididev_serial = serial
@@ -413,6 +420,17 @@ module UI
         dev = MIDI::Device.new(BitTransport.new(bit, entry ? entry[3] : nil))
         $ui_mididev_devices[bit] = dev
         dev
+      end
+
+      def _chain_names(src, dst)
+        c = $__midi_chains__ ? $__midi_chains__[src * 0x1000 + dst] : nil
+        c ? c.names : []
+      end
+
+      # The name the screen shows for a bit ("?" when it is not listed)
+      def _name_of_bit(bit)
+        e = _entry(_index_of_bit(bit))
+        e ? e[3] : "?"
       end
 
       def _device_at(index)

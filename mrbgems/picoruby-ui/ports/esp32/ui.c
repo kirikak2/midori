@@ -718,3 +718,46 @@ int picoruby_ui_mididev_serial(void)
 {
     return (int)ui_mididev_serial();
 }
+
+/* --- Named filters --- */
+
+bool picoruby_ui_filter_define(const char *name, const char *label, const char *params)
+{
+    return ui_filter_define(name, label, params);
+}
+
+bool picoruby_ui_filter_undefine(const char *name)
+{
+    return ui_filter_undefine(name);
+}
+
+int picoruby_ui_filter_serial(void)
+{
+    return (int)ui_filter_serial();
+}
+
+int picoruby_ui_filter_live_count(void)
+{
+    return ui_filter_live_count();
+}
+
+bool picoruby_ui_filter_live_get(int index, int *src, int *dst, int *rev, char *text, int len)
+{
+    uint8_t s, d;
+    uint32_t r;
+    ui_filter_chain_t chain;
+    if (!ui_filter_live_get(index, &s, &d, &r, &chain)) return false;
+    *src = s;
+    *dst = d;
+    *rev = (int)r;
+    ui_filter_chain_format(&chain, text, len);
+    return true;
+}
+
+int picoruby_ui_filter_chain_set(int src, int dst, const char *text, int save)
+{
+    ui_filter_chain_t chain;
+    ui_filter_chain_parse(text, &chain);
+    return (int)ui_filter_chain_set((uint8_t)src, (uint8_t)dst, &chain,
+                                    save ? UI_FILTER_SAVE_LATER : UI_FILTER_SAVE_NONE);
+}

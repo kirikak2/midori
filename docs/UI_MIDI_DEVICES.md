@@ -103,6 +103,8 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
   （All / **Clock** / 1〜16 / Off / Done）。**Clock と 1〜16 は複数選べる**（タップで個別に入り切り。
   All を選んでいたら外れる。最後の 1 つを切るとパッチごと外れる）。All と Off は選んだら閉じる。
   Done かピッカーの外をタップで閉じる。変更はその場で反映・保存する。
+  見出しの右の **Ch / Filters** タブで、名前付き filter のチェーンとパラメータも選べる
+  （2026-10-24、[MIDI_FILTER_REGISTRY.md](MIDI_FILTER_REGISTRY.md) 6 章）。
   Clock はタイミングクロック・Start / Continue / Stop・ソングポジションだけを通す
   （`MIDI.route(from, to, channel: :clock)`）。複数選ぶとルート 1 件のチャンネル集合になる
   （`channel: [0, 9, :clock]`、C では `MIDI_route_add_selection()` / `MIDI_ROUTE_SEL_*`）。

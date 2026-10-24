@@ -43,6 +43,7 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/screen_pad.cpp"
         "ui/screen_midi_devices.cpp"
         "ui/ui_midi_devices.cpp"
+        "ui/ui_filters.cpp"
         "ui/ui_tempo.cpp"
         "ui/screen_script.cpp"
         "ui/screen_settings.cpp"

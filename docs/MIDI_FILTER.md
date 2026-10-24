@@ -15,6 +15,8 @@
   [midi_route.c](../mrbgems/picoruby-midi/src/midi_route.c) / ESP32 のキューは
   [ports/esp32/midi.c](../mrbgems/picoruby-midi/ports/esp32/midi.c)
 - サンプル: [examples/midi_filter.rb](../examples/midi_filter.rb)
+- 名前を付けて再利用する filter（`MIDI::Filter` / `register_filter` / `/sd/filters` / MIDI Devices 画面での選択）は
+  [MIDI_FILTER_REGISTRY.md](MIDI_FILTER_REGISTRY.md)。この上に作っている
 
 ## 決定事項
 

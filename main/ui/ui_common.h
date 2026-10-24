@@ -794,6 +794,120 @@ bool ui_mididev_take_wanted(char* key, int len);
 void ui_mididev_tick(void);      // UI task: connection changes -> events
 void ui_mididev_cleanup(void);   // A script ended (any task)
 
+// Saved here by bit too: is it a built-in, and under what key (NVS)
+bool ui_mididev_builtin_key(uint8_t bit, char* key, int len);
+// The built-in by key: its bit (0 while standby / unknown)
+uint8_t ui_mididev_bit_of_key(const char* key);
+
+// --- Named filters --------------------------------------------------------------
+// MIDI::Filter as the MIDI Devices screen sees it (docs/MIDI_FILTER_REGISTRY.md):
+// the filters Ruby registered (their names and declared parameters) and the
+// chain of filters on each patch. The filters themselves run in Ruby; Ruby
+// mirrors its chains here and applies the ones the screen changes (each
+// chain has a revision for that). Chains between built-ins are saved (NVS
+// "chains"). Implemented in ui_filters.cpp.
+#define UI_FILTER_MAX          16
+#define UI_FILTER_NAME_LEN     16
+#define UI_FILTER_LABEL_LEN    12
+#define UI_FILTER_PARAM_MAX     8
+#define UI_FILTER_CHOICE_MAX    8
+#define UI_FILTER_CHOICE_LEN    8
+#define UI_FILTER_CHAIN_MAX     4
+#define UI_FILTER_CHAINS       16
+// A chain as text, "name(param:value,...),name2" at its longest
+#define UI_FILTER_CHAIN_TEXT  512
+
+typedef enum {
+    UI_FILTER_INT = 0,
+    UI_FILTER_ENUM,
+    UI_FILTER_BOOL,
+    UI_FILTER_NOTE,
+    UI_FILTER_CHANNEL,
+} ui_filter_kind_t;
+
+typedef struct {
+    char    name[UI_FILTER_LABEL_LEN];
+    char    label[UI_FILTER_LABEL_LEN];
+    uint8_t kind;                        // ui_filter_kind_t
+    uint8_t nchoices;
+    int16_t min, max, def, step;         // Values as integers (an enum's index)
+    char    choices[UI_FILTER_CHOICE_MAX][UI_FILTER_CHOICE_LEN];
+} ui_filter_param_t;
+
+typedef struct {
+    char    name[UI_FILTER_NAME_LEN];
+    char    label[UI_FILTER_LABEL_LEN];
+    uint8_t nparams;
+    ui_filter_param_t params[UI_FILTER_PARAM_MAX];
+} ui_filter_def_t;
+
+// One filter of a chain: its name and parameter values (by parameter name,
+// so they survive the filter being redefined)
+typedef struct {
+    char    name[UI_FILTER_NAME_LEN];
+    uint8_t nvalues;
+    char    pnames[UI_FILTER_PARAM_MAX][UI_FILTER_LABEL_LEN];
+    int16_t values[UI_FILTER_PARAM_MAX];
+} ui_filter_stage_t;
+
+typedef struct {
+    uint8_t len;
+    ui_filter_stage_t stages[UI_FILTER_CHAIN_MAX];
+} ui_filter_chain_t;
+
+typedef enum {
+    UI_FILTER_SAVE_NONE = 0,   // A script's: lasts the script
+    UI_FILTER_SAVE_LATER,      // A value turned on a panel: saved a moment later, if saved at all
+    UI_FILTER_SAVE_NOW,        // The screen's: saved when both ends are built-ins
+} ui_filter_save_t;
+
+// Registered filters (PicoRuby task). params is one line per parameter,
+// "name|label|kind|min|max|default|step|choice;choice;..." (kind as
+// ui_filter_kind_t). Defining a name again replaces it.
+bool ui_filter_define(const char* name, const char* label, const char* params);
+bool ui_filter_undefine(const char* name);
+int  ui_filter_count(void);
+bool ui_filter_get(int index, ui_filter_def_t* out);
+int  ui_filter_find(const char* name);    // index, or -1
+
+// Bumped whenever a filter is defined or a chain changes
+uint32_t ui_filter_serial(void);
+
+// Chains, by patch (transport bits). set replaces the chain (len 0 removes
+// it) and returns its new revision (0: the table is full).
+bool     ui_filter_chain_get(uint8_t src, uint8_t dst, ui_filter_chain_t* out);
+uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t* chain,
+                             ui_filter_save_t save);
+// Change one value (the screen's parameter page)
+void     ui_filter_set_value(uint8_t src, uint8_t dst, int stage, const char* pname,
+                             int16_t value);
+// The patch went away (the screen took it off): its chain goes, and its saved
+// chain when save
+void     ui_filter_drop(uint8_t src, uint8_t dst, bool save);
+// Saved chains by built-in keys: for a patch with an end on standby (it is
+// put on the patch when that end starts)
+bool     ui_filter_saved_get(const char* from, const char* to, ui_filter_chain_t* out);
+void     ui_filter_saved_set(const char* from, const char* to, const ui_filter_chain_t* chain);
+void     ui_filter_saved_drop(const char* from, const char* to);
+// How many filters a patch's live / saved chain has (0: none)
+int      ui_filter_chain_len(uint8_t src, uint8_t dst);
+int      ui_filter_saved_len(const char* from, const char* to);
+// Live chains for Ruby to apply: count, then each by index
+int      ui_filter_live_count(void);
+bool     ui_filter_live_get(int index, uint8_t* src, uint8_t* dst, uint32_t* rev,
+                            ui_filter_chain_t* out);
+// Text form (Ruby, NVS)
+int  ui_filter_chain_format(const ui_filter_chain_t* chain, char* buf, int len);
+bool ui_filter_chain_parse(const char* text, ui_filter_chain_t* out);
+
+// Saved chains: put back on the patches that exist (all, or those with the
+// built-in key at one end), save the live ones of built-in pairs
+void ui_filter_restore(const char* only_key);
+void ui_filter_save_live(void);
+
+void ui_filter_tick(void);      // UI task: the delayed save
+void ui_filter_cleanup(void);   // A script ended: its filters and chains are gone
+
 // --- Tempo ------------------------------------------------------------------------
 // The tempo is a MIDI device that sends clock (docs/TEMPO.md): picoruby-midi's
 // MIDI::Clock (one per process), listed on the MIDI Devices screen as "Tempo"
