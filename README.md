@@ -99,6 +99,7 @@ The following devices have been confirmed to work when connected to Midori's USB
 - ROLI Lightpad BLOCKS
 - ROLI LUMI keys
 - Novation Launch Control XL mk2
+- Ableton Push3 Standard
 
 ## Building
 

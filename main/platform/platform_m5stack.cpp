@@ -39,6 +39,15 @@ extern "C" esp_err_t platform_init(void)
     // Rotation 3 = 270 degrees clockwise (landscape with USB ports on left)
     M5.Lcd.setRotation(3);
     ESP_LOGI(TAG, "Tab5: Screen rotated to landscape mode");
+
+    // Tab5: Disable Quick Charge (IO expander 0x44 P5 = nCHG_QC_EN), which
+    // M5Unified leaves enabled. The USB-C port always carries data here
+    // (MIDI device or USB-Serial/JTAG), and on a charging host port (seen
+    // with an Ableton Push 3 standalone's USB-A) the QC handshake on D+/D-
+    // makes the host reset the port right after every enumeration.
+    // Charging itself stays on, at 5V.
+    M5.getIOExpander(1).digitalWrite(5, true);
+    ESP_LOGI(TAG, "Tab5: Quick Charge disabled");
 #endif
 
     // Enable USB OTG mode for USB Host functionality

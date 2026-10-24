@@ -1150,6 +1150,22 @@ MIDIデバイスの電源ON/USB接続のタイミングに依存する問題。
 - MIDI INデータ未受信時の自動再接続機構
 - デバイス固有のワークアラウンド（要調査）
 
+### Tab5 の Quick Charge が USB-C のデータを壊す（2026-10-24）
+
+**症状**: Tab5（`midi_device` モード）を Ableton Push 3 standalone の USB-A につなぐと、
+MIDI 機器として一瞬認識されてはすぐ外れる、を繰り返す。Mac / PC では起きない。
+MIDI Devices 画面の USB Device 詳細で `rst`（バスリセット）が増え続け、
+`setup / rst` ≈ 8（= 列挙は SET_CONFIGURATION まで通っている）。CDC を外しても変わらない。
+
+**原因**: M5Unified の Tab5 初期化が IO エキスパンダ 0x44 の `nCHG_QC_EN`（P5）を
+Low = **Quick Charge 有効**のままにしている。充電対応の USB ホストポートにつなぐと、
+充電器の QC ハンドシェイクが D+/D- に乗ってホストがポートをリセットする
+（充電を止めずに QC だけ止めた状態でリセットが止まることを確認済み）。
+
+**対処**: `platform_m5stack.cpp` で起動時に P5 を High にして QC を止める（充電は 5V で続く）。
+Tab5 の USB-C はどのモードでもデータ用なので常に止めている。
+`M5.Power.setUsbOutput()` は Tab5 では何もしない（CoreS3 専用）。
+
 ## メモリ確保ガイドライン (ESP32-P4 + PSRAM)
 
 詳細は [docs/MEMORY_ALLOCATION.md](docs/MEMORY_ALLOCATION.md) を参照。
