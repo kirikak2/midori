@@ -697,6 +697,8 @@ int  ui_seq_add_line(void);              // Index, or -1 with 16 lines
 bool ui_seq_remove_line(int line);
 bool ui_seq_clear_pattern(int pattern);
 bool ui_seq_copy_pattern(int src, int dst);
+// One line of a pattern over another (notes and steps / rate / bars)
+bool ui_seq_copy_line(int src_pattern, int src_line, int dst_pattern, int dst_line);
 
 // Grid notes (positions and lengths in steps): see seq_grid_place & co.
 int  ui_seq_place(int pattern, int line, int step, int len,

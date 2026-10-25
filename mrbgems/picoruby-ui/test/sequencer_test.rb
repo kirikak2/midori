@@ -114,6 +114,7 @@ module UI
     def _seq_set_chain(pats, reps); $seq[:chain] = pats.zip(reps); true; end
     def _seq_clear_pattern(p); true; end
     def _seq_copy_pattern(s, d); $seq[:copied] = [s, d]; true; end
+    def _seq_copy_line(sp, sl, dp, dl); $seq[:line_copied] = [sp, sl, dp, dl]; true; end
     def _seq_receive(*a); $seq[:received] = a; end
 
     # Files: the "song" written is $seq[:song], a String, in two pieces
@@ -332,6 +333,12 @@ check("copy_to", $seq[:copied] == [1, 4])
 seq.pattern(1).length = :auto
 check("length auto", set_of(:length)[3] == 0)
 check("bad length", raises? { seq.pattern(1).length = 9 })
+
+seq.pattern(1).line(2).copy_to(3)
+check("line copy_to: same pattern", $seq[:line_copied] == [1, 2, 1, 3])
+seq.line(0).copy_to(1, pattern: 4)
+check("line copy_to: another pattern", $seq[:line_copied] == [UI::Sequencer::EDIT, 0, 4, 1])
+check("line copy_to: bad line", raises? { seq.line(0).copy_to(99) })
 
 # --- lines ---
 reset_stub

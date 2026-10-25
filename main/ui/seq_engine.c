@@ -355,6 +355,47 @@ bool seq_pattern_copy(seq_engine_t *e, int src, int dst)
     return true;
 }
 
+bool seq_pline_copy(seq_engine_t *e, int src_pattern, int src_line, int dst_pattern, int dst_line)
+{
+    int s = seq_resolve_pattern(e, src_pattern);
+    int d = seq_resolve_pattern(e, dst_pattern);
+    if (s < 0 || d < 0 || !line_ok(e, src_line) || !line_ok(e, dst_line)) return false;
+    if (s == d && src_line == dst_line) return true;
+    seq_pattern_t *dst = seq_pattern_get(e, d, true);
+    if (!dst) return false;
+    seq_pattern_line_t *to = &dst->lines[dst_line];
+    const seq_pattern_t *src = e->patterns[s];
+    if (!src) {
+        // An empty slot's line: defaults, no notes
+        if (e->running && d == e->play_pattern) seq_line_release(e, dst_line);
+        notes_free(e, &to->grid);
+        notes_free(e, &to->rt);
+        pline_defaults(to);
+        e->edits++;
+        return true;
+    }
+    const seq_pattern_line_t *from = &src->lines[src_line];
+    int need = from->grid.n + from->rt.n - to->grid.n - to->rt.n;
+    if (e->song_notes + need > SEQ_MAX_SONG_NOTES) return false;
+    seq_notes_t grid, rt;
+    if (!notes_copy(e, &grid, &from->grid)) return false;
+    if (!notes_copy(e, &rt, &from->rt)) {
+        notes_free(e, &grid);
+        return false;
+    }
+    if (e->running && d == e->play_pattern) seq_line_release(e, dst_line);
+    notes_free(e, &to->grid);
+    notes_free(e, &to->rt);
+    to->steps = from->steps;
+    to->rate = from->rate;
+    to->bars = from->bars;
+    to->flags = from->flags;
+    to->grid = grid;
+    to->rt = rt;
+    e->edits++;
+    return true;
+}
+
 bool seq_pattern_set_length(seq_engine_t *e, int pattern, int bars)
 {
     if (bars < 0 || bars > SEQ_MAX_BARS) return false;

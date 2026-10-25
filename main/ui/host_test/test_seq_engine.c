@@ -462,6 +462,32 @@ static void test_pattern_copy_clear(void)
     EXPECT_EQ(g_e->song_notes, 0);
 }
 
+static void test_pline_copy(void)
+{
+    printf("line copy\n");
+    fresh();
+    uint8_t chord[3] = { 60, 64, 67 };
+    seq_grid_place(g_e, 0, 1, 0, 2, chord, NULL, 3);
+    seq_pline_set_steps(g_e, 0, 1, 32);
+    uint8_t other = 40;
+    seq_grid_place(g_e, 2, 4, 3, 1, &other, NULL, 1);
+    EXPECT_EQ(seq_pline_copy(g_e, 0, 1, 2, 4), 1);
+    EXPECT_EQ(seq_notes_get(g_e, 2, 4, SEQ_MODE_GRID)->n, 3);
+    EXPECT_EQ(seq_pline_steps(g_e, 2, 4), 32);
+    EXPECT_EQ(g_e->song_notes, 6);
+    /* Independent */
+    seq_grid_remove(g_e, 2, 4, 0, 60);
+    EXPECT_EQ(seq_notes_get(g_e, 0, 1, SEQ_MODE_GRID)->n, 3);
+    /* Within a pattern, and from an empty slot */
+    EXPECT_EQ(seq_pline_copy(g_e, 0, 1, 0, 0), 1);
+    EXPECT_EQ(seq_notes_get(g_e, 0, 0, SEQ_MODE_GRID)->n, 3);
+    EXPECT_EQ(seq_pline_copy(g_e, 9, 0, 0, 0), 1);
+    EXPECT_EQ(seq_notes_get(g_e, 0, 0, SEQ_MODE_GRID)->n, 0);
+    EXPECT_EQ(seq_pline_steps(g_e, 0, 0), 16);
+    EXPECT_EQ(seq_pline_copy(g_e, 0, 99, 0, 0), 0);
+    EXPECT_EQ(g_e->song_notes, 5);
+}
+
 static void test_lines_add_remove(void)
 {
     printf("lines add / remove\n");
@@ -849,6 +875,7 @@ int main(void)
     test_pattern_switch();
     test_chain();
     test_pattern_copy_clear();
+    test_pline_copy();
     test_lines_add_remove();
     test_limits();
     test_chord_input();

@@ -109,8 +109,22 @@ ScreenSequencer::ScreenSequencer()
     , m_files(nullptr)
     , m_fileRowH(24)
     , m_fileRows(1)
+    , m_patMenu(-1)
+    , m_patConfirm(-1)
+    , m_patClip(-1)
+    , m_chainSheet(false)
+    , m_chainSel(-1)
+    , m_chainScroll(0)
+    , m_chainConfirm(false)
+    , m_chainN(0)
+    , m_lineClipPat(-1)
+    , m_lineClipLine(-1)
+    , m_confirmPaste(false)
     , m_dirty(false)
 {
+    memset(m_patBtn, 0, sizeof(m_patBtn));
+    memset(m_chainBtn, 0, sizeof(m_chainBtn));
+    memset(&m_chainList, 0, sizeof(m_chainList));
     m_status[0] = '\0';
     memset(m_fileBtn, 0, sizeof(m_fileBtn));
     memset(&m_fileList, 0, sizeof(m_fileList));
@@ -258,6 +272,34 @@ void ScreenSequencer::computeGeom()
         m_fileBtn[i] = { fbx, g.linesY + i * fbh + gap, right - fbx, fbh - gap * 2 };
     }
 
+    // Pattern menu: a title row, then 3 x 2 buttons
+    int py = g.linesY + g.headerRowH;
+    int ph = (m_areaY + m_areaH - py) / 2;
+    int pw = m_areaW / 3;
+    for (int i = 0; i < PM_COUNT; i++) {
+        int r = i / 3, c = i % 3;
+        m_patBtn[i] = { m_areaX + c * pw + gap, py + r * ph + gap, pw - gap * 2, ph - gap * 2 };
+    }
+
+    // Chain sheet: the entries on the left, 2 x 6 buttons on the right
+    int chainListW = m_areaW / 2;
+    m_chainList = { m_areaX, g.linesY + g.headerRowH, chainListW,
+                    m_areaY + m_areaH - g.linesY - g.headerRowH };
+    static const int8_t CHAIN_GRID[6][2] = {
+        { CB_ADD, CB_DEL }, { CB_PAT_DN, CB_PAT_UP }, { CB_REP_DN, CB_REP_UP },
+        { CB_UP, CB_DOWN }, { CB_CLEAR, CB_ON }, { CB_CLOSE, -1 },
+    };
+    int cbx = m_areaX + chainListW + gap * 2;
+    int cbw = (right - cbx) / 2;
+    int cbh = (m_areaY + m_areaH - g.linesY) / 6;
+    for (int r = 0; r < 6; r++) {
+        for (int c = 0; c < 2; c++) {
+            int id = CHAIN_GRID[r][c];
+            if (id < 0) continue;
+            m_chainBtn[id] = { cbx + c * cbw, g.linesY + r * cbh + gap, cbw - gap * 2, cbh - gap * 2 };
+        }
+    }
+
     // Settings sheet: a title row, then 4 x 4 buttons
     memset(m_sheetBtn, 0, sizeof(m_sheetBtn));
     int sy = g.linesY + g.headerRowH;
@@ -267,7 +309,7 @@ void ScreenSequencer::computeGeom()
         { SB_MODE, SB_CH_DN, SB_CH, SB_CH_UP },
         { SB_STEPS, SB_RATE, SB_BARS, SB_MUTE },
         { SB_GATE_DN, SB_GATE, SB_GATE_UP, SB_CLEAR },
-        { SB_DELETE, -1, -1, SB_CLOSE },
+        { SB_DELETE, SB_COPY, SB_PASTE, SB_CLOSE },
     };
     for (int r = 0; r < 4; r++) {
         for (int c = 0; c < 4; c++) {
@@ -593,7 +635,102 @@ void ScreenSequencer::renderSheet(LovyanGFX* g, int ox, int oy)
     bool last = m_haveView && m_view->lineCount <= 1;
     button(g, ox, oy, m_sheetBtn[SB_DELETE], m_confirmDelete ? "Sure?" : "Delete",
            m_confirmDelete ? COL_RED : COL_BTN, last ? COL_TEXT_DIM : COL_WHITE);
+    button(g, ox, oy, m_sheetBtn[SB_COPY], "Copy", COL_BTN, COL_WHITE);
+    bool canPaste = m_lineClipLine >= 0 && !(m_lineClipLine == line && m_haveView &&
+                                             m_lineClipPat == m_view->shown);
+    if (m_confirmPaste) {
+        snprintf(buf, sizeof(buf), "Sure?");
+    } else if (m_lineClipLine >= 0) {
+        snprintf(buf, sizeof(buf), "Paste %d.%d", m_lineClipPat + 1, m_lineClipLine + 1);
+    } else {
+        snprintf(buf, sizeof(buf), "Paste");
+    }
+    button(g, ox, oy, m_sheetBtn[SB_PASTE], buf, m_confirmPaste ? COL_RED : COL_BTN,
+           canPaste ? COL_WHITE : COL_TEXT_DIM);
     button(g, ox, oy, m_sheetBtn[SB_CLOSE], "Close", COL_SLOT_USED, COL_WHITE);
+}
+
+void ScreenSequencer::renderPatternMenu(LovyanGFX* g, int ox, int oy)
+{
+    const ui_seq::View& v = *m_view;
+    int p = m_patMenu;
+    char buf[64];
+    bool used = (v.used >> p) & 1;
+    snprintf(buf, sizeof(buf), "Pattern %d%s%s%s", p + 1, used ? "" : " (empty)",
+             p == v.play ? "  playing" : "", p == v.edit ? "  editing" : "");
+    text(g, ox, oy, m_areaX + 8, m_g.linesY + (m_g.headerRowH - GLYPH_H * m_g.textSize) / 2,
+         m_areaW - 16, buf, COL_WHITE, m_g.textSize);
+
+    button(g, ox, oy, m_patBtn[PM_EDIT], p == v.edit ? "Follow play" : "Edit here",
+           p == v.edit ? COL_ON : COL_BTN, COL_WHITE);
+    button(g, ox, oy, m_patBtn[PM_COPY], m_patClip == p ? "Copied" : "Copy", COL_BTN, COL_WHITE);
+    bool canPaste = m_patClip >= 0 && m_patClip != p;
+    if (m_patConfirm == PM_PASTE) {
+        snprintf(buf, sizeof(buf), "Sure?");
+    } else if (m_patClip >= 0) {
+        snprintf(buf, sizeof(buf), "Paste %d", m_patClip + 1);
+    } else {
+        snprintf(buf, sizeof(buf), "Paste");
+    }
+    button(g, ox, oy, m_patBtn[PM_PASTE], buf, m_patConfirm == PM_PASTE ? COL_RED : COL_BTN,
+           canPaste ? COL_WHITE : COL_TEXT_DIM);
+    button(g, ox, oy, m_patBtn[PM_CLEAR], m_patConfirm == PM_CLEAR ? "Sure?" : "Clear",
+           m_patConfirm == PM_CLEAR ? COL_RED : COL_BTN, used ? COL_WHITE : COL_TEXT_DIM);
+    int length = ui_seq_get_i(p, -1, "length");
+    if (length == 0) {
+        snprintf(buf, sizeof(buf), "Length auto");
+    } else {
+        snprintf(buf, sizeof(buf), "Length %d bar%s", length, length > 1 ? "s" : "");
+    }
+    button(g, ox, oy, m_patBtn[PM_LENGTH], buf, COL_BTN, COL_WHITE);
+    button(g, ox, oy, m_patBtn[PM_CLOSE], "Close", COL_SLOT_USED, COL_WHITE);
+}
+
+void ScreenSequencer::renderChain(LovyanGFX* g, int ox, int oy)
+{
+    const ui_seq::View& v = *m_view;
+    int ts = m_g.textSize;
+    char buf[40];
+    snprintf(buf, sizeof(buf), "Chain (%s)", v.chainOn ? "on" : "off");
+    text(g, ox, oy, m_areaX + 8, m_g.linesY + (m_g.headerRowH - GLYPH_H * ts) / 2,
+         m_areaW - 16, buf, v.chainOn ? COL_PURPLE : COL_WHITE, ts);
+
+    const Rect& lr = m_chainList;
+    int rowH = m_fileRowH;
+    int rows = lr.h / rowH;
+    if (m_chainN == 0) {
+        text(g, ox, oy, lr.x + 8, lr.y + 8, lr.w - 16, "Empty: Add puts the pattern on screen",
+             COL_TEXT_DIM, ts > 1 ? 1 : ts);
+    }
+    for (int r = 0; r < rows; r++) {
+        int i = m_chainScroll + r;
+        if (i >= m_chainN) break;
+        int y = lr.y + r * rowH;
+        g->fillRect(lr.x - ox, y - oy, lr.w, rowH - 1, i == m_chainSel ? COL_NAME_SEL : COL_NAME_BG);
+        snprintf(buf, sizeof(buf), "%2d  P%d  x%d", i + 1, m_chainP[i] + 1, m_chainR[i]);
+        text(g, ox, oy, lr.x + 8, y + (rowH - GLYPH_H * ts) / 2, lr.w - 16, buf, COL_WHITE, ts);
+    }
+
+    bool sel = m_chainSel >= 0 && m_chainSel < m_chainN;
+    static const char* LABELS[CB_COUNT] = {
+        "Add", "Delete", "Pat -", "Pat +", "Rep -", "Rep +", "Up", "Down", "Clear", "On", "Close",
+    };
+    for (int b = 0; b < CB_COUNT; b++) {
+        bool enabled = b == CB_ADD || b == CB_CLOSE || b == CB_ON || (b == CB_CLEAR && m_chainN > 0) || sel;
+        const char* label = LABELS[b];
+        uint16_t bg = COL_BTN;
+        if (b == CB_CLEAR && m_chainConfirm) {
+            label = "Sure?";
+            bg = COL_RED;
+        } else if (b == CB_ON) {
+            label = v.chainOn ? "Turn off" : "Turn on";
+            bg = v.chainOn ? COL_PURPLE : COL_BTN;
+            enabled = m_chainN > 0;
+        } else if (b == CB_CLOSE) {
+            bg = COL_SLOT_USED;
+        }
+        button(g, ox, oy, m_chainBtn[b], label, bg, enabled ? COL_WHITE : COL_TEXT_DIM);
+    }
 }
 
 void ScreenSequencer::renderFiles(LovyanGFX* g, int ox, int oy)
@@ -631,6 +768,14 @@ void ScreenSequencer::render(LovyanGFX* g, int ox, int oy)
     if (m_clip.y < m_areaY + m_g.headerH) renderHeader(g, ox, oy);
     if (m_fileSheet) {
         renderFiles(g, ox, oy);
+        return;
+    }
+    if (m_patMenu >= 0) {
+        renderPatternMenu(g, ox, oy);
+        return;
+    }
+    if (m_chainSheet) {
+        renderChain(g, ox, oy);
         return;
     }
     if (m_sheetLine >= 0) {
@@ -722,8 +867,7 @@ void ScreenSequencer::leave()
 {
     m_isActive = false;
     memset(m_touch, 0, sizeof(m_touch));
-    m_sheetLine = -1;
-    m_fileSheet = false;
+    closeSheets();
 }
 
 void ScreenSequencer::draw()
@@ -782,6 +926,7 @@ void ScreenSequencer::update()
         }
         computeGeom();
         clampScroll();
+        if (m_chainSheet) loadChain();
         for (int l = 0; l < SEQ_MAX_LINES; l++) m_playCol[l] = playColOf(l);
         m_lastPlay = m_view->play;
         m_lastNext = m_view->next;
@@ -865,6 +1010,9 @@ void ScreenSequencer::pressButton(int id)
         case BTN_CHAIN:
             ui_seq_set_i(-1, -1, "chain_on", v.chainOn ? 0 : 1);
             break;
+        case BTN_CHORD:
+            ui_seq::preview_chord(m_selected);
+            break;
         case BTN_WIN_PREV:
         case BTN_WIN_NEXT:
             m_follow = false;
@@ -917,20 +1065,189 @@ void ScreenSequencer::pressButton(int id)
 // while another plays, or go back to following the playing one
 void ScreenSequencer::longPressButton(int id)
 {
-    int p = -1;
     if (id >= BTN_SLOT0 && id < BTN_SLOT0 + SEQ_MAX_PATTERNS) {
-        p = id - BTN_SLOT0;
+        openPatternMenu(id - BTN_SLOT0);
     } else if (id == BTN_PAT) {
-        p = m_view->shown;
-    } else {
-        return;
+        openPatternMenu(m_view->shown);
+    } else if (id == BTN_CHAIN) {
+        openChain();
     }
-    ui_seq_set_i(-1, -1, "edit_pattern", m_view->edit == p ? -1 : p);
+}
+
+// --- Pattern menu, chain sheet ------------------------------------------------
+
+void ScreenSequencer::openPatternMenu(int pattern)
+{
+    closeSheets();
+    m_patMenu = pattern;
+    paintAll();
+}
+
+void ScreenSequencer::pressPattern(int id)
+{
+    int p = m_patMenu;
+    bool used = (m_view->used >> p) & 1;
+    int confirmed = m_patConfirm;
+    m_patConfirm = -1;
+    switch (id) {
+        case PM_EDIT:
+            // Edit this pattern while another plays, or follow the playing one again
+            ui_seq_set_i(-1, -1, "edit_pattern", m_view->edit == p ? -1 : p);
+            closeSheet();
+            return;
+        case PM_COPY:
+            m_patClip = p;
+            ui_seq_set_status("Pattern copied");
+            break;
+        case PM_PASTE:
+            if (m_patClip < 0 || m_patClip == p) break;
+            if (used && confirmed != PM_PASTE) {
+                m_patConfirm = PM_PASTE;
+                break;
+            }
+            if (!ui_seq_copy_pattern(m_patClip, p)) ui_seq_set_status("Too many notes");
+            break;
+        case PM_CLEAR:
+            if (!used) break;
+            if (confirmed != PM_CLEAR) {
+                m_patConfirm = PM_CLEAR;
+                break;
+            }
+            ui_seq_clear_pattern(p);
+            break;
+        case PM_LENGTH: {
+            static const int LENGTHS[] = { 0, 1, 2, 4, 8 };
+            ui_seq_set_i(p, -1, "length", nextChoice(LENGTHS, 5, ui_seq_get_i(p, -1, "length")));
+            break;
+        }
+        case PM_CLOSE:
+            closeSheet();
+            return;
+        default:
+            return;
+    }
+    paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
+}
+
+void ScreenSequencer::loadChain()
+{
+    m_chainN = ui_seq_get_chain(m_chainP, m_chainR, SEQ_MAX_CHAIN);
+    if (m_chainSel >= m_chainN) m_chainSel = m_chainN - 1;
+    int rows = m_chainList.h / m_fileRowH;
+    if (rows < 1) rows = 1;
+    if (m_chainSel >= 0 && m_chainSel < m_chainScroll) m_chainScroll = m_chainSel;
+    if (m_chainSel >= m_chainScroll + rows) m_chainScroll = m_chainSel - rows + 1;
+    int maxScroll = m_chainN - rows;
+    if (m_chainScroll > maxScroll) m_chainScroll = maxScroll > 0 ? maxScroll : 0;
+}
+
+void ScreenSequencer::openChain()
+{
+    closeSheets();
+    m_chainSheet = true;
+    m_chainSel = -1;
+    m_chainScroll = 0;
+    loadChain();
+    paintAll();
+}
+
+void ScreenSequencer::pressChain(int id)
+{
+    bool confirmed = m_chainConfirm;
+    m_chainConfirm = false;
+    bool sel = m_chainSel >= 0 && m_chainSel < m_chainN;
+    int i = m_chainSel;
+    bool changed = false;
+    switch (id) {
+        case CB_ADD: {
+            if (m_chainN >= SEQ_MAX_CHAIN) break;
+            int at = sel ? i + 1 : m_chainN;
+            memmove(&m_chainP[at + 1], &m_chainP[at], (size_t)(m_chainN - at));
+            memmove(&m_chainR[at + 1], &m_chainR[at], (size_t)(m_chainN - at));
+            m_chainP[at] = (uint8_t)(m_view->shown >= 0 ? m_view->shown : 0);
+            m_chainR[at] = 1;
+            m_chainN++;
+            m_chainSel = at;
+            changed = true;
+            break;
+        }
+        case CB_DEL:
+            if (!sel) break;
+            memmove(&m_chainP[i], &m_chainP[i + 1], (size_t)(m_chainN - i - 1));
+            memmove(&m_chainR[i], &m_chainR[i + 1], (size_t)(m_chainN - i - 1));
+            m_chainN--;
+            if (m_chainSel >= m_chainN) m_chainSel = m_chainN - 1;
+            changed = true;
+            break;
+        case CB_PAT_DN:
+        case CB_PAT_UP:
+            if (!sel) break;
+            m_chainP[i] = (uint8_t)((m_chainP[i] + (id == CB_PAT_UP ? 1 : SEQ_MAX_PATTERNS - 1)) % SEQ_MAX_PATTERNS);
+            changed = true;
+            break;
+        case CB_REP_DN:
+        case CB_REP_UP: {
+            if (!sel) break;
+            int r = m_chainR[i] + (id == CB_REP_UP ? 1 : -1);
+            if (r < 1 || r > SEQ_MAX_REPEAT) break;
+            m_chainR[i] = (uint8_t)r;
+            changed = true;
+            break;
+        }
+        case CB_UP:
+        case CB_DOWN: {
+            if (!sel) break;
+            int j = id == CB_UP ? i - 1 : i + 1;
+            if (j < 0 || j >= m_chainN) break;
+            uint8_t tp = m_chainP[i], tr = m_chainR[i];
+            m_chainP[i] = m_chainP[j];
+            m_chainR[i] = m_chainR[j];
+            m_chainP[j] = tp;
+            m_chainR[j] = tr;
+            m_chainSel = j;
+            changed = true;
+            break;
+        }
+        case CB_CLEAR:
+            if (m_chainN == 0) break;
+            if (!confirmed) {
+                m_chainConfirm = true;
+                break;
+            }
+            m_chainN = 0;
+            m_chainSel = -1;
+            changed = true;
+            break;
+        case CB_ON:
+            ui_seq_set_i(-1, -1, "chain_on", m_view->chainOn ? 0 : 1);
+            break;
+        case CB_CLOSE:
+            closeSheet();
+            return;
+        default:
+            return;
+    }
+    if (changed) ui_seq_set_chain(m_chainP, m_chainR, m_chainN);
+    loadChain();
+    paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
+}
+
+void ScreenSequencer::closeSheets()
+{
+    m_sheetLine = -1;
+    m_fileSheet = false;
+    m_patMenu = -1;
+    m_chainSheet = false;
+    m_confirmDelete = false;
+    m_confirmPaste = false;
+    m_patConfirm = -1;
+    m_chainConfirm = false;
+    m_fileConfirm = -1;
 }
 
 void ScreenSequencer::openSheet(int line)
 {
-    m_fileSheet = false;
+    closeSheets();
     m_sheetLine = line;
     m_selected = line;
     m_confirmDelete = false;
@@ -939,9 +1256,7 @@ void ScreenSequencer::openSheet(int line)
 
 void ScreenSequencer::closeSheet()
 {
-    m_fileSheet = false;
-    m_sheetLine = -1;
-    m_confirmDelete = false;
+    closeSheets();
     refresh(true);
     computeGeom();
     clampScroll();
@@ -953,6 +1268,8 @@ void ScreenSequencer::pressSheet(int id)
     int line = m_sheetLine;
     int p = UI_SEQ_PATTERN_EDIT;
     if (id != SB_DELETE) m_confirmDelete = false;
+    bool pasteConfirmed = m_confirmPaste;
+    m_confirmPaste = false;
     switch (id) {
         case SB_MODE:
             ui_seq_set_i(p, line, "mode", ui_seq_get_i(p, line, "mode") == SEQ_MODE_GRID
@@ -997,6 +1314,19 @@ void ScreenSequencer::pressSheet(int id)
             if (m_selected >= line && m_selected > 0) m_selected--;
             closeSheet();
             return;
+        case SB_COPY:
+            m_lineClipPat = m_haveView ? m_view->shown : 0;
+            m_lineClipLine = line;
+            ui_seq_set_status("Line copied");
+            break;
+        case SB_PASTE:
+            if (m_lineClipLine < 0 || (m_lineClipLine == line && m_haveView && m_lineClipPat == m_view->shown)) break;
+            if (!pasteConfirmed) {
+                m_confirmPaste = true;
+                break;
+            }
+            if (!ui_seq_copy_line(m_lineClipPat, m_lineClipLine, p, line)) ui_seq_set_status("Too many notes");
+            break;
         case SB_CLOSE:
             closeSheet();
             return;
@@ -1039,7 +1369,7 @@ void ScreenSequencer::clampFileScroll()
 
 void ScreenSequencer::openFiles()
 {
-    m_sheetLine = -1;
+    closeSheets();
     m_fileSheet = true;
     m_fileConfirm = -1;
     takeFiles();
@@ -1099,7 +1429,7 @@ void ScreenSequencer::pressFile(int id)
 // Buttons that act on release, so a long press can mean something else
 bool ScreenSequencer::holdsForLongPress(int id)
 {
-    return (id >= BTN_SLOT0 && id < BTN_SLOT0 + SEQ_MAX_PATTERNS) || id == BTN_PAT;
+    return (id >= BTN_SLOT0 && id < BTN_SLOT0 + SEQ_MAX_PATTERNS) || id == BTN_PAT || id == BTN_CHAIN;
 }
 
 void ScreenSequencer::checkLongPress()
@@ -1140,6 +1470,25 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             t.kind = T_BUTTON;
             t.target = (int8_t)b;
             if (!holdsForLongPress(b)) pressButton(b);
+            return;
+        }
+        if (m_patMenu >= 0) {
+            for (int b = 0; b < PM_COUNT; b++) {
+                if (!m_patBtn[b].has(x, y)) continue;
+                t.kind = T_PAT_BTN;
+                pressPattern(b);
+                return;
+            }
+            return;
+        }
+        if (m_chainSheet) {
+            for (int b = 0; b < CB_COUNT; b++) {
+                if (!m_chainBtn[b].has(x, y)) continue;
+                t.kind = T_CHAIN_BTN;
+                pressChain(b);
+                return;
+            }
+            if (m_chainList.has(x, y)) t.kind = T_CHAIN_ROW;
             return;
         }
         if (m_fileSheet) {
@@ -1221,6 +1570,14 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             }
             break;
         }
+        case T_CHAIN_ROW:
+            if (!t.moved) {
+                int i = m_chainScroll + (t.y0 - m_chainList.y) / m_fileRowH;
+                m_chainSel = i < m_chainN ? i : -1;
+                m_chainConfirm = false;
+                paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
+            }
+            break;
         case T_FILE_ROW:
             if (!t.moved) {
                 int i = m_fileScroll + (t.y0 - m_fileList.y) / m_fileRowH;
@@ -1275,6 +1632,21 @@ void ScreenSequencer::onTouchMove(int touchId, int x, int y)
                 m_scroll += steps;
                 clampScroll();
                 if (m_scroll != before) paintAll();
+            }
+            break;
+        }
+        case T_CHAIN_ROW: {
+            if (far) t.moved = true;
+            int steps = (t.lastY - y) / m_fileRowH;
+            if (steps != 0 && t.moved) {
+                t.lastY -= steps * m_fileRowH;
+                int rows = m_chainList.h / m_fileRowH;
+                int maxScroll = m_chainN - (rows > 0 ? rows : 1);
+                int before = m_chainScroll;
+                m_chainScroll += steps;
+                if (m_chainScroll > maxScroll) m_chainScroll = maxScroll;
+                if (m_chainScroll < 0) m_chainScroll = 0;
+                if (m_chainScroll != before) paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
             }
             break;
         }

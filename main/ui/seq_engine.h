@@ -210,6 +210,9 @@ seq_pattern_t *seq_pattern_get(seq_engine_t *e, int pattern, bool create);
 bool seq_pattern_clear(seq_engine_t *e, int pattern);   // Frees the slot
 bool seq_pattern_copy(seq_engine_t *e, int src, int dst);
 bool seq_pattern_set_length(seq_engine_t *e, int pattern, int bars);   // 0 auto, 1..8
+// One line of a pattern over another (its notes, steps / rate / bars), in
+// the same pattern or another. Refused, changing nothing, over a limit.
+bool seq_pline_copy(seq_engine_t *e, int src_pattern, int src_line, int dst_pattern, int dst_line);
 
 uint32_t seq_pattern_ticks(const seq_engine_t *e, int pattern);
 uint32_t seq_line_ticks(const seq_engine_t *e, int pattern, int line);

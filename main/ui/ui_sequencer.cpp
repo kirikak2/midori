@@ -14,6 +14,7 @@
 // callbacks run with s_lock held and only send MIDI.
 
 #include "ui_sequencer.h"
+#include "midi.h"
 #include <cstring>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -64,6 +65,7 @@ static constexpr int64_t AUTOSAVE_QUIET_US = 5000000;    // After the last edit
 static constexpr int64_t AUTOSAVE_MAX_US = 60000000;     // Even while edits go on
 static constexpr int64_t STATUS_US = 3000000;
 static constexpr int MAX_FILES = 64;
+static constexpr uint32_t PREVIEW_MS = 400;     // A chord tried from the screen
 static uint32_t s_savedEdits;
 static uint32_t s_autosavedEdits;
 static uint32_t s_lastEditsSeen;
@@ -548,6 +550,13 @@ bool ui_seq_copy_pattern(int src, int dst)
     return seq_pattern_copy(s_eng, src, dst);
 }
 
+bool ui_seq_copy_line(int src_pattern, int src_line, int dst_pattern, int dst_line)
+{
+    if (!s_eng) return false;
+    Lock lock;
+    return seq_pline_copy(s_eng, src_pattern, src_line, dst_pattern, dst_line);
+}
+
 int ui_seq_place(int pattern, int line, int step, int len,
                  const uint8_t* notes, const uint8_t* velocities, int n)
 {
@@ -931,6 +940,20 @@ bool dirty()
     if (!s_eng) return false;
     Lock lock;
     return s_eng->edits != s_savedEdits;
+}
+
+void preview_chord(int line)
+{
+    if (!s_eng) return;
+    Lock lock;
+    if (line < 0 || line >= s_eng->line_count) return;
+    uint8_t ch = s_eng->lines[line].channel;
+    uint8_t mask = s_outMask;
+    if (s_bit) mask |= MIDI_route_targets(s_bit, 0x9, (uint8_t)(0x90 | ch)) & (uint8_t)~s_bit;
+    if (!mask) return;
+    for (int i = 0; i < s_eng->chord_n; i++) {
+        MIDI_Note_trigger(mask, ch, s_eng->chord[i], s_eng->chord_vel[i], PREVIEW_MS);
+    }
 }
 
 uint8_t ensure_clock()

@@ -18,10 +18,19 @@
 | 5. リアルタイム録音 | 未（realtime ラインの**再生**と `add_event` / `notes=` は済） |
 | 6. 仕上げ | MIDI Devices への登録は済（内蔵デバイス `seq`）。既定パッチ Tempo → seq と `on_*` は未 |
 
-- 段階 4 で**まだ無いもの**: スロット長押しのメニュー（Copy / Paste / Clear / Length。いまの長押しは
-  「再生中のまま編集」の切り替えだけ）、Chain の編集シート（チェーンは Ruby の `seq.chain =` で組む）、
-  ライン名の編集、Chord の試聴、ラインごとの Copy / Paste、ファイル名の入力（画面からの保存は
-  いまの名前か `SONGnnn`。名前は Ruby の `seq.save("name")` で付ける）
+- 段階 4 の残り（2026-10-25 に追加、ビルドとホストテストのみで実機未確認）:
+  - **スロットの長押し**（狭い画面は `P3` の長押し）でパターンのメニュー: **Edit here / Follow play**
+    （再生中のまま編集の切り替え）、**Copy**、**Paste N**（Copy した**番号**を覚えておき、貼るときにその時点の
+    中身を写す。使用中のスロットへは 2 回押し）、**Clear**（2 回押し）、**Length**（auto → 1 → 2 → 4 → 8 小節）、**Close**
+  - **Chain の長押し**で Chain シート（タップは従来どおり有効 / 無効）: 左にエントリ（`P3 x2`）、右に
+    Add（選んだエントリの後ろに、いま画面にあるパターンを 1 回で）/ Delete / Pat ± / Rep ± / Up / Down /
+    Clear（2 回押し）/ Turn on・off / Close
+  - ラインの設定シートの空いていた 2 マスに **Copy** / **Paste p.l**（そのラインの notes と steps / rate / bars を
+    別のライン・別のパターンへ。2 回押し。エンジンは `seq_pline_copy`、Ruby は `Line#copy_to(index, pattern:)`）
+  - ヘッダの **Chord** をタップすると、選択中のラインのチャンネルで和音を 0.4 秒鳴らす（`MIDI_Note_trigger`、
+    Sequencer の送信先とルートの宛先へ）
+- **まだ無いもの**: ライン名・ファイル名の入力（文字入力の仕組みが要る。名前は Ruby の `l.name =` /
+  `seq.save("name")` で付ける。画面からの保存はいまの名前か `SONGnnn`）
 - 画面は 1 フレームに 1 回 `ui_seq::snapshot()` で見えている範囲だけをヒープ（PSRAM）の View に写して描く
   （描画中にエンジンのロックを持たない）。曲が変わったら全体、再生位置は出入りしたマスだけを描き直す
 - テスト: `make -C main/ui/host_test`（C、ASan / UBSan 付き）、`ruby test/sequencer_test.rb`（picoruby-ui ディレクトリで）

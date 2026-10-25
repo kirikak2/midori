@@ -572,6 +572,12 @@ bool ui_seq_copy_pattern(int src, int dst)
     return false;
 }
 
+bool ui_seq_copy_line(int src_pattern, int src_line, int dst_pattern, int dst_line)
+{
+    (void)src_pattern; (void)src_line; (void)dst_pattern; (void)dst_line;
+    return false;
+}
+
 int ui_seq_place(int pattern, int line, int step, int len,
                  const uint8_t *notes, const uint8_t *velocities, int n)
 {

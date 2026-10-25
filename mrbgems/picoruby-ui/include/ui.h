@@ -213,6 +213,7 @@ int  picoruby_ui_seq_add_line(void);
 bool picoruby_ui_seq_remove_line(int line);
 bool picoruby_ui_seq_clear_pattern(int pattern);
 bool picoruby_ui_seq_copy_pattern(int src, int dst);
+bool picoruby_ui_seq_copy_line(int src_pattern, int src_line, int dst_pattern, int dst_line);
 int  picoruby_ui_seq_place(int pattern, int line, int step, int len,
                            const uint8_t *notes, const uint8_t *velocities, int n);
 int  picoruby_ui_seq_remove(int pattern, int line, int step, int note);

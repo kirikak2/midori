@@ -1149,6 +1149,16 @@ mrb_ui_seq_copy_pattern(mrb_state *mrb, mrb_value self)
     return mrb_bool_value(picoruby_ui_seq_copy_pattern(val_to_i(src), val_to_i(dst)));
 }
 
+/* UI._seq_copy_line(src_pattern, src_line, dst_pattern, dst_line) */
+static mrb_value
+mrb_ui_seq_copy_line(mrb_state *mrb, mrb_value self)
+{
+    mrb_value sp, sl, dp, dl;
+    mrb_get_args(mrb, "oooo", &sp, &sl, &dp, &dl);
+    return mrb_bool_value(picoruby_ui_seq_copy_line(val_to_i(sp), val_to_i(sl),
+                                                    val_to_i(dp), val_to_i(dl)));
+}
+
 /* UI._seq_place(pattern, line, step, len, notes, velocities) -> placed, or -1 */
 static mrb_value
 mrb_ui_seq_place(mrb_state *mrb, mrb_value self)
@@ -1705,6 +1715,7 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_seq_remove_line,    mrb_ui_seq_remove_line,    MRB_ARGS_REQ(1));
     DEF(_seq_clear_pattern,  mrb_ui_seq_clear_pattern,  MRB_ARGS_REQ(1));
     DEF(_seq_copy_pattern,   mrb_ui_seq_copy_pattern,   MRB_ARGS_REQ(2));
+    DEF(_seq_copy_line,      mrb_ui_seq_copy_line,      MRB_ARGS_REQ(4));
     DEF(_seq_place,          mrb_ui_seq_place,          MRB_ARGS_REQ(6));
     DEF(_seq_remove,         mrb_ui_seq_remove,         MRB_ARGS_REQ(4));
     DEF(_seq_set_length,     mrb_ui_seq_set_length,     MRB_ARGS_REQ(4));

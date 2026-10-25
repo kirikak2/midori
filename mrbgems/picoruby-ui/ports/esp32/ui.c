@@ -664,6 +664,11 @@ bool picoruby_ui_seq_copy_pattern(int src, int dst)
     return ui_seq_copy_pattern(src, dst);
 }
 
+bool picoruby_ui_seq_copy_line(int src_pattern, int src_line, int dst_pattern, int dst_line)
+{
+    return ui_seq_copy_line(src_pattern, src_line, dst_pattern, dst_line);
+}
+
 int picoruby_ui_seq_place(int pattern, int line, int step, int len,
                           const uint8_t *notes, const uint8_t *velocities, int n)
 {

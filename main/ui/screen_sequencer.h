@@ -64,7 +64,7 @@ private:
         SB_MODE = 0, SB_CH_DN, SB_CH, SB_CH_UP,
         SB_STEPS, SB_RATE, SB_BARS, SB_MUTE,
         SB_GATE_DN, SB_GATE, SB_GATE_UP, SB_CLEAR,
-        SB_DELETE, SB_CLOSE,
+        SB_DELETE, SB_COPY, SB_PASTE, SB_CLOSE,
         SB_COUNT,
     };
 
@@ -74,6 +74,19 @@ private:
     };
     static constexpr int MAX_FILES = 64;
 
+    // A pattern slot held down
+    enum PatternButton {
+        PM_EDIT = 0, PM_COPY, PM_PASTE, PM_CLEAR, PM_LENGTH, PM_CLOSE,
+        PM_COUNT,
+    };
+
+    // The chain sheet (Chain held down)
+    enum ChainButton {
+        CB_ADD = 0, CB_DEL, CB_PAT_DN, CB_PAT_UP, CB_REP_DN, CB_REP_UP,
+        CB_UP, CB_DOWN, CB_CLEAR, CB_ON, CB_CLOSE,
+        CB_COUNT,
+    };
+
     enum TouchKind : uint8_t {
         T_NONE = 0,
         T_BUTTON,      // A header button
@@ -82,6 +95,9 @@ private:
         T_PLUS,        // "+ Line"
         T_FILE_ROW,    // A song in the File sheet's list (select, scroll)
         T_FILE_BTN,    // A File sheet button
+        T_PAT_BTN,     // A pattern menu button
+        T_CHAIN_ROW,   // An entry in the chain sheet's list
+        T_CHAIN_BTN,   // A chain sheet button
         T_SHEET,       // A settings sheet button
         T_IGNORE,      // Landed on nothing; held until lifted
     };
@@ -141,6 +157,21 @@ private:
     Rect m_fileBtn[FB_COUNT];
     Rect m_fileList;
     int m_fileRowH, m_fileRows;
+    // Pattern menu, chain sheet, clipboards
+    int m_patMenu;               // Pattern whose menu shows, or -1
+    int m_patConfirm;            // PatternButton waiting for a second tap, or -1
+    int m_patClip;               // Pattern Copy marked, or -1 (pasted as it is then)
+    Rect m_patBtn[PM_COUNT];
+    bool m_chainSheet;
+    int m_chainSel;
+    int m_chainScroll;
+    bool m_chainConfirm;         // Clear waiting for a second tap
+    int m_chainN;
+    uint8_t m_chainP[SEQ_MAX_CHAIN], m_chainR[SEQ_MAX_CHAIN];
+    Rect m_chainBtn[CB_COUNT];
+    Rect m_chainList;
+    int m_lineClipPat, m_lineClipLine;   // Line Copy marked, or -1
+    bool m_confirmPaste;
     bool m_dirty;                // Shown on the File button
     char m_status[32];           // Fresh status message, or ""
 
@@ -165,7 +196,15 @@ private:
     void renderPlus(LovyanGFX* g, int ox, int oy, int y);
     void renderSheet(LovyanGFX* g, int ox, int oy);
     void renderFiles(LovyanGFX* g, int ox, int oy);
-    bool sheetOpen() const { return m_sheetLine >= 0 || m_fileSheet; }
+    bool sheetOpen() const { return m_sheetLine >= 0 || m_fileSheet || m_patMenu >= 0 || m_chainSheet; }
+    void closeSheets();          // Every sheet shut (no repaint)
+    void renderPatternMenu(LovyanGFX* g, int ox, int oy);
+    void renderChain(LovyanGFX* g, int ox, int oy);
+    void openPatternMenu(int pattern);
+    void pressPattern(int id);
+    void openChain();
+    void loadChain();
+    void pressChain(int id);
     void openFiles();
     void pressFile(int id);
     void takeFiles();

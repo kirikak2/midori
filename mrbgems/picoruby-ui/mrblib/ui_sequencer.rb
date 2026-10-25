@@ -1033,6 +1033,14 @@ module UI
         end
       end
 
+      # Copies this line (its notes and steps / rate / bars) over line `index`
+      # of `pattern` (default: this line's pattern)
+      def copy_to(index, pattern: nil)
+        @seq.check_line(index)
+        dst = pattern.nil? ? @pattern : Sequencer.check_pattern(pattern)
+        UI._seq_copy_line(@pattern, @index, dst, index)
+      end
+
       # Realtime: adds a note at `pos` ticks, `len` ticks long
       def add_event(pos:, len:, note:, velocity: 100)
         UI._seq_add_event(@pattern, @index, pos, len, note, velocity)

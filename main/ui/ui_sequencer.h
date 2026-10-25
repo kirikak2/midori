@@ -84,6 +84,8 @@ bool file_name(int index, char* buf, int size);
 bool status(char* buf, int size);
 // Changed since it was saved by name
 bool dirty();
+// Plays the chord on a line's channel, where the sequencer plays, briefly
+void preview_chord(int line);
 
 // How many notes start at `step`, and the longest of them
 int  starting_at(int line, int step, int* longest);
