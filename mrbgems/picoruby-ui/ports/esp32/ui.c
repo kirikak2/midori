@@ -617,6 +617,109 @@ bool picoruby_ui_keys_is_pressed(int note)
     return ui_keys_is_pressed(note);
 }
 
+/* --- Sequencer --- */
+
+void picoruby_ui_seq_reset(int lines)
+{
+    ui_seq_reset(lines);
+}
+
+bool picoruby_ui_seq_set_i(int pattern, int line, const char *name, int value)
+{
+    return ui_seq_set_i(pattern, line, name, value);
+}
+
+int picoruby_ui_seq_get_i(int pattern, int line, const char *name)
+{
+    return ui_seq_get_i(pattern, line, name);
+}
+
+bool picoruby_ui_seq_set_name(int line, const char *name)
+{
+    return ui_seq_set_name(line, name);
+}
+
+int picoruby_ui_seq_get_name(int line, char *buf, int size)
+{
+    return ui_seq_get_name(line, buf, size);
+}
+
+int picoruby_ui_seq_add_line(void)
+{
+    return ui_seq_add_line();
+}
+
+bool picoruby_ui_seq_remove_line(int line)
+{
+    return ui_seq_remove_line(line);
+}
+
+bool picoruby_ui_seq_clear_pattern(int pattern)
+{
+    return ui_seq_clear_pattern(pattern);
+}
+
+bool picoruby_ui_seq_copy_pattern(int src, int dst)
+{
+    return ui_seq_copy_pattern(src, dst);
+}
+
+int picoruby_ui_seq_place(int pattern, int line, int step, int len,
+                          const uint8_t *notes, const uint8_t *velocities, int n)
+{
+    return ui_seq_place(pattern, line, step, len, notes, velocities, n);
+}
+
+int picoruby_ui_seq_remove(int pattern, int line, int step, int note)
+{
+    return ui_seq_remove(pattern, line, step, note);
+}
+
+bool picoruby_ui_seq_set_length(int pattern, int line, int step, int len)
+{
+    return ui_seq_set_length(pattern, line, step, len);
+}
+
+bool picoruby_ui_seq_add_event(int pattern, int line, int pos, int len, int note, int velocity)
+{
+    return ui_seq_add_event(pattern, line, pos, len, note, velocity);
+}
+
+void picoruby_ui_seq_clear(int pattern, int line, int mode)
+{
+    ui_seq_clear(pattern, line, mode);
+}
+
+int picoruby_ui_seq_notes_read(int pattern, int line, int mode, int start, int *out, int max)
+{
+    return ui_seq_notes_read(pattern, line, mode, start, out, max);
+}
+
+int picoruby_ui_seq_get_chord(uint8_t *notes, uint8_t *velocities, int max)
+{
+    return ui_seq_get_chord(notes, velocities, max);
+}
+
+void picoruby_ui_seq_set_chord(const uint8_t *notes, const uint8_t *velocities, int n)
+{
+    ui_seq_set_chord(notes, velocities, n);
+}
+
+int picoruby_ui_seq_get_chain(uint8_t *patterns, uint8_t *repeats, int max)
+{
+    return ui_seq_get_chain(patterns, repeats, max);
+}
+
+bool picoruby_ui_seq_set_chain(const uint8_t *patterns, const uint8_t *repeats, int n)
+{
+    return ui_seq_set_chain(patterns, repeats, n);
+}
+
+void picoruby_ui_seq_receive(int cin, int b1, int b2, int b3)
+{
+    ui_seq_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
+}
+
 /* --- Tempo --- */
 
 int picoruby_ui_tempo_bit(void)

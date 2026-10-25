@@ -515,6 +515,127 @@ void ui_keys_cleanup(void)
 {
 }
 
+// Sequencer stubs (docs/SEQUENCER.md) - no screen, no sequencer task. It never
+// joins the transport registry, so UI::Sequencer#transport_id is 0 and
+// MIDI.route refuses it; edits are dropped and reads give defaults.
+
+void ui_seq_reset(int lines)
+{
+    (void)lines;
+}
+
+bool ui_seq_set_i(int pattern, int line, const char *name, int value)
+{
+    (void)pattern; (void)line; (void)name; (void)value;
+    return false;
+}
+
+int ui_seq_get_i(int pattern, int line, const char *name)
+{
+    (void)pattern; (void)line; (void)name;
+    return 0;
+}
+
+bool ui_seq_set_name(int line, const char *name)
+{
+    (void)line; (void)name;
+    return false;
+}
+
+int ui_seq_get_name(int line, char *buf, int size)
+{
+    (void)line;
+    if (buf && size > 0) buf[0] = '\0';
+    return 0;
+}
+
+int ui_seq_add_line(void)
+{
+    return -1;
+}
+
+bool ui_seq_remove_line(int line)
+{
+    (void)line;
+    return false;
+}
+
+bool ui_seq_clear_pattern(int pattern)
+{
+    (void)pattern;
+    return false;
+}
+
+bool ui_seq_copy_pattern(int src, int dst)
+{
+    (void)src; (void)dst;
+    return false;
+}
+
+int ui_seq_place(int pattern, int line, int step, int len,
+                 const uint8_t *notes, const uint8_t *velocities, int n)
+{
+    (void)pattern; (void)line; (void)step; (void)len; (void)notes; (void)velocities; (void)n;
+    return -1;
+}
+
+int ui_seq_remove(int pattern, int line, int step, int note)
+{
+    (void)pattern; (void)line; (void)step; (void)note;
+    return 0;
+}
+
+bool ui_seq_set_length(int pattern, int line, int step, int len)
+{
+    (void)pattern; (void)line; (void)step; (void)len;
+    return false;
+}
+
+bool ui_seq_add_event(int pattern, int line, int pos, int len, int note, int velocity)
+{
+    (void)pattern; (void)line; (void)pos; (void)len; (void)note; (void)velocity;
+    return false;
+}
+
+void ui_seq_clear(int pattern, int line, int mode)
+{
+    (void)pattern; (void)line; (void)mode;
+}
+
+int ui_seq_notes_read(int pattern, int line, int mode, int start, int *out, int max)
+{
+    (void)pattern; (void)line; (void)mode; (void)start; (void)out; (void)max;
+    return 0;
+}
+
+int ui_seq_get_chord(uint8_t *notes, uint8_t *velocities, int max)
+{
+    (void)notes; (void)velocities; (void)max;
+    return 0;
+}
+
+void ui_seq_set_chord(const uint8_t *notes, const uint8_t *velocities, int n)
+{
+    (void)notes; (void)velocities; (void)n;
+}
+
+int ui_seq_get_chain(uint8_t *patterns, uint8_t *repeats, int max)
+{
+    (void)patterns; (void)repeats; (void)max;
+    return 0;
+}
+
+bool ui_seq_set_chain(const uint8_t *patterns, const uint8_t *repeats, int n)
+{
+    (void)patterns; (void)repeats; (void)n;
+    return false;
+}
+
+void ui_seq_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)cin; (void)b1; (void)b2; (void)b3;
+}
+
 // MIDI Devices stubs (docs/UI_MIDI_DEVICES.md) - no screen to patch on. The
 // list stays empty, so UI::MIDIDevices has no devices, no selection and
 // nothing saved; MIDI.route itself works as everywhere.

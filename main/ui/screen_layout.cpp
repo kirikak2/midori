@@ -3,6 +3,7 @@
 #include "screen_xypad.h"
 #include "screen_tombola.h"
 #include "screen_keys.h"
+#include "screen_sequencer.h"
 #include "screen_main.h"
 #include "ui_layout.h"
 #include "ui_strip.h"
@@ -24,7 +25,7 @@ static constexpr float SWEEP_RAD = UI_KNOB_ANGLE_SWEEP * 3.14159265f / 180.0f;
 static bool isView(uint8_t kind)
 {
     return kind == UI_WIDGET_XYPAD || kind == UI_WIDGET_TOMBOLA || kind == UI_WIDGET_KEYS
-        || kind == UI_WIDGET_TEMPO;
+        || kind == UI_WIDGET_TEMPO || kind == UI_WIDGET_SEQUENCER;
 }
 
 ScreenLayout::ScreenLayout()
@@ -35,6 +36,7 @@ ScreenLayout::ScreenLayout()
     , m_hasTombola(false)
     , m_hasKeys(false)
     , m_hasTempo(false)
+    , m_hasSequencer(false)
 {
     m_title[0] = '\0';
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
@@ -55,6 +57,7 @@ void ScreenLayout::attachViews(LayoutDef* def)
     m_hasTombola = false;
     m_hasKeys = false;
     m_hasTempo = false;
+    m_hasSequencer = false;
     if (!def) return;
 
     for (int i = 0; i < def->count; i++) {
@@ -75,6 +78,10 @@ void ScreenLayout::attachViews(LayoutDef* def)
             getScreenMain().setArea(wd.x, wd.y, wd.w, wd.h);
             getScreenMain().enter();
             m_hasTempo = true;
+        } else if (wd.kind == UI_WIDGET_SEQUENCER && !m_hasSequencer) {
+            getScreenSequencer().setArea(wd.x, wd.y, wd.w, wd.h);
+            getScreenSequencer().enter();
+            m_hasSequencer = true;
         }
     }
 }
@@ -102,6 +109,11 @@ void ScreenLayout::detachViews()
         getScreenMain().leave();
         getScreenMain().resetArea();
         m_hasTempo = false;
+    }
+    if (m_hasSequencer) {
+        getScreenSequencer().leave();
+        getScreenSequencer().resetArea();
+        m_hasSequencer = false;
     }
 }
 
@@ -197,6 +209,8 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
                 getScreenXYPad().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_KEYS) {
                 getScreenKeys().onTouch(t, m_lastX[t], m_lastY[t], false);
+            } else if (m_ownerKind[t] == UI_WIDGET_SEQUENCER) {
+                getScreenSequencer().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_TEMPO) {
                 // Acts on press only: nothing held
             } else {
@@ -254,6 +268,7 @@ void ScreenLayout::update()
     if (m_hasTombola) getScreenTombola().update();
     if (m_hasKeys) getScreenKeys().update();
     if (m_hasTempo) getScreenMain().update();
+    if (m_hasSequencer) getScreenSequencer().update();
 }
 
 void ScreenLayout::draw()
@@ -271,6 +286,7 @@ void ScreenLayout::draw()
     if (m_hasTombola) getScreenTombola().draw();
     if (m_hasKeys) getScreenKeys().draw();
     if (m_hasTempo) getScreenMain().draw();
+    if (m_hasSequencer) getScreenSequencer().draw();
 }
 
 // --- Touch ------------------------------------------------------------------
@@ -344,6 +360,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         if (kind == UI_WIDGET_TOMBOLA) getScreenTombola().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_KEYS) getScreenKeys().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_TEMPO) getScreenMain().onTouch(touchId, x, y, true);
+        if (kind == UI_WIDGET_SEQUENCER) getScreenSequencer().onTouch(touchId, x, y, true);
         return;
     }
 
@@ -366,6 +383,10 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
     }
     if (kind == UI_WIDGET_TEMPO) {
         getScreenMain().onTouch(touchId, x, y, false);
+        return;
+    }
+    if (kind == UI_WIDGET_SEQUENCER) {
+        getScreenSequencer().onTouch(touchId, x, y, false);
         return;
     }
 
@@ -417,6 +438,12 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         m_lastX[touchId] = x;
         m_lastY[touchId] = y;
         getScreenMain().onTouchMove(touchId, x, y);
+        return;
+    }
+    if (kind == UI_WIDGET_SEQUENCER) {
+        m_lastX[touchId] = x;
+        m_lastY[touchId] = y;
+        getScreenSequencer().onTouchMove(touchId, x, y);
         return;
     }
     if (kind != UI_WIDGET_KNOB) return;

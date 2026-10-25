@@ -78,6 +78,7 @@ module UI
   SCREEN_LAYOUT    = 9
   SCREEN_HOME      = 10
   SCREEN_KEYS      = 11
+  SCREEN_SEQUENCER = 12
 
   # === Navigation (docs/UI_NAVIGATION.md) ===
   #
@@ -89,7 +90,7 @@ module UI
   SCREENS = {
     home: SCREEN_HOME, tempo: SCREEN_TEMPO, main: SCREEN_MAIN,
     pads: SCREEN_PADS, knobs: SCREEN_KNOBS, xypad: SCREEN_XYPAD,
-    tombola: SCREEN_TOMBOLA, keys: SCREEN_KEYS, layout: SCREEN_LAYOUT,
+    tombola: SCREEN_TOMBOLA, keys: SCREEN_KEYS, sequencer: SCREEN_SEQUENCER, layout: SCREEN_LAYOUT,
     midi_devices: SCREEN_MIDI_DEVICES, midi_info: SCREEN_MIDI_INFO, scripts: SCREEN_SCRIPTS,
     logs: SCREEN_LOGS, settings: SCREEN_SETTINGS
   }
@@ -97,7 +98,7 @@ module UI
   # Index -> Symbol. Screens 0 and 2 read back as :tempo and :midi_devices,
   # their current names.
   SCREEN_NAMES = [:tempo, :pads, :midi_devices, :logs, :scripts, :settings,
-                  :tombola, :knobs, :xypad, :layout, :home, :keys]
+                  :tombola, :knobs, :xypad, :layout, :home, :keys, :sequencer]
 
   # Internal: Symbol / SCREEN_* -> index, or nil
   def self.screen_index(screen)
@@ -181,6 +182,7 @@ module UI
   def self.pads;      show(:pads);      end
   def self.xypad;     show(:xypad);     end
   def self.keys;      show(:keys);      end
+  def self.sequencer; show(:sequencer); end
   def self.tombola;   show(:tombola);   end
   def self.midi_info; show(:midi_info); end
   def self.midi_devices; show(:midi_devices); end

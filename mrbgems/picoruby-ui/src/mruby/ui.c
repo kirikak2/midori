@@ -1021,6 +1021,261 @@ mrb_ui_keys_is_pressed(mrb_state *mrb, mrb_value self)
 }
 
 /* ------------------------------------------------------------------------
+ * Sequencer
+ *
+ * The Ruby-visible object is UI::Sequencer (mrblib/ui_sequencer.rb).
+ * Parameters go through _seq_set_i / _seq_get_i keyed by name; pattern and
+ * line say which pattern / line a name applies to (see ui_common.h).
+ * ------------------------------------------------------------------------ */
+
+#define SEQ_ARRAY_MAX 64
+
+/* Pairs of Integers from two Arrays of the same positions (b may be nil:
+ * `dflt` for each). Positions where either is not an Integer are skipped. */
+static int
+collect_pairs(mrb_value a, mrb_value b, uint8_t *out_a, uint8_t *out_b, int cap, int dflt)
+{
+    if (!mrb_array_p(a)) return 0;
+    int len = (int)RARRAY_LEN(a);
+    if (len > cap) len = cap;
+    int count = 0;
+    for (int i = 0; i < len; i++) {
+        mrb_value x = RARRAY_PTR(a)[i];
+        mrb_value y = (mrb_array_p(b) && i < RARRAY_LEN(b)) ? RARRAY_PTR(b)[i] : mrb_fixnum_value(dflt);
+        if (!mrb_integer_p(x) || !mrb_integer_p(y)) continue;
+        mrb_int vx = mrb_integer(x), vy = mrb_integer(y);
+        out_a[count] = (uint8_t)(vx < 0 ? 0 : (vx > 255 ? 255 : vx));
+        out_b[count] = (uint8_t)(vy < 0 ? 0 : (vy > 255 ? 255 : vy));
+        count++;
+    }
+    return count;
+}
+
+static mrb_value
+pairs_to_ary(mrb_state *mrb, const uint8_t *a, const uint8_t *b, int n)
+{
+    mrb_value ary = mrb_ary_new_capa(mrb, n);
+    for (int i = 0; i < n; i++) {
+        mrb_value pair = mrb_ary_new_capa(mrb, 2);
+        mrb_ary_push(mrb, pair, mrb_fixnum_value(a[i]));
+        mrb_ary_push(mrb, pair, mrb_fixnum_value(b[i]));
+        mrb_ary_push(mrb, ary, pair);
+    }
+    return ary;
+}
+
+/* UI._seq_reset(lines) */
+static mrb_value
+mrb_ui_seq_reset(mrb_state *mrb, mrb_value self)
+{
+    mrb_value lines;
+    mrb_get_args(mrb, "o", &lines);
+    picoruby_ui_seq_reset(val_to_i(lines));
+    return mrb_nil_value();
+}
+
+/* UI._seq_set_i(pattern, line, name, value) -> true / false */
+static mrb_value
+mrb_ui_seq_set_i(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, name_v, value;
+    mrb_get_args(mrb, "oooo", &pattern, &line, &name_v, &value);
+    const char *name = param_name(mrb, name_v);
+    int i;
+    if (!name || !val_to_flag_i(value, &i)) return mrb_false_value();
+    return mrb_bool_value(picoruby_ui_seq_set_i(val_to_i(pattern), val_to_i(line), name, i));
+}
+
+/* UI._seq_get_i(pattern, line, name) */
+static mrb_value
+mrb_ui_seq_get_i(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, name_v;
+    mrb_get_args(mrb, "ooo", &pattern, &line, &name_v);
+    const char *name = param_name(mrb, name_v);
+    if (!name) return mrb_fixnum_value(0);
+    return mrb_fixnum_value(picoruby_ui_seq_get_i(val_to_i(pattern), val_to_i(line), name));
+}
+
+/* UI._seq_set_name(line, name) -- line < 0: the song's */
+static mrb_value
+mrb_ui_seq_set_name(mrb_state *mrb, mrb_value self)
+{
+    mrb_value line, name;
+    mrb_get_args(mrb, "oo", &line, &name);
+    if (!mrb_string_p(name)) return mrb_false_value();
+    return mrb_bool_value(picoruby_ui_seq_set_name(val_to_i(line), RSTRING_CSTR(mrb, name)));
+}
+
+/* UI._seq_name(line) -> String */
+static mrb_value
+mrb_ui_seq_name(mrb_state *mrb, mrb_value self)
+{
+    mrb_value line;
+    mrb_get_args(mrb, "o", &line);
+    char buf[32];
+    int n = picoruby_ui_seq_get_name(val_to_i(line), buf, (int)sizeof(buf));
+    return mrb_str_new(mrb, buf, n);
+}
+
+/* UI._seq_add_line -> index, or -1 */
+static mrb_value
+mrb_ui_seq_add_line(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_seq_add_line());
+}
+
+static mrb_value
+mrb_ui_seq_remove_line(mrb_state *mrb, mrb_value self)
+{
+    mrb_value line;
+    mrb_get_args(mrb, "o", &line);
+    return mrb_bool_value(picoruby_ui_seq_remove_line(val_to_i(line)));
+}
+
+static mrb_value
+mrb_ui_seq_clear_pattern(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern;
+    mrb_get_args(mrb, "o", &pattern);
+    return mrb_bool_value(picoruby_ui_seq_clear_pattern(val_to_i(pattern)));
+}
+
+static mrb_value
+mrb_ui_seq_copy_pattern(mrb_state *mrb, mrb_value self)
+{
+    mrb_value src, dst;
+    mrb_get_args(mrb, "oo", &src, &dst);
+    return mrb_bool_value(picoruby_ui_seq_copy_pattern(val_to_i(src), val_to_i(dst)));
+}
+
+/* UI._seq_place(pattern, line, step, len, notes, velocities) -> placed, or -1 */
+static mrb_value
+mrb_ui_seq_place(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, step, len, notes_v, vels_v;
+    mrb_get_args(mrb, "oooooo", &pattern, &line, &step, &len, &notes_v, &vels_v);
+    uint8_t notes[SEQ_ARRAY_MAX], vels[SEQ_ARRAY_MAX];
+    int n = collect_pairs(notes_v, vels_v, notes, vels, SEQ_ARRAY_MAX, 100);
+    return mrb_fixnum_value(picoruby_ui_seq_place(val_to_i(pattern), val_to_i(line), val_to_i(step),
+                                                  val_to_i(len), notes, vels, n));
+}
+
+/* UI._seq_remove(pattern, line, step, note) -> removed (note < 0: all at step) */
+static mrb_value
+mrb_ui_seq_remove(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, step, note;
+    mrb_get_args(mrb, "oooo", &pattern, &line, &step, &note);
+    return mrb_fixnum_value(picoruby_ui_seq_remove(val_to_i(pattern), val_to_i(line),
+                                                   val_to_i(step), val_to_i(note)));
+}
+
+static mrb_value
+mrb_ui_seq_set_length(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, step, len;
+    mrb_get_args(mrb, "oooo", &pattern, &line, &step, &len);
+    return mrb_bool_value(picoruby_ui_seq_set_length(val_to_i(pattern), val_to_i(line),
+                                                     val_to_i(step), val_to_i(len)));
+}
+
+/* UI._seq_add_event(pattern, line, pos, len, note, velocity) */
+static mrb_value
+mrb_ui_seq_add_event(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, pos, len, note, vel;
+    mrb_get_args(mrb, "oooooo", &pattern, &line, &pos, &len, &note, &vel);
+    return mrb_bool_value(picoruby_ui_seq_add_event(val_to_i(pattern), val_to_i(line), val_to_i(pos),
+                                                    val_to_i(len), val_to_i(note), val_to_i(vel)));
+}
+
+/* UI._seq_clear(pattern, line, mode) -- line / mode < 0: all */
+static mrb_value
+mrb_ui_seq_clear(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, mode;
+    mrb_get_args(mrb, "ooo", &pattern, &line, &mode);
+    picoruby_ui_seq_clear(val_to_i(pattern), val_to_i(line), val_to_i(mode));
+    return mrb_nil_value();
+}
+
+/* UI._seq_notes(pattern, line, mode) -> [[pos, len, note, velocity], ...] */
+static mrb_value
+mrb_ui_seq_notes(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pattern, line, mode;
+    mrb_get_args(mrb, "ooo", &pattern, &line, &mode);
+    int p = val_to_i(pattern), l = val_to_i(line), m = val_to_i(mode);
+    mrb_value ary = mrb_ary_new(mrb);
+    int buf[32 * 4];
+    int start = 0;
+    for (;;) {
+        int n = picoruby_ui_seq_notes_read(p, l, m, start, buf, 32);
+        for (int i = 0; i < n; i++) {
+            mrb_value nt = mrb_ary_new_capa(mrb, 4);
+            for (int k = 0; k < 4; k++) mrb_ary_push(mrb, nt, mrb_fixnum_value(buf[i * 4 + k]));
+            mrb_ary_push(mrb, ary, nt);
+        }
+        if (n < 32) break;
+        start += n;
+    }
+    return ary;
+}
+
+/* UI._seq_chord -> [[note, velocity], ...] */
+static mrb_value
+mrb_ui_seq_chord(mrb_state *mrb, mrb_value self)
+{
+    uint8_t notes[SEQ_ARRAY_MAX], vels[SEQ_ARRAY_MAX];
+    int n = picoruby_ui_seq_get_chord(notes, vels, SEQ_ARRAY_MAX);
+    return pairs_to_ary(mrb, notes, vels, n);
+}
+
+/* UI._seq_set_chord(notes, velocities) */
+static mrb_value
+mrb_ui_seq_set_chord(mrb_state *mrb, mrb_value self)
+{
+    mrb_value notes_v, vels_v;
+    mrb_get_args(mrb, "oo", &notes_v, &vels_v);
+    uint8_t notes[SEQ_ARRAY_MAX], vels[SEQ_ARRAY_MAX];
+    int n = collect_pairs(notes_v, vels_v, notes, vels, SEQ_ARRAY_MAX, 100);
+    picoruby_ui_seq_set_chord(notes, vels, n);
+    return mrb_nil_value();
+}
+
+/* UI._seq_chain -> [[pattern, repeat], ...] */
+static mrb_value
+mrb_ui_seq_chain(mrb_state *mrb, mrb_value self)
+{
+    uint8_t pats[SEQ_ARRAY_MAX], reps[SEQ_ARRAY_MAX];
+    int n = picoruby_ui_seq_get_chain(pats, reps, SEQ_ARRAY_MAX);
+    return pairs_to_ary(mrb, pats, reps, n);
+}
+
+/* UI._seq_set_chain(patterns, repeats) -> true / false */
+static mrb_value
+mrb_ui_seq_set_chain(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pats_v, reps_v;
+    mrb_get_args(mrb, "oo", &pats_v, &reps_v);
+    uint8_t pats[SEQ_ARRAY_MAX], reps[SEQ_ARRAY_MAX];
+    int n = collect_pairs(pats_v, reps_v, pats, reps, SEQ_ARRAY_MAX, 1);
+    if (mrb_array_p(pats_v) && n != RARRAY_LEN(pats_v)) return mrb_false_value();
+    return mrb_bool_value(picoruby_ui_seq_set_chain(pats, reps, n));
+}
+
+/* UI._seq_receive(cin, b1, b2, b3): one USB-MIDI packet sent to the sequencer */
+static mrb_value
+mrb_ui_seq_receive(mrb_state *mrb, mrb_value self)
+{
+    mrb_value cin, b1, b2, b3;
+    mrb_get_args(mrb, "oooo", &cin, &b1, &b2, &b3);
+    picoruby_ui_seq_receive(val_to_i(cin), val_to_i(b1), val_to_i(b2), val_to_i(b3));
+    return mrb_nil_value();
+}
+
+/* ------------------------------------------------------------------------
  * Gem initialization
  * ------------------------------------------------------------------------ */
 
@@ -1334,6 +1589,28 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_keys_clear_lights,      mrb_ui_keys_clear_lights,      MRB_ARGS_NONE());
     DEF(_keys_lit,               mrb_ui_keys_is_lit,            MRB_ARGS_REQ(1));
     DEF(_keys_pressed,           mrb_ui_keys_is_pressed,        MRB_ARGS_REQ(1));
+
+    /* Sequencer */
+    DEF(_seq_reset,          mrb_ui_seq_reset,          MRB_ARGS_REQ(1));
+    DEF(_seq_set_i,          mrb_ui_seq_set_i,          MRB_ARGS_REQ(4));
+    DEF(_seq_get_i,          mrb_ui_seq_get_i,          MRB_ARGS_REQ(3));
+    DEF(_seq_set_name,       mrb_ui_seq_set_name,       MRB_ARGS_REQ(2));
+    DEF(_seq_name,           mrb_ui_seq_name,           MRB_ARGS_REQ(1));
+    DEF(_seq_add_line,       mrb_ui_seq_add_line,       MRB_ARGS_NONE());
+    DEF(_seq_remove_line,    mrb_ui_seq_remove_line,    MRB_ARGS_REQ(1));
+    DEF(_seq_clear_pattern,  mrb_ui_seq_clear_pattern,  MRB_ARGS_REQ(1));
+    DEF(_seq_copy_pattern,   mrb_ui_seq_copy_pattern,   MRB_ARGS_REQ(2));
+    DEF(_seq_place,          mrb_ui_seq_place,          MRB_ARGS_REQ(6));
+    DEF(_seq_remove,         mrb_ui_seq_remove,         MRB_ARGS_REQ(4));
+    DEF(_seq_set_length,     mrb_ui_seq_set_length,     MRB_ARGS_REQ(4));
+    DEF(_seq_add_event,      mrb_ui_seq_add_event,      MRB_ARGS_REQ(6));
+    DEF(_seq_clear,          mrb_ui_seq_clear,          MRB_ARGS_REQ(3));
+    DEF(_seq_notes,          mrb_ui_seq_notes,          MRB_ARGS_REQ(3));
+    DEF(_seq_chord,          mrb_ui_seq_chord,          MRB_ARGS_NONE());
+    DEF(_seq_set_chord,      mrb_ui_seq_set_chord,      MRB_ARGS_REQ(2));
+    DEF(_seq_chain,          mrb_ui_seq_chain,          MRB_ARGS_NONE());
+    DEF(_seq_set_chain,      mrb_ui_seq_set_chain,      MRB_ARGS_REQ(2));
+    DEF(_seq_receive,        mrb_ui_seq_receive,        MRB_ARGS_REQ(4));
 
     /* Tempo */
     DEF(_tempo_bit,              mrb_ui_tempo_bit,              MRB_ARGS_NONE());

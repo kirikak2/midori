@@ -822,6 +822,27 @@ keys.show
 サンプル: [examples/keys.rb](examples/keys.rb) / [examples/keys_layout.rb](examples/keys_layout.rb) /
 [examples/keys_amy.rb](examples/keys_amy.rb)（AMY を鍵盤 + レイアウト + Knobs で）
 
+## Sequencer（UI::Sequencer / 2026-10-25）
+
+詳細は [docs/SEQUENCER.md](docs/SEQUENCER.md)（設計と段階）。段階 1・2・4（エンジン・パターン・チェーン・Ruby API・
+画面 [main/ui/screen_sequencer.cpp](main/ui/screen_sequencer.cpp)・レイアウトの `sequencer`）まで実装、保存・録音は未。
+Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-25）。外部クロック同期・CoreS3 / CrowPanel は未確認。
+
+- ソング（ライン最大 16 本 × パターン 16 個 + チェーン）と再生は **ESP-IDF 非依存の
+  [main/ui/seq_engine.c](main/ui/seq_engine.c)**（ホストテスト `make -C main/ui/host_test`）。
+  [main/ui/ui_sequencer.cpp](main/ui/ui_sequencer.cpp) がトランスポート・専用タスク（Core 1 / 優先度 5）・`ui_seq_*` を持つ
+- **宛先として受けた MIDI クロックで進む**（F8 / Start / Continue / Stop / SPP）。Sequencer 自身は BPM も再生ボタンも持たない。
+  `UI::Sequencer.new` は既定で `UI::Tempo` → Sequencer にクロックだけのルートを張る。受けたノートは「最後に入力された和音」になる
+- `send_packet` は時刻を付けてキューに積むだけ（ルートの中からルートを呼ばないため）。F8 の間の 3 tick（内部は 96 PPQN）は
+  計測した F8 周期から esp_timer の one-shot で刻む（`CONFIG_FREERTOS_HZ=100` では刻めない）。次の F8 を追い越さない
+- ノートは (pattern, line) ごとの**ソート済み配列**（`seq_note_t` 8 byte、grid はステップ単位・realtime は tick 単位）。
+  配列ごと 512 / ソング全体 8192 ノート、PSRAM。エンジンは非スレッドセーフで、`ui_sequencer.cpp` が再帰ミューテックスで包む
+- ラインの設定（チャンネル・方式・ミュートなど）はソング共通、steps / rate / bars とノートはパターンごと
+- スクリプトが終わってもソングは残る（停止と `device:` の解除だけ）。Ruby: `UI::Sequencer.current` で取り直す
+- Ruby のホストテスト: `ruby test/sequencer_test.rb`（picoruby-ui ディレクトリで）
+- 画面はエンジンを直接読まない。`ui_seq::snapshot()`（[main/ui/ui_sequencer.h](main/ui/ui_sequencer.h)）で見えている範囲を
+  ヒープの View に写してから描く（描画中にロックを持つとシーケンサータスクが止まり、拍が遅れる）
+
 ## Tempo（UI::Tempo / 2026-10-22）
 
 詳細は [docs/TEMPO.md](docs/TEMPO.md)。**実機未確認**。

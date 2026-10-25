@@ -52,6 +52,7 @@ static const char* screenName(ui_screen_index_t screen)
         case UI_SCREEN_KNOBS:     return "Knobs";
         case UI_SCREEN_XYPAD:     return "XYPad";
         case UI_SCREEN_KEYS:      return "Keys";
+        case UI_SCREEN_SEQUENCER: return "Sequencer";
         default:                  return "";
     }
 }

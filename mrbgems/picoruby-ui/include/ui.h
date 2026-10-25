@@ -200,6 +200,33 @@ void picoruby_ui_keys_clear_lights(void);
 bool picoruby_ui_keys_is_lit(int note);
 bool picoruby_ui_keys_is_pressed(int note);
 
+/* Sequencer (docs/SEQUENCER.md): a step / realtime sequencer, also a
+ * picoruby-midi transport. Named parameters as ui_common.h lists them;
+ * pattern may be PICORUBY_UI_SEQ_PATTERN_EDIT (the one being edited). */
+#define PICORUBY_UI_SEQ_PATTERN_EDIT (-2)
+void picoruby_ui_seq_reset(int lines);
+bool picoruby_ui_seq_set_i(int pattern, int line, const char *name, int value);
+int  picoruby_ui_seq_get_i(int pattern, int line, const char *name);
+bool picoruby_ui_seq_set_name(int line, const char *name);
+int  picoruby_ui_seq_get_name(int line, char *buf, int size);
+int  picoruby_ui_seq_add_line(void);
+bool picoruby_ui_seq_remove_line(int line);
+bool picoruby_ui_seq_clear_pattern(int pattern);
+bool picoruby_ui_seq_copy_pattern(int src, int dst);
+int  picoruby_ui_seq_place(int pattern, int line, int step, int len,
+                           const uint8_t *notes, const uint8_t *velocities, int n);
+int  picoruby_ui_seq_remove(int pattern, int line, int step, int note);
+bool picoruby_ui_seq_set_length(int pattern, int line, int step, int len);
+bool picoruby_ui_seq_add_event(int pattern, int line, int pos, int len, int note, int velocity);
+void picoruby_ui_seq_clear(int pattern, int line, int mode);
+/* pos, len, note, velocity per note into out (room for max notes) */
+int  picoruby_ui_seq_notes_read(int pattern, int line, int mode, int start, int *out, int max);
+int  picoruby_ui_seq_get_chord(uint8_t *notes, uint8_t *velocities, int max);
+void picoruby_ui_seq_set_chord(const uint8_t *notes, const uint8_t *velocities, int n);
+int  picoruby_ui_seq_get_chain(uint8_t *patterns, uint8_t *repeats, int max);
+bool picoruby_ui_seq_set_chain(const uint8_t *patterns, const uint8_t *repeats, int n);
+void picoruby_ui_seq_receive(int cin, int b1, int b2, int b3);
+
 /* Tempo (docs/TEMPO.md): a MIDI device that sends clock at the UI BPM.
  * tempo_bit is its transport bit (0 when the registry was full). */
 int  picoruby_ui_tempo_bit(void);

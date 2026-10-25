@@ -116,6 +116,13 @@ check_raises("one tempo per layout", "only one tempo") do
   end
 end
 
+check_raises("one sequencer per layout", "only one sequencer") do
+  UI::Layout.resolve(CORES3, cols: 2) do
+    sequencer col: 0
+    sequencer col: 1
+  end
+end
+
 check_raises("one keys per layout", "only one keys") do
   UI::Layout.resolve(CORES3, cols: 2) do
     keys col: 0
@@ -336,6 +343,15 @@ check_raises("errors leave the old layout alone", "outside") do
   UI.layout("Perform", cols: 1) { pad col: 1 }
 end
 check "...which is still there", 1, $ui_layouts["Perform"].widgets.size
+
+$calls.clear
+given_seq = Object.new
+seqd = UI.layout("Seq", cols: 1, gap: 0) do
+  sequencer col: 0, sequencer: given_seq
+end
+check "sequencer goes over as a view of kind 6", [:view, 6, 0, 20, 320, 180], $calls[1]
+check "a given sequencer is used as is", true, seqd.widgets[0].equal?(given_seq)
+seqd.delete
 
 puts "#{$passed} passed, #{$failed} failed"
 # A bare mruby has no exit; the failure count above is the result there

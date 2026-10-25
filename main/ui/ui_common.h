@@ -171,7 +171,7 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         12
+#define UI_SCREEN_COUNT         13
 
 // Screen indices
 // New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
@@ -189,6 +189,7 @@ typedef enum {
     UI_SCREEN_LAYOUT,     // Script-defined layouts (docs/UI_LAYOUT_DSL.md)
     UI_SCREEN_HOME,       // Tile menu every other screen is reached from
     UI_SCREEN_KEYS,       // On-screen keyboard (docs/KEYS.md)
+    UI_SCREEN_SEQUENCER,  // Step / realtime sequencer (docs/SEQUENCER.md)
 } ui_screen_index_t;
 
 // What caused a screen switch, reported with UI_EVENT_SCREEN_CHANGE
@@ -654,6 +655,69 @@ bool ui_keys_is_pressed(int note);       // Held down by a finger
 // A script ended: back to defaults (any task, including the MIDI clock's).
 void ui_keys_cleanup(void);
 
+// --- Sequencer --------------------------------------------------------------
+// A step / realtime sequencer of up to 16 lines and 16 patterns that is also
+// a picoruby-midi transport (docs/SEQUENCER.md). The song model and playback
+// are seq_engine.c; ui_sequencer.cpp runs it on a task of its own and
+// implements this API.
+//
+// It plays on the MIDI clock it receives as a destination (F8, and Start /
+// Continue / Stop / Song Position), and takes the notes it receives as the
+// chord to place on the grid. What it plays goes, in C, to its own
+// destinations (out_mask) and wherever MIDI.route sends what comes from its
+// transport bit. Always there on a board with a display (ui_seq_init from
+// UIManager::init); a script's end stops it but keeps the song.
+//
+// Every function may be called from any task.
+#define UI_SEQ_PATTERN_EDIT  (-2)    // The pattern being edited (follows the playing one)
+
+void ui_seq_init(void);                  // UIManager::init
+void ui_seq_cleanup(void);               // A script ended: stopped, out_mask cleared
+void ui_seq_reset(int lines);            // An empty song of `lines` lines (1..16)
+
+// Named parameters. The name decides what `pattern` / `line` mean:
+//   song     (both ignored): out_mask play_pattern (set: picks it, queued
+//            while running) edit_pattern (-1 follows) switch chain_on;
+//            read-only: transport_bit running line_count next_pattern
+//            chain_len song_tick pattern_tick song_notes edits
+//   line     (line):          mode channel mute velocity gate quantize rec_mode
+//   pattern  (pattern):       length (0 auto, 1..8 bars); read-only: used ticks
+//   pattern line (both):      steps rate bars; read-only: ticks
+// `pattern` may be UI_SEQ_PATTERN_EDIT. set returns false for an unknown name
+// or a value out of range.
+bool ui_seq_set_i(int pattern, int line, const char* name, int value);
+int  ui_seq_get_i(int pattern, int line, const char* name);
+// Names: line < 0 is the song's
+bool ui_seq_set_name(int line, const char* name);
+int  ui_seq_get_name(int line, char* buf, int size);
+
+int  ui_seq_add_line(void);              // Index, or -1 with 16 lines
+bool ui_seq_remove_line(int line);
+bool ui_seq_clear_pattern(int pattern);
+bool ui_seq_copy_pattern(int src, int dst);
+
+// Grid notes (positions and lengths in steps): see seq_grid_place & co.
+int  ui_seq_place(int pattern, int line, int step, int len,
+                  const uint8_t* notes, const uint8_t* velocities, int n);
+int  ui_seq_remove(int pattern, int line, int step, int note);   // note < 0: all at step
+bool ui_seq_set_length(int pattern, int line, int step, int len);
+// Realtime notes (positions and lengths in ticks, 96 PPQN)
+bool ui_seq_add_event(int pattern, int line, int pos, int len, int note, int velocity);
+// line < 0: every line; mode < 0: grid and realtime
+void ui_seq_clear(int pattern, int line, int mode);
+// Copies notes from index `start` as pos, len, note, velocity quadruples
+// into out (room for `max` notes). Returns how many.
+int  ui_seq_notes_read(int pattern, int line, int mode, int start, int* out, int max);
+
+// The chord placed on the grid: the last one played into it, or set here
+int  ui_seq_get_chord(uint8_t* notes, uint8_t* velocities, int max);
+void ui_seq_set_chord(const uint8_t* notes, const uint8_t* velocities, int n);
+int  ui_seq_get_chain(uint8_t* patterns, uint8_t* repeats, int max);
+bool ui_seq_set_chain(const uint8_t* patterns, const uint8_t* repeats, int n);
+
+// The sequencer as a destination: what its transport's send_packet does
+void ui_seq_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
+
 // --- Layouts ----------------------------------------------------------------
 // Script-defined screens of pads, knobs, XYPad... placed on a grid by Ruby
 // (docs/UI_LAYOUT_DSL.md). Any number live at once (memory permitting), each a
@@ -670,6 +734,7 @@ typedef enum {
     UI_WIDGET_TOMBOLA,    // Likewise the Tombola's
     UI_WIDGET_KEYS,       // Likewise the Keys'
     UI_WIDGET_TEMPO,      // Likewise the Tempo screen's
+    UI_WIDGET_SEQUENCER,  // Likewise the Sequencer's
 } ui_widget_kind_t;
 
 typedef struct {
