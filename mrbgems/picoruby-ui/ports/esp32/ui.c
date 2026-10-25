@@ -57,6 +57,11 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->mididev_to = 0;
     event->mididev_channel = -1;
     event->mididev_sel = 0;
+    event->seq_kind = 0;
+    event->seq_pattern = -1;
+    event->seq_from = -1;
+    event->seq_line = -1;
+    event->seq_step = 0;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -137,6 +142,14 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->mididev_to = ui_evt.data.mididev.to;
             event->mididev_channel = ui_evt.data.mididev.channel;
             event->mididev_sel = ui_evt.data.mididev.sel;
+            break;
+        case UI_EVENT_SEQUENCER:
+            event->type = PICORUBY_UI_EVENT_SEQUENCER;
+            event->seq_kind = ui_evt.data.seq.kind;
+            event->seq_pattern = ui_evt.data.seq.pattern;
+            event->seq_from = ui_evt.data.seq.from;
+            event->seq_line = ui_evt.data.seq.line;
+            event->seq_step = ui_evt.data.seq.step;
             break;
         default:
             break;

@@ -58,6 +58,12 @@ static esp_timer_handle_t s_timer;
 static uint8_t s_bit;                  // Transport registry bit, 0 if none
 static volatile uint8_t s_outMask;     // Destinations of its own, besides the routes
 static volatile uint32_t s_dropped;    // Packets the queue had no room for
+// UI_EVENT_SEQUENCER for Ruby (UI::Sequencer#on_*): off until a script asks
+static volatile bool s_patternEvents;
+static volatile bool s_editEvents;
+// Steps come many to a beat: they leave the UI event queue this much room
+// for the pads and knobs (the queue holds 32)
+static constexpr int STEP_EVENTS_MAX_QUEUED = 16;
 
 // Saving (docs/SEQUENCER.md "保存と自動保存"). Edits are counted by the
 // engine; these remember the count as of the last save by name / autosave.
@@ -135,6 +141,31 @@ static void out_message(void* ctx, uint8_t status, uint8_t d1, uint8_t d2)
     uint8_t mask = s_outMask & (uint8_t)~route & (uint8_t)~s_bit;
     if (mask) MIDI_transport_send(mask, 0, cin, status, d1, d2);
     if (s_bit) MIDI_route_dispatch(s_bit, route, cin, status, d1, d2);
+}
+
+// Steps and pattern switches, from the sequencer task (lock held)
+static void out_event(void* ctx, int kind, int a, int b, int c)
+{
+    (void)ctx;
+    ui_event_t ev = {};
+    ev.type = UI_EVENT_SEQUENCER;
+    ev.data.seq.from = -1;
+    if (kind == SEQ_EVENT_STEP) {
+        if (ui_event_available() >= STEP_EVENTS_MAX_QUEUED) return;   // Late reader: dropped
+        ev.data.seq.kind = UI_SEQ_EVENT_STEP;
+        ev.data.seq.line = (int8_t)a;
+        ev.data.seq.step = (uint16_t)b;
+        ev.data.seq.pattern = (int8_t)c;
+    } else if (kind == SEQ_EVENT_PATTERN) {
+        if (!s_patternEvents) return;
+        ev.data.seq.kind = UI_SEQ_EVENT_PATTERN;
+        ev.data.seq.pattern = (int8_t)a;
+        ev.data.seq.from = (int8_t)b;
+        ev.data.seq.line = -1;
+    } else {
+        return;
+    }
+    ui_event_push(&ev);
 }
 
 // --- Transport ---------------------------------------------------------------
@@ -295,7 +326,7 @@ void ui_seq_init(void)
     if (s_eng) return;
     s_lock = xSemaphoreCreateRecursiveMutex();
     s_queue = xQueueCreate(QUEUE_LEN, sizeof(Item));
-    seq_output_t out = { out_note_on, out_note_off, nullptr, out_message };
+    seq_output_t out = { out_note_on, out_note_off, nullptr, out_message, out_event };
     s_eng = s_lock && s_queue ? seq_engine_new(&out) : nullptr;
     esp_timer_create_args_t targs = {};
     targs.callback = subtick_timer_cb;
@@ -327,8 +358,11 @@ void ui_seq_cleanup(void)
 {
     if (!s_eng) return;
     s_outMask = 0;
+    s_patternEvents = false;
+    s_editEvents = false;
     cancel_subticks();
     Lock lock;
+    s_eng->step_events = 0;   // The script's on_* went with it
     seq_engine_stop(s_eng);
 }
 
@@ -373,6 +407,18 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
         return true;
     }
     if (name_is(name, "armed")) return seq_set_armed(e, value);
+    if (name_is(name, "step_events")) {
+        e->step_events = (uint16_t)value;
+        return true;
+    }
+    if (name_is(name, "pattern_events")) {
+        s_patternEvents = value != 0;
+        return true;
+    }
+    if (name_is(name, "edit_events")) {
+        s_editEvents = value != 0;
+        return true;
+    }
     if (name_is(name, "chain_on")) {
         seq_set_chain_on(e, value != 0);
         return e->chain_on == (value != 0);
@@ -483,6 +529,9 @@ int ui_seq_get_i(int pattern, int line, const char* name)
     if (name_is(name, "recording"))    return seq_recording(e) ? 1 : 0;
     if (name_is(name, "rec_open"))     return seq_rec_open(e);
     if (name_is(name, "rec_dropped"))  return (int)e->rec_dropped;
+    if (name_is(name, "step_events"))  return e->step_events;
+    if (name_is(name, "pattern_events")) return s_patternEvents ? 1 : 0;
+    if (name_is(name, "edit_events"))  return s_editEvents ? 1 : 0;
     if (name_is(name, "song_tick"))    return (int)e->song_tick;
     if (name_is(name, "pattern_tick")) return (int)e->pattern_tick;
     if (name_is(name, "song_notes"))   return e->song_notes;
@@ -941,6 +990,22 @@ static void chord_velocities(const seq_engine_t* e, int line, uint8_t* vels)
 {
     uint8_t fixed = e->lines[line].velocity;
     for (int i = 0; i < e->chord_n; i++) vels[i] = fixed ? fixed : e->chord_vel[i];
+}
+
+void notify_edit(int pattern, int line)
+{
+    if (!s_eng || !s_editEvents) return;
+    {
+        Lock lock;
+        pattern = seq_resolve_pattern(s_eng, pattern);
+    }
+    ui_event_t ev = {};
+    ev.type = UI_EVENT_SEQUENCER;
+    ev.data.seq.kind = UI_SEQ_EVENT_EDIT;
+    ev.data.seq.pattern = (int8_t)pattern;
+    ev.data.seq.from = -1;
+    ev.data.seq.line = (int8_t)(line < 0 ? -1 : line);
+    ui_event_push(&ev);
 }
 
 void request(int op, const char* name)

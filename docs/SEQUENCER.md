@@ -1,7 +1,9 @@
 # Sequencer（UI::Sequencer）
 
-> **状態: 段階 1〜5 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
-> 和音の取り込み、リアルタイム録音）、トランスポート、Ruby API、保存と自動保存、画面とレイアウト部品まで。
+> **状態: 段階 1〜6 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
+> 和音の取り込み、リアルタイム録音）、トランスポート、Ruby API、保存と自動保存、画面とレイアウト部品、
+> 既定パッチと `on_*` イベントまで。段階 6 は Tab5 の実機で `on_step` / `on_pattern` / `on_edit`（examples/sequencer_events.rb）と
+> 既定パッチ Tempo → Sequencer の Clock が付くことを確認（2026-10-25。外したパッチが再起動後も外れたままかは未確認）。
 > 録音（段階 5）は Tab5 の実機でリアルタイム入力の録音と再生を確認（2026-10-25）。
 > 保存（段階 3）はビルドとホストのテストのみで、実機では未確認。
 > Tab5 の実機で画面の表示と Play / Stop による再生を確認（2026-10-25）。それ以外（編集操作の細部、外部クロック同期、
@@ -17,7 +19,7 @@
 | 3. 保存と自動保存 | 済（実機未確認）。`.mseq` の読み書きは `seq_engine.c`（`seq_song_clone` / `seq_dump_*` / `seq_load_*` / `seq_engine_adopt`）、自動保存の判定と画面の要求は `ui_sequencer.cpp`、ファイル I/O は `mrblib/ui_sequencer.rb`（`save` / `load` / `songs` / `to_h` / `restore` / `_setup` / `_poll`）、起動時は `main_task_base.rb` の `setup_sequencer`、画面は File ボタンとシート |
 | 4. 画面 + レイアウト | 済（下記の一部を除く）。`main/ui/screen_sequencer.{h,cpp}`、`UI_SCREEN_SEQUENCER`（= 12）/ `:sequencer` / `UI.sequencer` / `seq.show`、レイアウトの `sequencer`（`UI_WIDGET_SEQUENCER` = 6） |
 | 5. リアルタイム録音 | 済（Tab5 の実機で録音と再生を確認）。エンジンは `seq_engine.c` の「Realtime recording」（`seq_set_armed` / `seq_engine_input_at`）、時刻の換算は `ui_sequencer.cpp`、画面は REC ボタン・ラインの arm の印・設定シートの Quant / Overdub・Replace、Ruby は `Line#arm` / `disarm` / `armed?`、`seq.armed` / `disarm` / `recording?`。下記「リアルタイム録音」の実装メモ |
-| 6. 仕上げ | MIDI Devices への登録は済（内蔵デバイス `seq`）。既定パッチ Tempo → seq と `on_*` は未 |
+| 6. 仕上げ | 済（Tab5 の実機で確認）。MIDI Devices の内蔵デバイス `seq`、既定パッチ Tempo → seq（Clock。`ui_midi_devices.cpp` の `DEFAULT_PATCHES`、docs/UI_MIDI_DEVICES.md）、`on_step` / `on_pattern` / `on_edit`（下記「状態・イベント」） |
 
 - 段階 4 の残り（2026-10-25 に追加、ビルドとホストテストのみで実機未確認）:
   - **スロットの長押し**（狭い画面は `P3` の長押し）でパターンのメニュー: **Edit here / Follow play**
@@ -35,7 +37,8 @@
 - 画面は 1 フレームに 1 回 `ui_seq::snapshot()` で見えている範囲だけをヒープ（PSRAM）の View に写して描く
   （描画中にエンジンのロックを持たない）。曲が変わったら全体、再生位置は出入りしたマスだけを描き直す
 - テスト: `make -C main/ui/host_test`（C、ASan / UBSan 付き）、`ruby test/sequencer_test.rb`（picoruby-ui ディレクトリで）
-- サンプル: [examples/sequencer.rb](../examples/sequencer.rb)（Pads 画面で Play / パターン / チェーン）
+- サンプル: [examples/sequencer.rb](../examples/sequencer.rb)（Pads 画面で Play / パターン / チェーン）、
+  [examples/sequencer_events.rb](../examples/sequencer_events.rb)（`on_step` で拍のランプと周回、`on_pattern` でスクリプトによる曲構成、`on_edit` で画面の編集の表示）
 - `ui_seq_init()` は UIManager の初期化で `ui_tempo_init()` の直後に呼ぶ。トランスポートのビットは Clock の次に取るので、
   Keys のビットは以前より 1 つ後ろにずれる（MIDI Devices のパッチは名前で保存しているので影響なし）
 - スクリプト終了時（`UIManager::scriptCleanup`）は停止して `device:` を外すだけで、ソングは残る。
@@ -457,7 +460,8 @@ offset  size  内容
 - **スクリプト終了時に既定値へ戻さない**。止まって（クリーンアップの Stop / All Notes Off で）、ソングは残る。
   ただし `UI::Sequencer.new` の一時的なソングだった場合は、上記のとおり自動保存のソングに戻る
 - Home にタイルを置く（スクリプトが無くても開ける）。クロックの入力は MIDI Devices の内蔵デバイスのパッチ
-  （既定で **Tempo → Sequencer の Clock** を張る。保存済みのパッチがあればそちら）。スクリプトの `clock:` /
+  （既定で **Tempo → Sequencer の Clock** を張る。初めて起動したときに 1 回だけ保存済みパッチに足すので、
+  外せば外したまま。docs/UI_MIDI_DEVICES.md の「既定パッチ」）。スクリプトの `clock:` /
   `input:` で張ったルートはスクリプト限りで、終了後は保存済みのパッチに戻る（`setup_midi_devices` が張り直す）
 
 ## エンジン（シーケンサータスク）
@@ -724,10 +728,28 @@ seq.chord = [60, 64, 67]                 # 直接設定。seq.chord = 60 でも�
 seq.running? / seq.position              # => { pattern:, tick:, bar:, beat: }
 seq.window = 8; seq.follow = true; seq.view = 8
 
-seq.on_step { |e| ... }                  # { line:, step: }。ブロックを渡すまでキューに載らない
+seq.on_step { |e| ... }                  # { line:, step:, pattern: }。ブロックを渡すまでキューに載らない
+seq.on_step(line: [0, 2]) { |e| ... }    # 見るラインを絞る（C で絞るのでキューに載らない）
 seq.on_pattern { |e| ... }               # { pattern:, from: }（パターンが切り替わったとき）
-seq.on_edit { |e| ... }                  # 画面での編集 { pattern:, line: }
+seq.on_edit { |e| ... }                  # 画面での編集 { pattern:, line: }（line nil = パターン全体・ソング）
+seq.off(:step) / seq.off(block) / seq.off   # 外す。戻り値は外した数
 ```
+
+イベントの実装（2026-10-25）:
+
+- 3 つとも UI イベント（`UI_EVENT_SEQUENCER`、Ruby の `:sequencer`）で届き、ブロックは **`UI.process`** で走る
+  （`MIDI.sleep_ms` だけのループでは走らない）。ハンドラはスクリプト限り（終了時に C の `ui_seq_cleanup` が全部止める）
+- **step**: エンジン（`seq_engine.c` の `step_events`）が、`step_events`（ラインのビット）に入ったラインがステップに
+  来た tick に `out.event` を呼ぶ。step は grid ならそのライン自身のステップ、realtime なら 16 分音符の番号。
+  ミュート中のラインと空のスロットも進むので届く。1 拍に何通も来るので、**UI イベントキュー（32）が半分以上
+  埋まっている間は捨てる**（パッドやノブのイベントの場所を残すため。`UI.process` を回すのが遅いスクリプトは
+  取りこぼす）
+- **pattern**: `play_pattern` が変わったとき（予約・チェーン・小節頭・停止中の選択・読み込み）。`from` は前のパターン
+- **edit**: 画面の操作で変わったときだけ（マスの置く / 消す / 長さ / 和音の置き換え、ミュート、ライン設定シート、
+  Paste、ラインの追加・削除、パターンメニューの Paste / Clear / Length、チェーンの編集）。Ruby からの変更と録音は出さない。
+  ラインの削除・チェーンは `line: nil`
+- C では `ui_seq_set_i` の `step_events`（マスク）/ `pattern_events` / `edit_events`（0 / 1）。Ruby は
+  ハンドラの増減のたびに `UI::Sequencer._sync_events` で書く
 
 再生・停止は Sequencer の API ではなく `UI::Tempo.start` / `.stop`（クロックの送信元が外部機器なら、その機器）。
 

@@ -124,11 +124,19 @@ typedef void (*seq_note_off_fn)(void *ctx, uint32_t token, uint8_t channel, uint
 // d2 unused for a two-byte one
 typedef void (*seq_message_fn)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);
 
+// What happened, for whoever watches (UI::Sequencer#on_step / on_pattern)
+typedef enum {
+    SEQ_EVENT_STEP = 0,      // a: line, b: step (grid: its step, realtime: its sixteenth), c: pattern
+    SEQ_EVENT_PATTERN = 1,   // a: the pattern now playing, b: the one before
+} seq_event_kind_t;
+typedef void (*seq_event_fn)(void *ctx, int kind, int a, int b, int c);
+
 typedef struct {
     seq_note_on_fn  note_on;
     seq_note_off_fn note_off;
     void           *ctx;
     seq_message_fn  message;
+    seq_event_fn    event;   // May be NULL
 } seq_output_t;
 
 typedef struct {
@@ -177,6 +185,7 @@ typedef struct {
     bool              programs_due;   // The playing pattern's programs go out on the next tick
     uint32_t          edits;          // Bumped by every change to the song
     uint32_t          pattern_changes;   // Bumped when play_pattern changes
+    uint16_t          step_events;    // Lines whose steps go to out.event (bit n = line n)
     seq_sounding_t    sounding[SEQ_MAX_SOUNDING];
 
     // --- The last chord played into it ---

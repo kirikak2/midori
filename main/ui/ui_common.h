@@ -376,7 +376,14 @@ typedef enum {
     UI_EVENT_WIDGET,          // A pad / knob on a layout was operated
     UI_EVENT_KEY,             // A key of the on-screen keyboard went down / up
     UI_EVENT_MIDI_DEVICES,    // MIDI Devices: selection, patch or connection changed
+    UI_EVENT_SEQUENCER,       // Sequencer: a step, a pattern switch, an edit on its screen
 } ui_event_type_t;
+
+typedef enum {
+    UI_SEQ_EVENT_STEP = 0,    // = SEQ_EVENT_STEP
+    UI_SEQ_EVENT_PATTERN,     // = SEQ_EVENT_PATTERN
+    UI_SEQ_EVENT_EDIT,        // The song was changed on the Sequencer screen
+} ui_seq_event_t;
 
 typedef enum {
     UI_WIDGET_PRESS = 0,      // Pad pressed
@@ -450,6 +457,13 @@ typedef struct {
             int8_t  channel; // Patches: 0..15, -1 all, -2 clock, -3 several (see sel)
             uint32_t sel;    // Patches: MIDI_ROUTE_SEL_* (0 for the other kinds)
         } mididev;
+        struct {
+            uint8_t kind;    // For UI_EVENT_SEQUENCER: ui_seq_event_t
+            int8_t  pattern; // Step: the playing one; pattern: the new one; edit: the one shown
+            int8_t  from;    // Pattern: the one before (else -1)
+            int8_t  line;    // Step / edit (-1: the whole pattern)
+            uint16_t step;   // Step: grid step, or a realtime line's sixteenth
+        } seq;
     } data;
 } ui_event_t;
 
@@ -682,7 +696,9 @@ void ui_seq_reset(int lines);            // An empty song of `lines` lines (1..1
 //            none; set false for a grid line); set-only: mark_clean
 //            mark_saved; read-only: transport_bit running line_count
 //            next_pattern chain_len song_tick pattern_tick song_notes edits
-//            dirty autosave_due recording rec_open rec_dropped
+//            dirty autosave_due recording rec_open rec_dropped; events
+//            for UI_EVENT_SEQUENCER: step_events (bit n: line n's steps),
+//            pattern_events / edit_events (0 / 1); all off at a script's end
 //   line     (line):          mode channel mute velocity gate quantize rec_mode
 //   pattern  (pattern):       length (0 auto, 1..8 bars); read-only: used ticks
 //   pattern line (both):      steps rate bars program bank_msb bank_lsb

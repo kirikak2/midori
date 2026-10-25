@@ -111,6 +111,7 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
         case PICORUBY_UI_EVENT_WIDGET:        type = MRB_SYM(widget); break;
         case PICORUBY_UI_EVENT_KEY:           type = MRB_SYM(key); break;
         case PICORUBY_UI_EVENT_MIDI_DEVICES:  type = MRB_SYM(midi_devices); break;
+        case PICORUBY_UI_EVENT_SEQUENCER:     type = MRB_SYM(sequencer); break;
         default:                              type = MRB_SYM(unknown); break;
     }
 
@@ -232,6 +233,21 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
                 ch = mrb_fixnum_value(event.mididev_channel);
             }
             HSET(channel, ch);
+            break;
+        }
+        case PICORUBY_UI_EVENT_SEQUENCER: {
+            /* UI::Sequencer hands these to on_step / on_pattern / on_edit */
+            mrb_sym kind;
+            switch (event.seq_kind) {
+                case 0:  kind = MRB_SYM(step);    break;
+                case 1:  kind = MRB_SYM(pattern); break;
+                default: kind = MRB_SYM(edit);    break;
+            }
+            HSET(kind, mrb_symbol_value(kind));
+            HSET(pattern, event.seq_pattern >= 0 ? mrb_fixnum_value(event.seq_pattern) : mrb_nil_value());
+            HSET(from, event.seq_from >= 0 ? mrb_fixnum_value(event.seq_from) : mrb_nil_value());
+            HSET(line, event.seq_line >= 0 ? mrb_fixnum_value(event.seq_line) : mrb_nil_value());
+            HSET(step, mrb_fixnum_value(event.seq_step));
             break;
         }
         default:

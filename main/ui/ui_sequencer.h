@@ -72,6 +72,10 @@ uint32_t revision();
 int  place_chord(int line, int step, int len);
 // The notes starting at `step` replaced by the chord, as long as the longest was
 bool replace_with_chord(int line, int step);
+// Tells Ruby (UI::Sequencer#on_edit) the screen changed a pattern
+// (UI_SEQ_PATTERN_EDIT: the one shown): one line of it, or with line < 0
+// the whole pattern / the song
+void notify_edit(int pattern, int line);
 // Where the sequencer's clock comes from: the bit of a source routing F8 to
 // it. With none, routes the Tempo's clock to it first (clock only, until the
 // script's end clears the routes) -- what the screen's Play needs when no

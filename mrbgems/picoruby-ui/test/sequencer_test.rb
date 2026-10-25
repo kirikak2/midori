@@ -51,6 +51,8 @@ module UI
   end
 
   class << self
+    def log(text); ($seq[:logs] ||= []) << text; end
+
     def _seq_reset(lines)
       $seq[:resets] << lines
       $seq[:lines] = lines
@@ -343,6 +345,34 @@ seq.disarm
 check("seq.disarm", seq.armed.nil?)
 r.configure(quantize: 16, rec_mode: :replace)
 check("quantize / rec_mode", $seq[:values][[:quantize, 2]] == 3 && $seq[:values][[:rec_mode, 2]] == 1)
+
+# --- events ---
+check("no events asked for", $seq[:values][[:step_events, -1]].nil?)
+steps = []
+blk = seq.on_step(line: [0, 2]) { |e| steps << e }
+check("step lines to C", $seq[:values][[:step_events, -1]] == 0b101)
+seq.on_step { |e| }
+check("every line", $seq[:values][[:step_events, -1]] == 0xFFFF)
+check("on_step line checked", raises? { seq.on_step(line: 99) { } })
+UI::Sequencer._dispatch({ type: :sequencer, kind: :step, line: 2, step: 5, pattern: 1, from: nil })
+UI::Sequencer._dispatch({ type: :sequencer, kind: :step, line: 1, step: 6, pattern: 1, from: nil })
+check("step for a watched line", steps == [{ line: 2, step: 5, pattern: 1 }])
+pats = []
+seq.on_pattern { |e| pats << e }
+check("pattern events on", $seq[:values][[:pattern_events, -1]] == 1)
+UI::Sequencer._dispatch({ type: :sequencer, kind: :pattern, line: nil, step: 0, pattern: 3, from: 0 })
+check("pattern event", pats == [{ pattern: 3, from: 0 }])
+edits = []
+seq.on_edit { |e| edits << e }
+UI::Sequencer._dispatch({ type: :sequencer, kind: :edit, line: nil, step: 0, pattern: 2, from: nil })
+check("edit event", edits == [{ pattern: 2, line: nil }])
+seq.on_pattern { raise "boom" }
+UI::Sequencer._dispatch({ kind: :pattern, pattern: 1, from: 0 })
+check("an error in a block is logged, not raised", $seq[:logs].last.include?("boom"))
+check("off one block", seq.off(blk) == 1 && $seq[:values][[:step_events, -1]] == 0xFFFF)
+check("off a kind", seq.off(:step) == 1 && $seq[:values][[:step_events, -1]] == 0)
+seq.off
+check("off all", $seq[:values][[:pattern_events, -1]] == 0 && $seq[:values][[:edit_events, -1]] == 0)
 
 # --- chord ---
 seq.chord = 60

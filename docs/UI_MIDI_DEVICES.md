@@ -211,6 +211,16 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 - 名前空間 `midi_devs`
 - `patches` … `"<from>><to>[:<ch>]"` を `,` で連結（例: `usb_host>amy,usb_host>uart:9,keys>amy`）、最大 16 件
 - `in` / `out` … Prog の選択（キー。未選択は削除）
+- `defaults` … 既定パッチをどの版まで足したか（u8、2026-10-25）
+
+既定パッチ（`ui_midi_devices.cpp` の `DEFAULT_PATCHES`）: 起動して初めて NVS を読んだとき、`defaults` が
+`DEFAULTS_VERSION` より小さければ、まだ保存済みパッチに無い既定パッチを足して保存し、`defaults` を上げる。
+**1 回だけ**なので、ユーザーが画面で外したものは次の起動で戻らない。既定パッチを増やすときは表に足して
+`DEFAULTS_VERSION` を上げる（足した分だけがすでに使っている機体にも入る）。
+
+| 版 | パッチ | 理由 |
+|---|---|---|
+| 1 | `tempo>seq:clock`（Tempo → Sequencer、Clock のみ） | スクリプトなしで Sequencer が Tempo の Play / テンポで動くように（docs/SEQUENCER.md） |
 
 タイミング:
 

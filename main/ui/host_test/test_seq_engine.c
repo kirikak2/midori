@@ -70,7 +70,21 @@ static void out_msg(void *ctx, uint8_t status, uint8_t d1, uint8_t d2)
     m->tick = g_e->song_tick;
 }
 
-static void clear_events(void) { g_n = 0; g_msg_n = 0; }
+/* Steps and pattern switches (out.event) */
+typedef struct { int kind, a, b, c; uint32_t tick; } seq_ev_t;
+static seq_ev_t g_sev[4096];
+static int g_sev_n;
+
+static void out_event(void *ctx, int kind, int a, int b, int c)
+{
+    (void)ctx;
+    if (g_sev_n >= 4096) return;
+    seq_ev_t *ev = &g_sev[g_sev_n++];
+    ev->kind = kind; ev->a = a; ev->b = b; ev->c = c;
+    ev->tick = g_e->song_tick;
+}
+
+static void clear_events(void) { g_n = 0; g_msg_n = 0; g_sev_n = 0; }
 
 /* Plays `ticks` ticks the way the device does: an F8 then three subticks */
 static void run_ticks(int ticks)
@@ -108,7 +122,8 @@ static const event_t *off_for(uint32_t token)
 static void fresh(void)
 {
     if (g_e) seq_engine_free(g_e);
-    seq_output_t out = { .note_on = out_on, .note_off = out_off, .ctx = NULL, .message = out_msg };
+    seq_output_t out = { .note_on = out_on, .note_off = out_off, .ctx = NULL, .message = out_msg,
+                         .event = out_event };
     g_e = seq_engine_new(&out);
     clear_events();
 }
@@ -562,6 +577,59 @@ static void test_record_replace(void)
     EXPECT_EQ(rt_len(0, 2, 48, 60), 4);
     EXPECT_EQ(rt_find(0, 2, 50, 71), -1);          /* The pass goes on past it */
     EXPECT_EQ(rt_count(0, 2), 1);
+}
+
+static void test_events(void)
+{
+    printf("step and pattern events\n");
+    fresh();
+    seq_engine_start(g_e);
+    run_ticks(100);
+    EXPECT_EQ(g_sev_n, 0);                         /* No line watched */
+
+    fresh();
+    g_e->lines[2].mode = SEQ_MODE_REALTIME;
+    seq_pline_set_rate(g_e, 0, 1, SEQ_RATE_8);     /* Line 1: 48 ticks a step */
+    g_e->lines[1].mute = 1;                        /* Muted lines still step */
+    g_e->step_events = (1u << 0) | (1u << 1) | (1u << 2);
+    seq_engine_start(g_e);
+    run_ticks(49);                                 /* Ticks 0..48 */
+    int steps0 = 0, steps1 = 0, steps2 = 0;
+    for (int i = 0; i < g_sev_n; i++) {
+        EXPECT_EQ(g_sev[i].kind, SEQ_EVENT_STEP);
+        EXPECT_EQ(g_sev[i].c, 0);
+        if (g_sev[i].a == 0) { EXPECT_EQ(g_sev[i].b * 24, g_sev[i].tick); steps0++; }
+        if (g_sev[i].a == 1) { EXPECT_EQ(g_sev[i].b * 48, g_sev[i].tick); steps1++; }
+        if (g_sev[i].a == 2) { EXPECT_EQ(g_sev[i].b * 24, g_sev[i].tick); steps2++; }
+    }
+    EXPECT_EQ(steps0, 3);                          /* 0, 24, 48 */
+    EXPECT_EQ(steps1, 2);                          /* 0, 48 */
+    EXPECT_EQ(steps2, 3);                          /* Sixteenths */
+
+    /* Line 0 loops back to step 0 */
+    clear_events();
+    g_e->step_events = 1;
+    run_ticks(384 - 49 + 1);                       /* .. 384 */
+    EXPECT_EQ(g_sev[g_sev_n - 1].b, 0);
+    EXPECT_EQ(g_sev[g_sev_n - 1].tick, 384);
+
+    /* A pattern switch: new pattern, the one before */
+    clear_events();
+    g_e->step_events = 0;
+    seq_select_pattern(g_e, 3);
+    run_ticks(384);
+    EXPECT_EQ(g_sev_n, 1);
+    EXPECT_EQ(g_sev[0].kind, SEQ_EVENT_PATTERN);
+    EXPECT_EQ(g_sev[0].a, 3);
+    EXPECT_EQ(g_sev[0].b, 0);
+    /* Stopped, it switches at once; the same pattern is no switch */
+    seq_engine_stop(g_e);
+    clear_events();
+    seq_select_pattern(g_e, 5);
+    seq_select_pattern(g_e, 5);
+    EXPECT_EQ(g_sev_n, 1);
+    EXPECT_EQ(g_sev[0].a, 5);
+    EXPECT_EQ(g_sev[0].b, 3);
 }
 
 static void test_clock_interpolation(void)
@@ -1269,6 +1337,7 @@ int main(void)
     test_record_stop_disarm();
     test_record_pattern_switch();
     test_record_replace();
+    test_events();
     test_clock_interpolation();
     test_continue_and_spp();
     test_mute();

@@ -59,6 +59,11 @@ typedef struct {
     int8_t  mididev_channel; /* ...patches: 0..15, -1 all, -2 the clock alone,
                                 -3 several (mididev_sel) */
     uint32_t mididev_sel;  /* ...patches: channel bits 0..15, 0x10000 the clock */
+    uint8_t seq_kind;      /* For Sequencer events: 0 step / 1 pattern / 2 edit */
+    int8_t  seq_pattern;   /* ...step: the playing one; pattern: the new one; edit: the one edited */
+    int8_t  seq_from;      /* ...pattern: the one before (else -1) */
+    int8_t  seq_line;      /* ...step / edit, -1 for none (the whole pattern) */
+    uint16_t seq_step;     /* ...step: grid step, or a realtime line's sixteenth */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -75,6 +80,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_WIDGET       10
 #define PICORUBY_UI_EVENT_KEY          11
 #define PICORUBY_UI_EVENT_MIDI_DEVICES 12
+#define PICORUBY_UI_EVENT_SEQUENCER    13
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);

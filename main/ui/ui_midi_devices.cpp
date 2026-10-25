@@ -35,6 +35,19 @@ static constexpr int ITEM_LEN = 2 * UI_MIDIDEV_KEY_LEN + 48;
 static constexpr int PATCHES_LEN = SAVED_MAX * ITEM_LEN;
 static constexpr uint32_t TICK_MS = 250;
 
+// Patches every board starts with: added once (NVS "defaults" records the
+// version applied), so one the user takes off stays off. A board without
+// one of the ends simply never routes it.
+struct DefaultPatch {
+    const char* from;
+    const char* to;
+    uint32_t sel;
+};
+static const DefaultPatch DEFAULT_PATCHES[] = {
+    { "tempo", "seq", MIDI_ROUTE_SEL_CLOCK },   // The Sequencer plays on the Tempo (version 1)
+};
+static constexpr uint8_t DEFAULTS_VERSION = 1;
+
 namespace {
 
 struct Device {
@@ -208,22 +221,51 @@ static void parse_patches(const char* text)
     }
 }
 
+static void save_now();
+static int saved_find_locked(const char* from, const char* to);
+
+// The default patches not applied yet join the saved ones, and are saved
+static void apply_defaults(uint8_t applied)
+{
+    if (applied >= DEFAULTS_VERSION) return;
+    portENTER_CRITICAL(&s_mux);
+    for (const DefaultPatch& d : DEFAULT_PATCHES) {
+        if (saved_find_locked(d.from, d.to) >= 0 || s_savedCount >= SAVED_MAX) continue;
+        SavedPatch& sp = s_saved[s_savedCount++];
+        copy_str(sp.from, d.from, sizeof(sp.from));
+        copy_str(sp.to, d.to, sizeof(sp.to));
+        sp.sel = d.sel;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    save_now();
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "defaults", DEFAULTS_VERSION);
+    nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "default patches added (version %u)", DEFAULTS_VERSION);
+}
+
 static void load_saved()
 {
     if (s_loaded) return;
     s_loaded = true;
     initialize_nvs();
+    uint8_t defaults = 0;
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;  // Nothing saved yet
-    char* buf = new char[PATCHES_LEN];   // Kept off the caller's stack
-    size_t len = PATCHES_LEN;
-    if (nvs_get_str(h, "patches", buf, &len) == ESP_OK) parse_patches(buf);
-    delete[] buf;
-    len = sizeof(s_savedSel[0].key);
-    if (nvs_get_str(h, "in", s_savedSel[0].key, &len) != ESP_OK) s_savedSel[0].key[0] = '\0';
-    len = sizeof(s_savedSel[1].key);
-    if (nvs_get_str(h, "out", s_savedSel[1].key, &len) != ESP_OK) s_savedSel[1].key[0] = '\0';
-    nvs_close(h);
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {   // Else nothing saved yet
+        char* buf = new char[PATCHES_LEN];   // Kept off the caller's stack
+        size_t len = PATCHES_LEN;
+        if (nvs_get_str(h, "patches", buf, &len) == ESP_OK) parse_patches(buf);
+        delete[] buf;
+        len = sizeof(s_savedSel[0].key);
+        if (nvs_get_str(h, "in", s_savedSel[0].key, &len) != ESP_OK) s_savedSel[0].key[0] = '\0';
+        len = sizeof(s_savedSel[1].key);
+        if (nvs_get_str(h, "out", s_savedSel[1].key, &len) != ESP_OK) s_savedSel[1].key[0] = '\0';
+        if (nvs_get_u8(h, "defaults", &defaults) != ESP_OK) defaults = 0;
+        nvs_close(h);
+    }
+    apply_defaults(defaults);
 }
 
 // Snapshot of what to write, taken under the lock

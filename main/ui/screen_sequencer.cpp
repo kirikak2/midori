@@ -1201,6 +1201,7 @@ void ScreenSequencer::pressPattern(int id)
                 break;
             }
             if (!ui_seq_copy_pattern(m_patClip, p)) ui_seq_set_status("Too many notes");
+            ui_seq::notify_edit(p, -1);
             break;
         case PM_CLEAR:
             if (!used) break;
@@ -1209,10 +1210,12 @@ void ScreenSequencer::pressPattern(int id)
                 break;
             }
             ui_seq_clear_pattern(p);
+            ui_seq::notify_edit(p, -1);
             break;
         case PM_LENGTH: {
             static const int LENGTHS[] = { 0, 1, 2, 4, 8 };
             ui_seq_set_i(p, -1, "length", nextChoice(LENGTHS, 5, ui_seq_get_i(p, -1, "length")));
+            ui_seq::notify_edit(p, -1);
             break;
         }
         case PM_CLOSE:
@@ -1322,7 +1325,10 @@ void ScreenSequencer::pressChain(int id)
         default:
             return;
     }
-    if (changed) ui_seq_set_chain(m_chainP, m_chainR, m_chainN);
+    if (changed) {
+        ui_seq_set_chain(m_chainP, m_chainR, m_chainN);
+        ui_seq::notify_edit(UI_SEQ_PATTERN_EDIT, -1);   // The song's chain
+    }
     loadChain();
     paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
 }
@@ -1415,6 +1421,7 @@ void ScreenSequencer::pressSheet(int id)
                 break;
             }
             ui_seq_remove_line(line);
+            ui_seq::notify_edit(p, -1);   // The lines after it moved up
             if (m_selected >= line && m_selected > 0) m_selected--;
             closeSheet();
             return;
@@ -1443,7 +1450,8 @@ void ScreenSequencer::pressSheet(int id)
             m_lineClipPat = m_haveView ? m_view->shown : 0;
             m_lineClipLine = line;
             ui_seq_set_status("Line copied");
-            break;
+            paintAll();
+            return;
         case SB_PASTE:
             if (m_lineClipLine < 0 || (m_lineClipLine == line && m_haveView && m_lineClipPat == m_view->shown)) break;
             if (!pasteConfirmed) {
@@ -1451,6 +1459,7 @@ void ScreenSequencer::pressSheet(int id)
                 break;
             }
             if (!ui_seq_copy_line(m_lineClipPat, m_lineClipLine, p, line)) ui_seq_set_status("Too many notes");
+            ui_seq::notify_edit(p, line);
             break;
         case SB_CLOSE:
             closeSheet();
@@ -1458,6 +1467,8 @@ void ScreenSequencer::pressSheet(int id)
         default:
             return;
     }
+    // The line changed (a Delete / Paste waiting for its second tap changed nothing)
+    if (id != SB_DELETE && id != SB_PASTE && !m_confirmPaste) ui_seq::notify_edit(p, line);
     // Most changes show up through the song's revision; this covers the rest
     paintAll();
 }
@@ -1571,7 +1582,7 @@ void ScreenSequencer::checkLongPress()
             openSheet(t.target);
         } else if (t.kind == T_CELL && t.onNote) {
             t.longFired = true;
-            ui_seq::replace_with_chord(t.target, t.step);
+            if (ui_seq::replace_with_chord(t.target, t.step)) ui_seq::notify_edit(UI_SEQ_PATTERN_EDIT, t.target);
         }
     }
 }
@@ -1678,6 +1689,7 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             } else {
                 ui_seq::place_chord(t.target, t.step, len);
             }
+            ui_seq::notify_edit(UI_SEQ_PATTERN_EDIT, t.target);
             m_selected = t.target;
             paintRow(t.target);   // Without the outline, even if nothing changed
             break;
@@ -1688,6 +1700,7 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             muteRect(m_areaX, m_g.nameW, rowY(t.target), m_g.rowH, mx, my, ms);
             if (t.x0 >= mx - 6 && t.x0 < mx + ms + 6 && t.x0 < m_g.cellX) {
                 ui_seq_set_i(UI_SEQ_PATTERN_EDIT, t.target, "mute", m_view->lines[t.target].mute ? 0 : 1);
+                ui_seq::notify_edit(UI_SEQ_PATTERN_EDIT, t.target);
             } else if (t.target == m_view->armed && t.x0 >= mx - 6 - ms && t.x0 < mx - 6) {
                 toggleArm(t.target);
             } else if (m_selected != t.target) {
@@ -1716,7 +1729,10 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
         case T_PLUS:
             if (!t.moved) {
                 int index = ui_seq_add_line();
-                if (index >= 0) m_selected = index;
+                if (index >= 0) {
+                    m_selected = index;
+                    ui_seq::notify_edit(UI_SEQ_PATTERN_EDIT, index);
+                }
             }
             break;
         default:

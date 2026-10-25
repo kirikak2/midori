@@ -567,7 +567,9 @@ bool seq_pline_set_bars(seq_engine_t *e, int pattern, int line, int bars)
 static void set_play_pattern(seq_engine_t *e, int p)
 {
     if (e->play_pattern != p) {
+        int from = e->play_pattern;
         e->play_pattern = (int8_t)p;
+        if (e->out.event) e->out.event(e->out.ctx, SEQ_EVENT_PATTERN, p, from, 0);
         e->pattern_changes++;
         // A different pattern: its sounds (the same one looping sends nothing again)
         e->programs_due = true;
@@ -1126,6 +1128,22 @@ static void rec_replace_tick(seq_engine_t *e)
     if (--e->rec_left == 0) e->rec_pass = 2;
 }
 
+// Lines watched reaching a step (muted ones and an empty slot's too: the
+// position moves all the same). A realtime line's step is a sixteenth.
+static void step_events(seq_engine_t *e)
+{
+    for (int l = 0; l < e->line_count; l++) {
+        if (!(e->step_events & (1u << l))) continue;
+        uint32_t lt = seq_line_ticks(e, e->play_pattern, l);
+        if (lt == 0) continue;
+        uint32_t lpos = e->pattern_tick % lt;
+        uint32_t unit = e->lines[l].mode == SEQ_MODE_GRID
+                            ? (uint32_t)seq_rate_ticks(seq_pline_rate(e, e->play_pattern, l))
+                            : SEQ_PPQN / 4;
+        if (lpos % unit == 0) e->out.event(e->out.ctx, SEQ_EVENT_STEP, l, (int)(lpos / unit), e->play_pattern);
+    }
+}
+
 static void process_tick(seq_engine_t *e)
 {
     int before = e->play_pattern;
@@ -1157,6 +1175,7 @@ static void process_tick(seq_engine_t *e)
     if (pat) {
         for (int l = 0; l < e->line_count; l++) play_line(e, pat, l);
     }
+    if (e->step_events && e->out.event) step_events(e);
 
     e->song_tick++;
     e->pattern_tick++;

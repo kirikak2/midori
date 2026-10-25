@@ -13,6 +13,9 @@
 # The song lives in C and outlasts the script (UI::Sequencer.current picks it
 # up without clearing it). Lines are the same in every pattern; what a line
 # plays (its notes and length) is per pattern.
+# UI::Sequencer#on_step / on_pattern / on_edit: [[line mask, block], ...]
+$ui_sequencer_handlers = { step: [], pattern: [], edit: [] }
+
 module UI
   class Sequencer
     MAX_LINES     = 16
@@ -352,6 +355,98 @@ module UI
     # A line armed, and running: what comes in is being recorded
     def recording?
       UI._seq_get_i(SONG, SONG, :recording) != 0
+    end
+
+    # --- Events (run from UI.process) ---
+
+    # The block gets { line:, step:, pattern: } each time a line reaches a
+    # step (a grid step, or a realtime line's sixteenth) while playing.
+    # line: one line, an Array of them, or nil for every line. Steps come
+    # many to a beat: a script that runs UI.process seldom gets fewer of them
+    # (they are dropped while the UI event queue is half full).
+    # @return [Proc] the block (for #off)
+    def on_step(line: nil, &block)
+      raise ArgumentError, "on_step: a block is required" unless block
+      mask = 0
+      if line.nil?
+        mask = 0xFFFF
+      else
+        Sequencer.list(line).each do |l|
+          check_line(l)
+          mask |= 1 << l
+        end
+      end
+      $ui_sequencer_handlers[:step] << [mask, block]
+      Sequencer._sync_events
+      block
+    end
+
+    # The block gets { pattern:, from: } when the playing pattern changes
+    # (queued, chained, or picked while stopped)
+    def on_pattern(&block)
+      raise ArgumentError, "on_pattern: a block is required" unless block
+      $ui_sequencer_handlers[:pattern] << [0, block]
+      Sequencer._sync_events
+      block
+    end
+
+    # The block gets { pattern:, line: } when the song is changed on the
+    # Sequencer screen (line nil: the whole pattern, or the song -- a line
+    # deleted, the chain). Changes made from Ruby are not reported.
+    def on_edit(&block)
+      raise ArgumentError, "on_edit: a block is required" unless block
+      $ui_sequencer_handlers[:edit] << [0, block]
+      Sequencer._sync_events
+      block
+    end
+
+    # Removes handlers: one block, those of a kind (:step / :pattern /
+    # :edit), or all
+    # @return [Integer] how many
+    def off(kind = nil, handler = nil)
+      if kind.is_a?(Proc)
+        handler = kind
+        kind = nil
+      end
+      removed = 0
+      $ui_sequencer_handlers.each do |k, list|
+        next unless kind.nil? || k == kind
+        before = list.size
+        list.delete_if { |h| handler.nil? || h[1] == handler }
+        removed += before - list.size
+      end
+      Sequencer._sync_events
+      removed
+    end
+
+    # Internal: tell C which events to queue (none until a block asks)
+    def self._sync_events
+      h = $ui_sequencer_handlers
+      mask = 0
+      h[:step].each { |e| mask |= e[0] }
+      UI._seq_set_i(SONG, SONG, :step_events, mask & 0xFFFF)
+      UI._seq_set_i(SONG, SONG, :pattern_events, h[:pattern].empty? ? 0 : 1)
+      UI._seq_set_i(SONG, SONG, :edit_events, h[:edit].empty? ? 0 : 1)
+    end
+
+    # Internal: a :sequencer event from UI.process
+    def self._dispatch(event)
+      kind = event[:kind]
+      list = $ui_sequencer_handlers[kind]
+      return unless list && !list.empty?
+      e = case kind
+          when :step    then { line: event[:line], step: event[:step], pattern: event[:pattern] }
+          when :pattern then { pattern: event[:pattern], from: event[:from] }
+          else               { pattern: event[:pattern], line: event[:line] }
+          end
+      list.each do |mask, block|
+        next if kind == :step && (mask & (1 << e[:line])) == 0
+        begin
+          block.call(e)
+        rescue => err
+          UI.log("Error in Sequencer on_#{kind}: " + err.message)
+        end
+      end
     end
 
     # { pattern:, tick:, bar:, beat: } in the playing pattern

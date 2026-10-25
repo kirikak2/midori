@@ -336,6 +336,11 @@ module UI
       dispatch_widget_event(event)
     end
 
+    # Steps, pattern switches and screen edits (UI::Sequencer#on_*)
+    if type == :sequencer
+      Sequencer._dispatch(event)
+    end
+
     handlers = $ui_handlers[type]
     if handlers
       handlers.each do |h|
