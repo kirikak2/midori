@@ -678,10 +678,11 @@ void ui_seq_reset(int lines);            // An empty song of `lines` lines (1..1
 // Named parameters. The name decides what `pattern` / `line` mean:
 //   song     (both ignored): out_mask play_pattern (set: picks it, queued
 //            while running) edit_pattern (-1 follows) switch chain_on
-//            bpm_x100 temporary restored; set-only: mark_clean mark_saved;
-//            read-only: transport_bit running line_count next_pattern
-//            chain_len song_tick pattern_tick song_notes edits dirty
-//            autosave_due
+//            bpm_x100 temporary restored armed (the line recording, -1
+//            none; set false for a grid line); set-only: mark_clean
+//            mark_saved; read-only: transport_bit running line_count
+//            next_pattern chain_len song_tick pattern_tick song_notes edits
+//            dirty autosave_due recording rec_open rec_dropped
 //   line     (line):          mode channel mute velocity gate quantize rec_mode
 //   pattern  (pattern):       length (0 auto, 1..8 bars); read-only: used ticks
 //   pattern line (both):      steps rate bars program bank_msb bank_lsb

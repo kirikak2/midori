@@ -1,7 +1,8 @@
 # Sequencer（UI::Sequencer）
 
-> **状態: 段階 1〜4 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
-> 和音の取り込み）、トランスポート、Ruby API、保存と自動保存、画面とレイアウト部品まで。録音は未実装（「段階」を参照）。
+> **状態: 段階 1〜5 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
+> 和音の取り込み、リアルタイム録音）、トランスポート、Ruby API、保存と自動保存、画面とレイアウト部品まで。
+> 録音（段階 5）はビルドとホストのテストのみで、実機では未確認。
 > 保存（段階 3）はビルドとホストのテストのみで、実機では未確認。
 > Tab5 の実機で画面の表示と Play / Stop による再生を確認（2026-10-25）。それ以外（編集操作の細部、外部クロック同期、
 > CoreS3 / CrowPanel）は未確認。
@@ -15,7 +16,7 @@
 | 2. パターンとチェーン | 済（エンジンと Ruby API。画面の操作は段階 4） |
 | 3. 保存と自動保存 | 済（実機未確認）。`.mseq` の読み書きは `seq_engine.c`（`seq_song_clone` / `seq_dump_*` / `seq_load_*` / `seq_engine_adopt`）、自動保存の判定と画面の要求は `ui_sequencer.cpp`、ファイル I/O は `mrblib/ui_sequencer.rb`（`save` / `load` / `songs` / `to_h` / `restore` / `_setup` / `_poll`）、起動時は `main_task_base.rb` の `setup_sequencer`、画面は File ボタンとシート |
 | 4. 画面 + レイアウト | 済（下記の一部を除く）。`main/ui/screen_sequencer.{h,cpp}`、`UI_SCREEN_SEQUENCER`（= 12）/ `:sequencer` / `UI.sequencer` / `seq.show`、レイアウトの `sequencer`（`UI_WIDGET_SEQUENCER` = 6） |
-| 5. リアルタイム録音 | 未（realtime ラインの**再生**と `add_event` / `notes=` は済） |
+| 5. リアルタイム録音 | 済（実機未確認）。エンジンは `seq_engine.c` の「Realtime recording」（`seq_set_armed` / `seq_engine_input_at`）、時刻の換算は `ui_sequencer.cpp`、画面は REC ボタン・ラインの arm の印・設定シートの Quant / Overdub・Replace、Ruby は `Line#arm` / `disarm` / `armed?`、`seq.armed` / `disarm` / `recording?`。下記「リアルタイム録音」の実装メモ |
 | 6. 仕上げ | MIDI Devices への登録は済（内蔵デバイス `seq`）。既定パッチ Tempo → seq と `on_*` は未 |
 
 - 段階 4 の残り（2026-10-25 に追加、ビルドとホストテストのみで実機未確認）:
@@ -514,6 +515,26 @@ offset  size  内容
 - 入力をそのまま音源へ流すのは Sequencer の仕事ではない（Keys と同じく、受けたものは転送しない）。
   弾いた音も聞きたいなら `MIDI.route(kb, synth)` を別に張る
 
+#### 実装メモ（2026-10-25）
+
+- **arm できるのは realtime のラインだけ**（`seq_set_armed` は grid のラインに false。画面は File ボタンに
+  「Rec: realtime lines」、Ruby は ArgumentError）。arm 中のラインを grid にすると disarm する。arm は保存しない
+  （ファイルの読み込み・`reset` で外れる）。スクリプトの終了では外さない（停止で開いているノートは閉じる）
+- **時刻**: 入力は「最後に鳴らした tick」に置く。seq タスクは Note On / Off を F8・補間 tick と同じキューから
+  順に取り出すので、tick 単位の順序は保たれる。そのうえで受信時刻が最後の tick から **tick の半分**
+  （F8 周期 / 8）を過ぎていれば次の tick に置く（`seq_engine_input_at(..., next)`）。Start の後、最初の F8 の前に
+  来たものは tick 0
+- 開いたノートは最大 16（`SEQ_REC_OPEN`）。超えた分と配列・ソングの上限で入らなかったものは `rec_dropped` に数える
+  （`:full` イベントはまだ無い）
+- 長さは note off までの tick 数（最小 1）。**1 周より長く押さえたら 1 周の長さ**にする
+- quantize は開始位置を**いちばん近い**単位に丸める（ループの末尾へ丸めたら先頭）
+- パターンの切り替えで開いているノートは切り替えの tick で閉じる。ただし**切り替えの tick ちょうどに始まった
+  ノート**（次のパターンの頭を少し早めに弾いた）は、新しいパターンの先頭へ移す
+- replace は録音が始まった tick（arm した・Start / Continue・パターンが替わった・rec_mode を変えた）から 1 周、
+  再生位置が通る tick のノートを消してから鳴らす（消したノートは鳴らない）。quantize で再生位置より**先**へ
+  丸めたノートは、確定したときにそこまでを先に消し、通過のときに消し直さない
+- 録音したノートの確定は `edits` を進めるので、自動保存の対象になる（録音中は 60 秒ごと）
+
 ## 画面
 
 ### 構成（Tab5 / CrowPanel の全画面。CoreS3 は後述）
@@ -581,7 +602,7 @@ offset  size  内容
 | 操作 | 結果 |
 |---|---|
 | タップ | ラインを選択（REC の対象・Follow の基準） |
-| `M` / `●` の位置をタップ | ミュート / arm の切り替え |
+| `M` / `●` の位置をタップ | ミュート / disarm（`●` は arm 中のラインにだけ出る。arm はヘッダの REC） |
 | 長押し | ラインの設定シート（方式・チャンネル・steps / rate / bars・velocity・gate・quantize・rec mode・名前・このラインの Copy / Paste / Clear・Delete） |
 | 「＋ Line」をタップ | ラインを末尾に追加して選択 |
 
@@ -598,6 +619,15 @@ grid のマス（当たり判定は**列＝ステップだけ**。音程の高�
 1 音ずつの追加・削除・別々の長さは Ruby API で行える（画面では和音を 1 単位として扱う）。
 
 realtime のライン: 縮小ピアノロールを描くだけで、マスの編集はしない（v1）。Clear は設定シートから。
+
+録音（2026-10-25）:
+
+- ヘッダ 1 段目の Chain の左に **REC**。タップで選択中のラインを arm（arm 中なら disarm）。表示は `REC 3`
+  （arm 中のライン）、色は録音中（arm + 再生中）が赤・停止中の arm が暗い赤。ノートを押さえている間は白い枠。
+  何も arm していなくて選択中のラインが grid なら灰色の文字
+- arm 中のラインの見出しには `M` の左に赤い丸（録音中は明るい赤）。タップで disarm
+- realtime のラインの設定シートでは、grid 用の **Steps / Rate** のボタンが **Quant**（off → 1/4 → 1/8 → 1/16 →
+  1/32 → 1/8T → 1/16T）と **Overdub / Replace** になる
 
 ### 描画
 

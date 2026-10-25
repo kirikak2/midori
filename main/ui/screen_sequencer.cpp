@@ -38,6 +38,7 @@ static constexpr uint16_t COL_SLOT_NEXT = 0xC600;
 static constexpr uint16_t COL_ON        = 0x0451;
 static constexpr uint16_t COL_MUTED     = 0x632C;
 static constexpr uint16_t COL_TEXT_DIM  = 0xAD55;
+static constexpr uint16_t COL_ARMED     = 0x7800;   // Armed, not running
 
 static const uint16_t LINE_COLORS[8] = {
     UI_COLOR_CYAN, UI_COLOR_ORANGE, UI_COLOR_MAGENTA, UI_COLOR_GREEN,
@@ -47,6 +48,8 @@ static const uint16_t LINE_COLORS[8] = {
 static const char* RATE_NAMES[SEQ_RATE_COUNT] = { "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" };
 static const int STEP_CHOICES[] = { 4, 8, 16, 32, 64 };
 static const int BAR_CHOICES[] = { 1, 2, 4, 8 };
+// A realtime line's quantize: none, then the rates (seq_rate_t + 1)
+static const char* QUANT_NAMES[SEQ_RATE_COUNT + 1] = { "off", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" };
 
 static void noteName(int note, char* buf, int len)
 {
@@ -99,6 +102,7 @@ ScreenSequencer::ScreenSequencer()
     , m_confirmDelete(false)
     , m_lastPlay(-1), m_lastNext(-1), m_lastEdit(-1)
     , m_lastRunning(false), m_lastChain(false)
+    , m_lastArmed(-1), m_lastRecording(false), m_lastRecOpen(0)
     , m_lastUsed(0)
     , m_fileSheet(false)
     , m_fileSel(-1)
@@ -239,7 +243,9 @@ void ScreenSequencer::computeGeom()
         m_btn[BTN_PAT_NEXT] = { x, y1, 24, bh };
         x += 24 + gap;
     }
-    m_btn[BTN_CHORD] = { x + gap, y1, right - chainW - gap - (x + gap), bh };
+    int recW = wide ? 110 : 40;
+    m_btn[BTN_REC] = { right - chainW - gap - recW, y1, recW, bh };
+    m_btn[BTN_CHORD] = { x + gap, y1, right - chainW - recW - gap * 2 - (x + gap), bh };
 
     x = m_areaX;
     int arrowW = wide ? 56 : 24;
@@ -415,6 +421,19 @@ void ScreenSequencer::renderHeader(LovyanGFX* g, int ox, int oy)
     button(g, ox, oy, m_btn[BTN_CHAIN], "Chain", v.chainOn ? COL_PURPLE : COL_BTN,
            v.chainLen ? COL_WHITE : COL_TEXT_DIM);
 
+    // REC: red while recording, dark red while armed and stopped. Grayed out
+    // when nothing is armed and the selected line cannot be (a grid line).
+    if (v.armed >= 0) {
+        snprintf(buf, sizeof(buf), "REC %d", v.armed + 1);
+    } else {
+        snprintf(buf, sizeof(buf), "REC");
+    }
+    bool canArm = v.armed >= 0 || (m_selected >= 0 && m_selected < v.lineCount &&
+                                   v.lines[m_selected].mode == SEQ_MODE_REALTIME);
+    uint16_t recBg = v.recording ? COL_RED : (v.armed >= 0 ? COL_ARMED : COL_BTN);
+    button(g, ox, oy, m_btn[BTN_REC], buf, recBg, canArm ? COL_WHITE : COL_TEXT_DIM,
+           v.recOpen > 0);
+
     // The chord the grid places
     int pos = 0;
     buf[0] = '\0';
@@ -470,7 +489,8 @@ void ScreenSequencer::renderLine(LovyanGFX* g, int ox, int oy, int line, int y)
     g->fillRect(m_areaX - ox, y - oy, 4, rowH - 1, color);
     int mx, my, ms;
     muteRect(m_areaX, m_g.nameW, y, rowH, mx, my, ms);
-    int textW = mx - m_areaX - 10;
+    int armW = line == m_view->armed ? ms : 0;   // Room for the armed dot
+    int textW = mx - armW - m_areaX - 10;
     if (lv.name[0]) {
         snprintf(buf, sizeof(buf), "%d %s", line + 1, lv.name);
     } else {
@@ -485,7 +505,7 @@ void ScreenSequencer::renderLine(LovyanGFX* g, int ox, int oy, int line, int y)
         snprintf(prog, sizeof(prog), "P%d", lv.program + 1);
         int pw = (int)strlen(prog) * GLYPH_W * ts;
         nameW = textW - pw - 4;
-        text(g, ox, oy, mx - 6 - pw, ty, pw, prog, COL_YELLOW, ts);
+        text(g, ox, oy, mx - armW - 6 - pw, ty, pw, prog, COL_YELLOW, ts);
     }
     text(g, ox, oy, m_areaX + 8, ty, nameW, buf, COL_WHITE, ts);
     if (grid) {
@@ -498,6 +518,12 @@ void ScreenSequencer::renderLine(LovyanGFX* g, int ox, int oy, int line, int y)
     g->fillRect(mx - ox, my - oy, ms, ms, lv.mute ? COL_RED : 0x2945);
     g->drawRect(mx - ox, my - oy, ms, ms, lv.mute ? COL_RED : COL_TEXT_DIM);
     text(g, ox, oy, mx + (ms - GLYPH_W) / 2, my + (ms - GLYPH_H) / 2, ms, "M", COL_WHITE, 1);
+    // Armed to record: a red dot left of M (tap it to disarm)
+    if (line == m_view->armed) {
+        int r = ms / 2 - 2;
+        g->fillCircle(mx - 6 - r - ox, my + ms / 2 - oy, r, m_view->recording ? COL_RED : COL_ARMED);
+        g->drawCircle(mx - 6 - r - ox, my + ms / 2 - oy, r, COL_RED);
+    }
 
     // Cells
     int row = line;
@@ -629,10 +655,20 @@ void ScreenSequencer::renderSheet(LovyanGFX* g, int ox, int oy)
     button(g, ox, oy, m_sheetBtn[SB_CH], buf, 0x1082, COL_WHITE);
     button(g, ox, oy, m_sheetBtn[SB_CH_UP], "Ch +", COL_BTN, COL_WHITE);
     uint16_t gridFg = mode == SEQ_MODE_GRID ? COL_WHITE : COL_TEXT_DIM;
-    snprintf(buf, sizeof(buf), "Steps %d", steps);
-    button(g, ox, oy, m_sheetBtn[SB_STEPS], buf, COL_BTN, gridFg);
-    snprintf(buf, sizeof(buf), "Rate %s", RATE_NAMES[rate % SEQ_RATE_COUNT]);
-    button(g, ox, oy, m_sheetBtn[SB_RATE], buf, COL_BTN, gridFg);
+    if (mode == SEQ_MODE_GRID) {
+        snprintf(buf, sizeof(buf), "Steps %d", steps);
+        button(g, ox, oy, m_sheetBtn[SB_STEPS], buf, COL_BTN, COL_WHITE);
+        snprintf(buf, sizeof(buf), "Rate %s", RATE_NAMES[rate % SEQ_RATE_COUNT]);
+        button(g, ox, oy, m_sheetBtn[SB_RATE], buf, COL_BTN, COL_WHITE);
+    } else {
+        // How it records
+        int q = ui_seq_get_i(p, line, "quantize");
+        snprintf(buf, sizeof(buf), "Quant %s", QUANT_NAMES[q % (SEQ_RATE_COUNT + 1)]);
+        button(g, ox, oy, m_sheetBtn[SB_STEPS], buf, COL_BTN, COL_WHITE);
+        bool replace = ui_seq_get_i(p, line, "rec_mode") != 0;
+        button(g, ox, oy, m_sheetBtn[SB_RATE], replace ? "Replace" : "Overdub",
+               replace ? COL_ARMED : COL_BTN, COL_WHITE);
+    }
     snprintf(buf, sizeof(buf), "Bars %d", bars);
     button(g, ox, oy, m_sheetBtn[SB_BARS], buf, COL_BTN,
            mode == SEQ_MODE_REALTIME ? COL_WHITE : COL_TEXT_DIM);
@@ -966,6 +1002,9 @@ void ScreenSequencer::update()
         m_lastRunning = m_view->running;
         m_lastChain = m_view->chainOn;
         m_lastUsed = m_view->used;
+        m_lastArmed = m_view->armed;
+        m_lastRecording = m_view->recording;
+        m_lastRecOpen = m_view->recOpen;
         paintAll();
         return;
     }
@@ -975,11 +1014,19 @@ void ScreenSequencer::update()
     follow();
 
     const ui_seq::View& v = *m_view;
+    // Armed or recording changed: the REC button and the lines' dots
+    if (v.armed != m_lastArmed || v.recording != m_lastRecording) {
+        m_lastArmed = v.armed;
+        m_lastRecording = v.recording;
+        m_lastRecOpen = v.recOpen;
+        paintAll();
+        return;
+    }
     static bool s_blink;
     bool blink = (nowUs() / BLINK_US) % 2 == 0;
     bool headerDirty = v.play != m_lastPlay || v.next != m_lastNext || v.edit != m_lastEdit ||
                        v.running != m_lastRunning || v.chainOn != m_lastChain || v.used != m_lastUsed ||
-                       v.chordSerial != chordSerial ||
+                       v.chordSerial != chordSerial || v.recOpen != m_lastRecOpen ||
                        (v.next >= 0 && blink != s_blink);
     s_blink = blink;
     if (headerDirty) {
@@ -989,6 +1036,7 @@ void ScreenSequencer::update()
         m_lastRunning = v.running;
         m_lastChain = v.chainOn;
         m_lastUsed = v.used;
+        m_lastRecOpen = v.recOpen;
         paintHeader();
     }
 
@@ -1045,6 +1093,9 @@ void ScreenSequencer::pressButton(int id)
         case BTN_CHORD:
             ui_seq::preview_chord(m_selected);
             break;
+        case BTN_REC:
+            toggleArm(v.armed >= 0 ? v.armed : m_selected);
+            break;
         case BTN_WIN_PREV:
         case BTN_WIN_NEXT:
             m_follow = false;
@@ -1090,6 +1141,18 @@ void ScreenSequencer::pressButton(int id)
         }
         default:
             break;
+    }
+}
+
+// Arms a line to record, or disarms it if it is armed. Only a realtime line
+// records: a grid one says so on the File button.
+void ScreenSequencer::toggleArm(int line)
+{
+    if (line < 0 || line >= m_view->lineCount) return;
+    if (m_view->armed == line) {
+        ui_seq_set_i(-1, -1, "armed", -1);
+    } else if (!ui_seq_set_i(-1, -1, "armed", line)) {
+        ui_seq_set_status("Rec: realtime lines");
     }
 }
 
@@ -1313,11 +1376,20 @@ void ScreenSequencer::pressSheet(int id)
             ui_seq_set_i(p, line, "channel", ch % 16);
             break;
         }
+        // A realtime line has no steps / rate: these set how it records
         case SB_STEPS:
-            ui_seq_set_i(p, line, "steps", nextChoice(STEP_CHOICES, 5, ui_seq_get_i(p, line, "steps")));
+            if (ui_seq_get_i(p, line, "mode") == SEQ_MODE_REALTIME) {
+                ui_seq_set_i(p, line, "quantize", (ui_seq_get_i(p, line, "quantize") + 1) % (SEQ_RATE_COUNT + 1));
+            } else {
+                ui_seq_set_i(p, line, "steps", nextChoice(STEP_CHOICES, 5, ui_seq_get_i(p, line, "steps")));
+            }
             break;
         case SB_RATE:
-            ui_seq_set_i(p, line, "rate", (ui_seq_get_i(p, line, "rate") + 1) % SEQ_RATE_COUNT);
+            if (ui_seq_get_i(p, line, "mode") == SEQ_MODE_REALTIME) {
+                ui_seq_set_i(p, line, "rec_mode", ui_seq_get_i(p, line, "rec_mode") ? 0 : 1);
+            } else {
+                ui_seq_set_i(p, line, "rate", (ui_seq_get_i(p, line, "rate") + 1) % SEQ_RATE_COUNT);
+            }
             break;
         case SB_BARS:
             ui_seq_set_i(p, line, "bars", nextChoice(BAR_CHOICES, 4, ui_seq_get_i(p, line, "bars")));
@@ -1616,6 +1688,8 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             muteRect(m_areaX, m_g.nameW, rowY(t.target), m_g.rowH, mx, my, ms);
             if (t.x0 >= mx - 6 && t.x0 < mx + ms + 6 && t.x0 < m_g.cellX) {
                 ui_seq_set_i(UI_SEQ_PATTERN_EDIT, t.target, "mute", m_view->lines[t.target].mute ? 0 : 1);
+            } else if (t.target == m_view->armed && t.x0 >= mx - 6 - ms && t.x0 < mx - 6) {
+                toggleArm(t.target);
             } else if (m_selected != t.target) {
                 m_selected = t.target;
                 refresh(true);

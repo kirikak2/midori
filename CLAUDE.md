@@ -825,7 +825,8 @@ keys.show
 ## Sequencer（UI::Sequencer / 2026-10-25）
 
 詳細は [docs/SEQUENCER.md](docs/SEQUENCER.md)（設計と段階）。段階 1〜4（エンジン・パターン・チェーン・Ruby API・
-保存と自動保存・画面 [main/ui/screen_sequencer.cpp](main/ui/screen_sequencer.cpp)・レイアウトの `sequencer`）まで実装、録音は未。
+保存と自動保存・画面 [main/ui/screen_sequencer.cpp](main/ui/screen_sequencer.cpp)・レイアウトの `sequencer`）と段階 5（リアルタイム録音）まで実装。
+録音（REC で realtime のラインを arm、`Line#arm`。overdub / replace / quantize）はビルドとホストテストのみで実機未確認。
 保存（`.mseq`、`/sd/patterns/`、自動保存 `_autosave.mseq`）はビルドとホストテストのみで実機未確認。
 Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-25）。外部クロック同期・CoreS3 / CrowPanel は未確認。
 

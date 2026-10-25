@@ -298,6 +298,272 @@ static void test_realtime_playback(void)
     EXPECT_EQ(nth_on(72, 0)->channel, 2);
 }
 
+/* --- Realtime recording ---------------------------------------------------- */
+
+static void key_on(int note, int vel) { seq_engine_input(g_e, 0x90, (uint8_t)note, (uint8_t)vel); }
+static void key_off(int note) { seq_engine_input(g_e, 0x80, (uint8_t)note, 0); }
+
+/* The index of a realtime note of (pattern, line), or -1 */
+static int rt_find(int pattern, int line, int pos, int note)
+{
+    const seq_notes_t *a = seq_notes_get(g_e, pattern, line, SEQ_MODE_REALTIME);
+    if (!a) return -1;
+    for (int i = 0; i < a->n; i++) {
+        if (a->v[i].pos == pos && a->v[i].note == note) return i;
+    }
+    return -1;
+}
+
+static int rt_len(int pattern, int line, int pos, int note)
+{
+    int i = rt_find(pattern, line, pos, note);
+    return i < 0 ? -1 : seq_notes_get(g_e, pattern, line, SEQ_MODE_REALTIME)->v[i].len;
+}
+
+static int rt_count(int pattern, int line)
+{
+    const seq_notes_t *a = seq_notes_get(g_e, pattern, line, SEQ_MODE_REALTIME);
+    return a ? a->n : 0;
+}
+
+/* Line 2 realtime, one bar, armed */
+static void fresh_recording(void)
+{
+    fresh();
+    g_e->lines[2].mode = SEQ_MODE_REALTIME;
+    EXPECT_EQ(seq_set_armed(g_e, 2), 1);
+}
+
+static void test_record_basic(void)
+{
+    printf("recording: notes, timing\n");
+    fresh();
+    EXPECT_EQ(g_e->armed_line, -1);
+    EXPECT_EQ(seq_set_armed(g_e, 0), 0);            /* A grid line cannot be armed */
+    EXPECT_EQ(seq_set_armed(g_e, 9), 0);
+    g_e->lines[2].mode = SEQ_MODE_REALTIME;
+    EXPECT_EQ(seq_set_armed(g_e, 2), 1);
+    EXPECT_EQ(g_e->armed_line, 2);
+
+    /* Stopped: the chord follows, nothing is recorded */
+    key_on(70, 90);
+    key_off(70);
+    EXPECT_EQ(rt_count(0, 2), 0);
+    EXPECT_EQ(g_e->chord[0], 70);
+    EXPECT_EQ(seq_recording(g_e), 0);
+
+    seq_engine_start(g_e);
+    EXPECT_EQ(seq_recording(g_e), 1);
+    /* Before the first tick: on tick 0 */
+    key_on(60, 80);
+    run_ticks(13);                                  /* Ticks 0..12 */
+    key_off(60);
+    EXPECT_EQ(rt_len(0, 2, 0, 60), 12);
+    key_on(72, 90);                                 /* After tick 12 */
+    EXPECT_EQ(seq_rec_open(g_e), 1);
+    run_ticks(50);                                  /* .. 62 */
+    key_off(72);
+    EXPECT_EQ(seq_rec_open(g_e), 0);
+    EXPECT_EQ(rt_len(0, 2, 12, 72), 50);
+    EXPECT_EQ(seq_notes_get(g_e, 0, 2, SEQ_MODE_REALTIME)->v[rt_find(0, 2, 12, 72)].velocity, 90);
+    /* Nearer the next tick */
+    run_ticks(37);                                  /* .. 99 */
+    seq_engine_input_at(g_e, 0x90, 74, 100, true);
+    run_ticks(10);
+    seq_engine_input_at(g_e, 0x90, 74, 0, true);    /* Velocity 0: a note off */
+    EXPECT_EQ(rt_len(0, 2, 100, 74), 10);
+
+    /* It plays on the next loop, on the line's channel */
+    clear_events();
+    run_ticks(384 - 110 + 120);
+    EXPECT_EQ(nth_on(72, 0)->tick, 384 + 12);
+    EXPECT_EQ(off_for(nth_on(72, 0)->token)->tick, 384 + 62);
+    EXPECT_EQ(nth_on(72, 0)->channel, 2);
+    EXPECT_EQ(nth_on(74, 0)->tick, 384 + 100);
+    /* Recording does not play what comes in: only what was recorded sounds */
+    EXPECT_EQ(count_on(70), 0);
+}
+
+static void test_record_overdub_and_hold(void)
+{
+    printf("recording: overdub, held notes, loop end\n");
+    fresh_recording();
+    seq_rt_add(g_e, 0, 2, 20, 30, 72, 100);
+    seq_engine_start(g_e);
+    run_ticks(11);                                  /* .. 10 */
+    key_on(72, 100);                                /* Held over the recorded 72 at 20 */
+    run_ticks(20);                                  /* .. 30 */
+    EXPECT_EQ(count_on(72), 0);                     /* Not played under the finger */
+    key_off(72);
+    EXPECT_EQ(rt_count(0, 2), 2);                   /* Overdub keeps the old one */
+    EXPECT_EQ(rt_len(0, 2, 10, 72), 20);
+    EXPECT_EQ(rt_len(0, 2, 20, 72), 30);
+
+    /* Held across the loop end: the length runs past it */
+    run_ticks(380 - 31 + 1);                        /* .. 380 */
+    key_on(50, 100);
+    run_ticks(14);                                  /* .. 394 = 10 in the next loop */
+    key_off(50);
+    EXPECT_EQ(rt_len(0, 2, 380, 50), 14);
+    /* It comes back round: on at 380 of the loop, off 14 later */
+    clear_events();
+    run_ticks(384);
+    EXPECT_EQ(nth_on(50, 0)->tick, 384 + 380);
+    EXPECT_EQ(off_for(nth_on(50, 0)->token)->tick, 384 + 394);
+
+    /* Held for more than a loop: one loop long */
+    key_on(51, 100);
+    run_ticks(500);
+    key_off(51);
+    EXPECT_EQ(rt_count(0, 2) >= 4, 1);
+    const seq_notes_t *a = seq_notes_get(g_e, 0, 2, SEQ_MODE_REALTIME);
+    for (int i = 0; i < a->n; i++) {
+        if (a->v[i].note == 51) EXPECT_EQ(a->v[i].len, 384);
+    }
+}
+
+static void test_record_quantize(void)
+{
+    printf("recording: quantize\n");
+    fresh_recording();
+    g_e->lines[2].quantize = SEQ_RATE_16 + 1;       /* 24 ticks */
+    seq_engine_start(g_e);
+    run_ticks(31);                                  /* .. 30 */
+    key_on(60, 100);
+    run_ticks(7);                                   /* .. 37 */
+    key_on(62, 100);
+    run_ticks(10);
+    key_off(60);
+    key_off(62);
+    EXPECT_EQ(rt_len(0, 2, 24, 60), 17);            /* Start rounded, length kept */
+    EXPECT_EQ(rt_len(0, 2, 48, 62), 10);
+    /* Rounded up past the loop end: onto its start */
+    run_ticks(380 - 48 + 1);                        /* .. 380 */
+    key_on(64, 100);
+    run_ticks(2);
+    key_off(64);
+    EXPECT_EQ(rt_len(0, 2, 0, 64), 2);
+}
+
+static void test_record_stop_disarm(void)
+{
+    printf("recording: stop, disarm, line changes\n");
+    fresh_recording();
+    seq_engine_start(g_e);
+    run_ticks(5);
+    key_on(60, 100);
+    run_ticks(6);
+    seq_engine_stop(g_e);                           /* Held notes end there */
+    EXPECT_EQ(seq_rec_open(g_e), 0);
+    EXPECT_EQ(rt_len(0, 2, 4, 60), 7);
+    key_off(60);
+    EXPECT_EQ(rt_count(0, 2), 1);
+
+    seq_engine_continue(g_e);
+    key_on(62, 100);
+    run_ticks(3);
+    EXPECT_EQ(seq_set_armed(g_e, -1), 1);           /* Disarmed: the held note ends */
+    EXPECT_EQ(rt_count(0, 2), 2);
+    key_off(62);
+    key_on(63, 100);
+    run_ticks(3);
+    key_off(63);
+    EXPECT_EQ(rt_count(0, 2), 2);                   /* Nothing armed, nothing recorded */
+
+    /* Removing lines keeps the arm on its line */
+    g_e->lines[5].mode = SEQ_MODE_REALTIME;
+    seq_set_armed(g_e, 5);
+    seq_line_remove(g_e, 1);
+    EXPECT_EQ(g_e->armed_line, 4);
+    seq_line_remove(g_e, 4);
+    EXPECT_EQ(g_e->armed_line, -1);
+
+    /* More held at once than it keeps: counted, not recorded */
+    fresh_recording();
+    seq_engine_start(g_e);
+    for (int n = 0; n < SEQ_REC_OPEN + 2; n++) key_on(40 + n, 100);
+    EXPECT_EQ(g_e->rec_dropped, 2);
+    run_ticks(2);
+    for (int n = 0; n < SEQ_REC_OPEN + 2; n++) key_off(40 + n);
+    EXPECT_EQ(rt_count(0, 2), SEQ_REC_OPEN);
+}
+
+static void test_record_pattern_switch(void)
+{
+    printf("recording: pattern switch\n");
+    fresh_recording();
+    seq_engine_start(g_e);
+    seq_select_pattern(g_e, 1);                     /* At the end of this bar */
+    run_ticks(370);                                 /* .. 369 */
+    key_on(60, 100);
+    run_ticks(30);                                  /* Past the switch at 384 */
+    EXPECT_EQ(g_e->play_pattern, 1);
+    EXPECT_EQ(rt_len(0, 2, 369, 60), 15);           /* Closed at the switch, in pattern 0 */
+    key_off(60);
+    EXPECT_EQ(rt_count(1, 2), 0);
+    key_on(62, 100);                                /* Still armed, into pattern 1 */
+    run_ticks(4);
+    key_off(62);
+    EXPECT_EQ(rt_len(1, 2, 15, 62), 4);             /* Tick 399 = 15 of pattern 1 */
+
+    /* Played a hair early onto the next pattern's downbeat: its start */
+    seq_select_pattern(g_e, 0);
+    run_ticks(384 - (int)g_e->pattern_tick);        /* Pattern 1's last tick played */
+    EXPECT_EQ(g_e->pattern_tick, 384);
+    seq_engine_input_at(g_e, 0x90, 65, 100, true);
+    run_ticks(5);
+    key_off(65);
+    EXPECT_EQ(g_e->play_pattern, 0);
+    EXPECT_EQ(rt_len(0, 2, 0, 65), 4);              /* Ticks 0..4: off after the 4th */
+    EXPECT_EQ(rt_find(1, 2, 0, 65), -1);
+}
+
+static void test_record_replace(void)
+{
+    printf("recording: replace\n");
+    fresh_recording();
+    g_e->lines[2].rec_mode = 1;
+    seq_rt_add(g_e, 0, 2, 10, 5, 70, 100);
+    seq_rt_add(g_e, 0, 2, 200, 5, 71, 100);
+    seq_engine_start(g_e);
+    run_ticks(100);
+    EXPECT_EQ(rt_find(0, 2, 10, 70), -1);          /* Passed: gone, and not played */
+    EXPECT_EQ(count_on(70), 0);
+    EXPECT_EQ(rt_find(0, 2, 200, 71) >= 0, 1);     /* Not reached yet */
+    key_on(60, 100);
+    run_ticks(10);
+    key_off(60);                                    /* Recorded behind the pass: stays */
+    run_ticks(300);                                 /* Past 200, and a whole loop */
+    EXPECT_EQ(rt_find(0, 2, 200, 71), -1);
+    EXPECT_EQ(rt_len(0, 2, 99, 60), 10);
+    EXPECT_EQ(g_e->rec_pass, 2);
+    /* After one loop it records as overdub */
+    clear_events();
+    run_ticks(384);
+    EXPECT_EQ(count_on(60), 1);
+    EXPECT_EQ(rt_len(0, 2, 99, 60), 10);
+
+    /* A note quantized ahead of the pass is not taken out when it gets there */
+    fresh_recording();
+    g_e->lines[2].rec_mode = 1;
+    g_e->lines[2].quantize = SEQ_RATE_16 + 1;
+    seq_rt_add(g_e, 0, 2, 47, 5, 69, 100);
+    seq_rt_add(g_e, 0, 2, 48, 5, 70, 100);
+    seq_rt_add(g_e, 0, 2, 50, 5, 71, 100);
+    seq_engine_start(g_e);
+    run_ticks(41);                                  /* .. 40 */
+    key_on(60, 100);
+    run_ticks(4);                                   /* .. 44 */
+    key_off(60);                                    /* At 48 */
+    EXPECT_EQ(rt_find(0, 2, 47, 69), -1);          /* Its way cleared */
+    EXPECT_EQ(rt_find(0, 2, 48, 70), -1);
+    EXPECT_EQ(rt_find(0, 2, 50, 71) >= 0, 1);
+    run_ticks(20);
+    EXPECT_EQ(rt_len(0, 2, 48, 60), 4);
+    EXPECT_EQ(rt_find(0, 2, 50, 71), -1);          /* The pass goes on past it */
+    EXPECT_EQ(rt_count(0, 2), 1);
+}
+
 static void test_clock_interpolation(void)
 {
     printf("clock and subticks\n");
@@ -997,6 +1263,12 @@ int main(void)
     test_chords_and_overlap();
     test_polymeter();
     test_realtime_playback();
+    test_record_basic();
+    test_record_overdub_and_hold();
+    test_record_quantize();
+    test_record_stop_disarm();
+    test_record_pattern_switch();
+    test_record_replace();
     test_clock_interpolation();
     test_continue_and_spp();
     test_mute();

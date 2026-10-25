@@ -57,6 +57,8 @@ module UI
     end
 
     def _seq_set_i(pattern, line, name, value)
+      # Like the engine: only a realtime line can be armed
+      return false if name == :armed && value >= 0 && $seq[:values][[:mode, value]] != 1
       $seq[:sets] << [pattern, line, name, value]
       $seq[:values][[name, line]] = value
       true
@@ -68,6 +70,7 @@ module UI
       when :line_count then $seq[:lines]
       when :play_pattern then 3
       when :next_pattern, :edit_pattern then -1
+      when :armed then $seq[:values][[:armed, -1]] || -1
       when :pattern_tick then 384 + 96 * 2 + 10
       when :gate then $seq[:values][[:gate, line]] || 100
       when :program, :bank_msb, :bank_lsb then $seq[:values][[name, line]] || -1
@@ -324,6 +327,22 @@ r.add_event(pos: 13, len: 50, note: 72)
 check("realtime notes", r.notes == [{ pos: 13, len: 50, note: 72, velocity: 100 }])
 r.notes = [{ pos: 0, len: 96, note: 60 }]
 check("notes= replaces", r.notes.map { |n| n[:pos] } == [0])
+
+# --- recording ---
+check("nothing armed", seq.armed.nil? && !r.armed?)
+check("arm returns the line", r.arm.equal?(r))
+check("armed", r.armed? && seq.armed.index == 2 && $seq[:values][[:armed, -1]] == 2)
+check("arm a grid line raises", raises? { seq.line(0).arm })
+check("still armed after a refused arm", r.armed?)
+seq.line(0).disarm
+check("disarm of a line not armed does nothing", r.armed?)
+r.disarm
+check("disarm", !r.armed? && seq.armed.nil?)
+r.arm
+seq.disarm
+check("seq.disarm", seq.armed.nil?)
+r.configure(quantize: 16, rec_mode: :replace)
+check("quantize / rec_mode", $seq[:values][[:quantize, 2]] == 3 && $seq[:values][[:rec_mode, 2]] == 1)
 
 # --- chord ---
 seq.chord = 60

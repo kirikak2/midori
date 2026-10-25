@@ -30,6 +30,7 @@ extern "C" {
 #define SEQ_MAX_CHAIN         64
 #define SEQ_MAX_REPEAT        16
 #define SEQ_MAX_SOUNDING      128
+#define SEQ_REC_OPEN          16     // Notes held while recording
 #define SEQ_NAME_LEN          8      // Line names
 #define SEQ_SONG_NAME_LEN     16
 
@@ -139,6 +140,16 @@ typedef struct {
     uint32_t off_tick;   // song_tick at which it ends
 } seq_sounding_t;
 
+// A note being recorded: its note on has come, its note off not yet
+typedef struct {
+    bool     used;
+    int8_t   pattern;
+    uint8_t  note;
+    uint8_t  velocity;
+    uint16_t pos;        // Tick in the line, before quantizing
+    uint32_t start;      // song_tick of the note on
+} seq_rec_note_t;
+
 typedef struct {
     // --- Song (saved) ---
     uint8_t           line_count;
@@ -175,6 +186,15 @@ typedef struct {
     uint8_t           held_count;
     uint32_t          chord_serial;   // Bumped whenever the chord changes
     uint32_t          held[4];        // Notes held on the input (bit n of held[n / 32])
+
+    // --- Realtime recording (not saved) ---
+    int8_t            armed_line;     // -1: none
+    uint8_t           rec_pass;       // Replace: 0 not begun, 1 erasing, 2 a loop done
+    uint16_t          rec_left;       // Replace: ticks of the loop still to erase
+    uint16_t          rec_ahead;      // Replace: ticks ahead of the pass erased already
+    uint16_t          rec_next;       // Replace: the tick in the line the pass erases next
+    uint32_t          rec_dropped;    // Notes a limit kept out
+    seq_rec_note_t    rec[SEQ_REC_OPEN];
 } seq_engine_t;
 
 // --- Life --------------------------------------------------------------------
@@ -202,8 +222,24 @@ void seq_engine_clock(seq_engine_t *e);
 bool seq_engine_subtick(seq_engine_t *e);
 int  seq_engine_pending(const seq_engine_t *e);
 
-// A note on / off from the input: updates the chord (and, later, recording).
+// A note on / off from the input: updates the chord and, while a line is
+// armed and it runs, records. It is taken to have come on the tick played
+// last; seq_engine_input_at() with `next` true puts it on the next one (it
+// came closer to that).
 void seq_engine_input(seq_engine_t *e, uint8_t status, uint8_t note, uint8_t velocity);
+void seq_engine_input_at(seq_engine_t *e, uint8_t status, uint8_t note, uint8_t velocity, bool next);
+
+// --- Realtime recording --------------------------------------------------------
+
+// Arms a realtime line to record into (one at a time; -1 disarms). Notes
+// still held are closed where they are. False for a grid line.
+bool seq_set_armed(seq_engine_t *e, int line);
+// Recording now: a line armed, and running
+bool seq_recording(const seq_engine_t *e);
+// Notes held, being recorded
+int  seq_rec_open(const seq_engine_t *e);
+// Replace begins a new loop of erasing (after the line's rec_mode changed)
+void seq_rec_restart(seq_engine_t *e);
 
 // --- Lines -------------------------------------------------------------------
 

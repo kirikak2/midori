@@ -337,6 +337,23 @@ module UI
       UI._seq_get_i(SONG, SONG, :running) != 0
     end
 
+    # The line armed to record (Line#arm), or nil
+    def armed
+      n = UI._seq_get_i(SONG, SONG, :armed)
+      n < 0 ? nil : line(n)
+    end
+
+    # Disarms whatever line is armed
+    def disarm
+      UI._seq_set_i(SONG, SONG, :armed, -1)
+      nil
+    end
+
+    # A line armed, and running: what comes in is being recorded
+    def recording?
+      UI._seq_get_i(SONG, SONG, :recording) != 0
+    end
+
     # { pattern:, tick:, bar:, beat: } in the playing pattern
     def position
       tick = UI._seq_get_i(SONG, SONG, :pattern_tick)
@@ -893,6 +910,27 @@ module UI
 
       def rec_mode=(m)
         put(:rec_mode, Sequencer.code(REC_MODES, m, "rec_mode"))
+      end
+
+      # --- Recording (realtime lines; one line armed at a time) ---
+
+      # Records the notes played into the sequencer while it runs, into the
+      # playing pattern. Arming another line disarms this one.
+      def arm
+        unless UI._seq_set_i(SONG, SONG, :armed, @index)
+          raise ArgumentError, "line #{@index}: only a realtime line records"
+        end
+        self
+      end
+
+      # Notes still held end where they are
+      def disarm
+        UI._seq_set_i(SONG, SONG, :armed, -1) if armed?
+        self
+      end
+
+      def armed?
+        UI._seq_get_i(SONG, SONG, :armed) == @index
       end
 
       # --- This pattern's length ---

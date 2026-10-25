@@ -50,6 +50,7 @@ private:
         BTN_PAT_NEXT,
         BTN_CHAIN,
         BTN_CHORD,
+        BTN_REC,                        // Arms the selected line to record / disarms
         BTN_WIN_PREV,
         BTN_WIN,
         BTN_WIN_NEXT,
@@ -140,6 +141,9 @@ private:
     int16_t m_playCol[SEQ_MAX_LINES];
     int8_t m_lastPlay, m_lastNext, m_lastEdit;
     bool m_lastRunning, m_lastChain;
+    int8_t m_lastArmed;
+    bool m_lastRecording;
+    uint8_t m_lastRecOpen;
     uint16_t m_lastUsed;
     Geom m_g;
     Rect m_btn[BTN_COUNT];
@@ -214,6 +218,7 @@ private:
                 uint16_t bg, uint16_t fg, bool outline = false);
 
     void pressButton(int id);
+    void toggleArm(int line);
     void longPressButton(int id);
     void pressSheet(int id);
     void openSheet(int line);

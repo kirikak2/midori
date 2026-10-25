@@ -90,6 +90,7 @@ static int64_t s_statusUs;
 static int64_t s_lastClock;
 static int64_t s_period;               // Measured F8 period (µs), 0 until known
 static volatile uint32_t s_clockGen;   // Bumped by each clock: stale subticks are dropped
+static int64_t s_lastTick;             // When the tick played last was due
 
 struct Lock {
     Lock() { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
@@ -177,7 +178,7 @@ static const midi_transport_t s_transport = {
 static void subtick_timer_cb(void* arg)
 {
     (void)arg;
-    Item item = { ITEM_SUBTICK, 0, 0, 0, 0, s_clockGen, 0 };
+    Item item = { ITEM_SUBTICK, 0, 0, 0, 0, s_clockGen, esp_timer_get_time() };
     xQueueSend(s_queue, &item, 0);   // Lost only if the queue is full; the next F8 catches up
 }
 
@@ -202,6 +203,7 @@ static void on_clock(int64_t time)
         s_period = s_period ? (s_period * 3 + dt) / 4 : dt;
     }
     s_lastClock = time;
+    s_lastTick = time;
 
     cancel_subticks();
     int pending;
@@ -251,8 +253,11 @@ static void handle_packet(const Item& it)
             return;
         case 0x8:
         case 0x9: {
+            // Recorded on the tick it came nearer to: past half a tick after
+            // the last one, the next
+            bool next = s_period > 0 && it.time - s_lastTick > s_period / (SEQ_TICKS_PER_CLOCK * 2);
             Lock lock;
-            seq_engine_input(s_eng, it.b1, it.b2, it.b3);
+            seq_engine_input_at(s_eng, it.b1, it.b2, it.b3, next);
             return;
         }
         default:
@@ -268,6 +273,7 @@ static void seq_task(void* arg)
         if (xQueueReceive(s_queue, &it, portMAX_DELAY) != pdTRUE) continue;
         if (it.kind == ITEM_SUBTICK) {
             if (it.gen != s_clockGen) continue;   // A clock came first and played it
+            s_lastTick = it.time;
             bool more;
             {
                 Lock lock;
@@ -366,6 +372,7 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
         e->switch_mode = (uint8_t)value;
         return true;
     }
+    if (name_is(name, "armed")) return seq_set_armed(e, value);
     if (name_is(name, "chain_on")) {
         seq_set_chain_on(e, value != 0);
         return e->chain_on == (value != 0);
@@ -424,6 +431,8 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
     if (name_is(name, "mode")) {
         if (value != SEQ_MODE_GRID && value != SEQ_MODE_REALTIME) return false;
         if (l->mode != value) seq_line_release(e, line);
+        // Only a realtime line records: a grid one is disarmed
+        if (value != SEQ_MODE_REALTIME && e->armed_line == line) seq_set_armed(e, -1);
         l->mode = (uint8_t)value;
     } else if (name_is(name, "channel")) {
         if (value < 0 || value > 15) return false;
@@ -443,6 +452,8 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
         l->quantize = (uint8_t)value;
     } else if (name_is(name, "rec_mode")) {
         if (value != 0 && value != 1) return false;
+        // Replace erases a fresh loop from here
+        if (l->rec_mode != value && e->armed_line == line) seq_rec_restart(e);
         l->rec_mode = (uint8_t)value;
     } else {
         return false;
@@ -468,6 +479,10 @@ int ui_seq_get_i(int pattern, int line, const char* name)
     if (name_is(name, "switch"))       return e->switch_mode;
     if (name_is(name, "chain_on"))     return e->chain_on ? 1 : 0;
     if (name_is(name, "chain_len"))    return e->chain_len;
+    if (name_is(name, "armed"))        return e->armed_line;
+    if (name_is(name, "recording"))    return seq_recording(e) ? 1 : 0;
+    if (name_is(name, "rec_open"))     return seq_rec_open(e);
+    if (name_is(name, "rec_dropped"))  return (int)e->rec_dropped;
     if (name_is(name, "song_tick"))    return (int)e->song_tick;
     if (name_is(name, "pattern_tick")) return (int)e->pattern_tick;
     if (name_is(name, "song_notes"))   return e->song_notes;
@@ -900,6 +915,9 @@ bool snapshot(View* v, int window, int view, bool notes)
     v->shown = (int8_t)p;
     v->lineCount = e->line_count;
     v->chainLen = e->chain_len;
+    v->armed = e->armed_line;
+    v->recording = seq_recording(e);
+    v->recOpen = (uint8_t)seq_rec_open(e);
     v->used = 0;
     for (int i = 0; i < SEQ_MAX_PATTERNS; i++) {
         if (e->patterns[i]) v->used |= (uint16_t)(1u << i);

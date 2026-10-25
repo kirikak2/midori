@@ -46,6 +46,9 @@ struct View {
     int8_t   shown;         // The pattern on screen (edit, else play)
     uint8_t  lineCount;
     uint8_t  chainLen;
+    int8_t   armed;         // Line armed to record, -1 none
+    bool     recording;     // Armed and running
+    uint8_t  recOpen;       // Notes held, being recorded
     uint8_t  chordN;
     uint16_t used;          // Patterns with anything in them
     uint8_t  chord[SEQ_MAX_CHORD];

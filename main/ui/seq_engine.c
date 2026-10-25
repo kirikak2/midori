@@ -183,6 +183,8 @@ static void fire(seq_engine_t *e, int line, uint8_t channel, uint8_t note, uint8
     slot->off_tick = e->song_tick + duration;
 }
 
+static void rec_drop_all(seq_engine_t *e);
+
 // --- Song --------------------------------------------------------------------
 
 static void line_defaults(seq_line_t *l, int channel)
@@ -267,6 +269,9 @@ void seq_engine_reset(seq_engine_t *e, int lines)
     e->chord_n = 1;
     e->held_count = 0;
     memset(e->held, 0, sizeof(e->held));
+    e->armed_line = -1;
+    e->rec_pass = 0;
+    rec_drop_all(e);
 }
 
 // --- Patterns ----------------------------------------------------------------
@@ -654,6 +659,12 @@ int seq_line_add(seq_engine_t *e)
 bool seq_line_remove(seq_engine_t *e, int line)
 {
     if (!line_ok(e, line) || e->line_count <= 1) return false;
+    if (e->armed_line == line) {
+        rec_drop_all(e);   // Its notes go with it
+        e->armed_line = -1;
+    } else if (e->armed_line > line) {
+        e->armed_line--;
+    }
     for (int i = 0; i < SEQ_MAX_SOUNDING; i++) {
         seq_sounding_t *s = &e->sounding[i];
         if (!s->used) continue;
@@ -855,7 +866,150 @@ void seq_set_chord(seq_engine_t *e, const uint8_t *notes, const uint8_t *velocit
     }
 }
 
+// --- Realtime recording --------------------------------------------------------
+
+bool seq_recording(const seq_engine_t *e)
+{
+    return e->running && e->armed_line >= 0 && e->armed_line < e->line_count &&
+           e->lines[e->armed_line].mode == SEQ_MODE_REALTIME;
+}
+
+int seq_rec_open(const seq_engine_t *e)
+{
+    int n = 0;
+    for (int i = 0; i < SEQ_REC_OPEN; i++) n += e->rec[i].used ? 1 : 0;
+    return n;
+}
+
+void seq_rec_restart(seq_engine_t *e)
+{
+    e->rec_pass = 0;
+}
+
+static bool rec_holds(const seq_engine_t *e, uint8_t note)
+{
+    for (int i = 0; i < SEQ_REC_OPEN; i++) {
+        if (e->rec[i].used && e->rec[i].note == note) return true;
+    }
+    return false;
+}
+
+// Where an input lands: its song tick, and its tick in the armed line of the
+// playing pattern. The tick played last, or (`next`, or nothing played yet)
+// the one to play next.
+static void rec_now(const seq_engine_t *e, bool next, uint32_t *song, uint32_t *lpos)
+{
+    uint32_t pt;
+    if (next || e->pattern_tick == 0 || e->song_tick == 0) {
+        *song = e->song_tick;
+        pt = e->pattern_tick >= seq_pattern_ticks(e, e->play_pattern) ? 0 : e->pattern_tick;
+    } else {
+        *song = e->song_tick - 1;
+        pt = e->pattern_tick - 1;
+    }
+    uint32_t lt = seq_line_ticks(e, e->play_pattern, e->armed_line);
+    *lpos = lt ? pt % lt : 0;
+}
+
+// Replace: the armed line's notes starting at `pos` go
+static void rec_erase_at(seq_engine_t *e, int pattern, uint32_t pos)
+{
+    seq_pattern_t *pat = e->patterns[pattern];
+    if (!pat) return;
+    seq_notes_t *a = &pat->lines[e->armed_line].rt;
+    int i = notes_lower_bound(a, (uint16_t)pos, 0);
+    bool any = false;
+    while (i < a->n && a->v[i].pos == pos) {
+        notes_erase(e, a, i);
+        any = true;
+    }
+    if (any) e->edits++;
+}
+
+// A held note let go (or cut where it is): into the line it was played on
+static void rec_commit(seq_engine_t *e, seq_rec_note_t *r, uint32_t song_end)
+{
+    r->used = false;
+    int line = e->armed_line;
+    if (line < 0 || line >= e->line_count) return;
+    uint32_t lt = seq_line_ticks(e, r->pattern, line);
+    if (lt == 0) return;
+    uint32_t len = song_end - r->start;
+    if ((int32_t)len < 1) len = 1;
+    if (len > lt) len = lt;   // Held past a whole loop: one loop long
+    uint32_t pos = r->pos;
+    uint8_t q = e->lines[line].quantize;
+    if (q > 0 && q <= SEQ_RATE_COUNT) {
+        uint32_t qt = (uint32_t)seq_rate_ticks(q - 1);
+        pos = (pos + qt / 2) / qt * qt % lt;   // The nearest; the length stays
+    }
+    // Replace: a note moved ahead of the pass clears its way there now, so the
+    // pass does not take it out when it gets there
+    if (e->rec_pass == 1 && r->pattern == e->play_pattern) {
+        uint32_t d = (pos + lt - e->rec_next) % lt;
+        if (d < e->rec_left && d >= e->rec_ahead) {
+            for (uint32_t k = e->rec_ahead; k <= d; k++) rec_erase_at(e, r->pattern, (e->rec_next + k) % lt);
+            e->rec_ahead = (uint16_t)(d + 1);
+        }
+    }
+    if (!seq_rt_add(e, r->pattern, line, (int)pos, (int)len, r->note, r->velocity)) e->rec_dropped++;
+}
+
+static void rec_close_all(seq_engine_t *e, uint32_t song_end)
+{
+    for (int i = 0; i < SEQ_REC_OPEN; i++) {
+        if (e->rec[i].used) rec_commit(e, &e->rec[i], song_end);
+    }
+}
+
+// Notes held as nothing (their line or pattern is going away)
+static void rec_drop_all(seq_engine_t *e)
+{
+    for (int i = 0; i < SEQ_REC_OPEN; i++) e->rec[i].used = false;
+}
+
+bool seq_set_armed(seq_engine_t *e, int line)
+{
+    if (line >= 0 && (!line_ok(e, line) || e->lines[line].mode != SEQ_MODE_REALTIME)) return false;
+    if (line < 0) line = -1;
+    if (line == e->armed_line) return true;
+    rec_close_all(e, e->song_tick);
+    e->armed_line = (int8_t)line;
+    e->rec_pass = 0;
+    return true;
+}
+
+static void rec_input(seq_engine_t *e, bool on, uint8_t note, uint8_t velocity, bool next)
+{
+    uint32_t song, lpos;
+    rec_now(e, next, &song, &lpos);
+    seq_rec_note_t *r = NULL;
+    for (int i = 0; i < SEQ_REC_OPEN; i++) {
+        if (e->rec[i].used && e->rec[i].note == note) r = &e->rec[i];
+    }
+    if (r) rec_commit(e, r, song);   // Its note off, or a second note on without one
+    if (!on) return;
+    for (int i = 0; i < SEQ_REC_OPEN; i++) {
+        if (!e->rec[i].used) {
+            r = &e->rec[i];
+            r->used = true;
+            r->pattern = e->play_pattern;
+            r->note = note;
+            r->velocity = clamp_velocity(velocity);
+            r->pos = (uint16_t)lpos;
+            r->start = song;
+            return;
+        }
+    }
+    e->rec_dropped++;   // More held at once than it keeps
+}
+
 void seq_engine_input(seq_engine_t *e, uint8_t status, uint8_t note, uint8_t velocity)
+{
+    seq_engine_input_at(e, status, note, velocity, false);
+}
+
+void seq_engine_input_at(seq_engine_t *e, uint8_t status, uint8_t note, uint8_t velocity, bool next)
 {
     if (note > 127) return;
     uint8_t type = status & 0xF0;
@@ -869,11 +1023,13 @@ void seq_engine_input(seq_engine_t *e, uint8_t status, uint8_t note, uint8_t vel
             e->held_count++;
         }
         chord_add(e, note, velocity);
+        if (seq_recording(e)) rec_input(e, true, note, velocity, next);
     } else if (type == 0x80 || type == 0x90) {
         if (held) {
             e->held[note >> 5] &= ~bit;
             e->held_count--;
         }
+        if (seq_recording(e)) rec_input(e, false, note, 0, next);
     }
 }
 
@@ -919,14 +1075,60 @@ static void play_line(seq_engine_t *e, const seq_pattern_t *pat, int line)
         }
     } else {
         const seq_notes_t *a = &pl->rt;
+        // A note being recorded is not played over the finger holding it
+        bool recording = line == e->armed_line && seq_recording(e);
         for (int i = notes_lower_bound(a, (uint16_t)lpos, 0); i < a->n && a->v[i].pos == lpos; i++) {
+            if (recording && rec_holds(e, a->v[i].note)) continue;
             fire(e, line, ln->channel, a->v[i].note, a->v[i].velocity, a->v[i].len);
         }
     }
 }
 
+// The pattern changed under notes being recorded: they end where they were
+// played. One that began on this very tick (played a hair early, onto the
+// new pattern's downbeat) moves to the new pattern's start instead.
+static void rec_pattern_changed(seq_engine_t *e)
+{
+    for (int i = 0; i < SEQ_REC_OPEN; i++) {
+        seq_rec_note_t *r = &e->rec[i];
+        if (!r->used || r->pattern == e->play_pattern) continue;
+        if (r->start == e->song_tick) {
+            r->pattern = e->play_pattern;
+            r->pos = 0;
+        } else {
+            rec_commit(e, r, e->song_tick);
+        }
+    }
+    e->rec_pass = 0;
+}
+
+// Replace: the armed line's notes go as the playing position passes them,
+// for one loop from when recording began
+static void rec_replace_tick(seq_engine_t *e)
+{
+    int line = e->armed_line;
+    if (e->lines[line].rec_mode != 1) return;
+    uint32_t lt = seq_line_ticks(e, e->play_pattern, line);
+    if (lt == 0) return;
+    if (e->rec_pass == 0) {
+        e->rec_pass = 1;
+        e->rec_left = (uint16_t)lt;
+        e->rec_ahead = 0;
+    }
+    if (e->rec_pass != 1) return;
+    uint32_t lpos = e->pattern_tick % lt;
+    if (e->rec_ahead > 0) {
+        e->rec_ahead--;   // Cleared already by a note quantized ahead
+    } else {
+        rec_erase_at(e, e->play_pattern, lpos);
+    }
+    e->rec_next = (uint16_t)((lpos + 1) % lt);
+    if (--e->rec_left == 0) e->rec_pass = 2;
+}
+
 static void process_tick(seq_engine_t *e)
 {
+    int before = e->play_pattern;
     // Pattern end (or a shorter pattern after an edit): next pattern / loop
     if (e->pattern_tick >= seq_pattern_ticks(e, e->play_pattern)) {
         end_of_pattern(e);
@@ -936,6 +1138,8 @@ static void process_tick(seq_engine_t *e)
         e->next_pattern = -1;
         set_play_pattern(e, next);
     }
+    if (e->play_pattern != before) rec_pattern_changed(e);
+    if (seq_recording(e)) rec_replace_tick(e);
 
     // Notes off before notes on, so a repeated note is retriggered
     for (int i = 0; i < SEQ_MAX_SOUNDING; i++) {
@@ -961,6 +1165,8 @@ static void process_tick(seq_engine_t *e)
 void seq_engine_start(seq_engine_t *e)
 {
     all_notes_off(e);
+    rec_close_all(e, e->song_tick);   // A Start while running: the take so far stays
+    e->rec_pass = 0;
     e->running = true;
     e->song_tick = 0;
     e->pending = 0;
@@ -980,10 +1186,13 @@ void seq_engine_continue(seq_engine_t *e)
     e->running = true;
     e->pending = 0;
     e->programs_due = true;
+    e->rec_pass = 0;
 }
 
 void seq_engine_stop(seq_engine_t *e)
 {
+    rec_close_all(e, e->song_tick);
+    e->rec_pass = 0;
     e->running = false;
     e->pending = 0;
     all_notes_off(e);
@@ -1587,6 +1796,10 @@ const char *seq_load_error_name(int err)
 void seq_engine_adopt(seq_engine_t *e, seq_engine_t *song)
 {
     all_notes_off(e);
+    // Another song's lines: nothing stays armed
+    rec_drop_all(e);
+    e->armed_line = -1;
+    e->rec_pass = 0;
     for (int p = 0; p < SEQ_MAX_PATTERNS; p++) {
         pattern_free(e, p);
         e->patterns[p] = song->patterns[p];
