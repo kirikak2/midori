@@ -1265,6 +1265,111 @@ mrb_ui_seq_set_chain(mrb_state *mrb, mrb_value self)
     return mrb_bool_value(picoruby_ui_seq_set_chain(pats, reps, n));
 }
 
+/* UI._seq_dump_begin(dirty_flag) -> true / false (out of memory) */
+static mrb_value
+mrb_ui_seq_dump_begin(mrb_state *mrb, mrb_value self)
+{
+    mrb_value dirty;
+    mrb_get_args(mrb, "o", &dirty);
+    return mrb_bool_value(picoruby_ui_seq_dump_begin(mrb_test(dirty)));
+}
+
+/* UI._seq_dump_next -> the next piece of the file (String), or nil when done */
+static mrb_value
+mrb_ui_seq_dump_next(mrb_state *mrb, mrb_value self)
+{
+    uint8_t *buf = (uint8_t *)mrb_malloc(mrb, PICORUBY_UI_SEQ_DUMP_MAX);
+    int n = picoruby_ui_seq_dump_next(buf, PICORUBY_UI_SEQ_DUMP_MAX);
+    mrb_value piece = n > 0 ? mrb_str_new(mrb, (const char *)buf, n) : mrb_nil_value();
+    mrb_free(mrb, buf);
+    return piece;
+}
+
+/* UI._seq_dump_end(saved, autosave) */
+static mrb_value
+mrb_ui_seq_dump_end(mrb_state *mrb, mrb_value self)
+{
+    mrb_value saved, autosave;
+    mrb_get_args(mrb, "oo", &saved, &autosave);
+    picoruby_ui_seq_dump_end(mrb_test(saved), mrb_test(autosave));
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_ui_seq_load_begin(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(picoruby_ui_seq_load_begin());
+}
+
+/* UI._seq_load_feed(string) -> 0, or a negative error */
+static mrb_value
+mrb_ui_seq_load_feed(mrb_state *mrb, mrb_value self)
+{
+    mrb_value data;
+    mrb_get_args(mrb, "o", &data);
+    if (!mrb_string_p(data)) return mrb_fixnum_value(-3);
+    return mrb_fixnum_value(picoruby_ui_seq_load_feed((const uint8_t *)RSTRING_PTR(data),
+                                                      (int)RSTRING_LEN(data)));
+}
+
+/* UI._seq_load_commit(autosave) -> 0, or a negative error */
+static mrb_value
+mrb_ui_seq_load_commit(mrb_state *mrb, mrb_value self)
+{
+    mrb_value autosave;
+    mrb_get_args(mrb, "o", &autosave);
+    return mrb_fixnum_value(picoruby_ui_seq_load_commit(mrb_test(autosave)));
+}
+
+static mrb_value
+mrb_ui_seq_load_abort(mrb_state *mrb, mrb_value self)
+{
+    picoruby_ui_seq_load_abort();
+    return mrb_nil_value();
+}
+
+/* UI._seq_load_error(code) -> String */
+static mrb_value
+mrb_ui_seq_load_error(mrb_state *mrb, mrb_value self)
+{
+    mrb_value code;
+    mrb_get_args(mrb, "o", &code);
+    return mrb_str_new_cstr(mrb, picoruby_ui_seq_load_error_name(val_to_i(code)));
+}
+
+/* UI._seq_take_request -> [op, name], or nil */
+static mrb_value
+mrb_ui_seq_take_request(mrb_state *mrb, mrb_value self)
+{
+    char name[32];
+    int op = picoruby_ui_seq_take_request(name, (int)sizeof(name));
+    if (op == 0) return mrb_nil_value();
+    mrb_value pair = mrb_ary_new_capa(mrb, 2);
+    mrb_ary_push(mrb, pair, mrb_fixnum_value(op));
+    mrb_ary_push(mrb, pair, mrb_str_new_cstr(mrb, name));
+    return pair;
+}
+
+/* UI._seq_set_files(newline-separated names) */
+static mrb_value
+mrb_ui_seq_set_files(mrb_state *mrb, mrb_value self)
+{
+    mrb_value names;
+    mrb_get_args(mrb, "o", &names);
+    if (mrb_string_p(names)) picoruby_ui_seq_set_files(RSTRING_CSTR(mrb, names));
+    return mrb_nil_value();
+}
+
+/* UI._seq_status(message) */
+static mrb_value
+mrb_ui_seq_status(mrb_state *mrb, mrb_value self)
+{
+    mrb_value message;
+    mrb_get_args(mrb, "o", &message);
+    if (mrb_string_p(message)) picoruby_ui_seq_set_status(RSTRING_CSTR(mrb, message));
+    return mrb_nil_value();
+}
+
 /* UI._seq_receive(cin, b1, b2, b3): one USB-MIDI packet sent to the sequencer */
 static mrb_value
 mrb_ui_seq_receive(mrb_state *mrb, mrb_value self)
@@ -1611,6 +1716,17 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_seq_chain,          mrb_ui_seq_chain,          MRB_ARGS_NONE());
     DEF(_seq_set_chain,      mrb_ui_seq_set_chain,      MRB_ARGS_REQ(2));
     DEF(_seq_receive,        mrb_ui_seq_receive,        MRB_ARGS_REQ(4));
+    DEF(_seq_dump_begin,     mrb_ui_seq_dump_begin,     MRB_ARGS_REQ(1));
+    DEF(_seq_dump_next,      mrb_ui_seq_dump_next,      MRB_ARGS_NONE());
+    DEF(_seq_dump_end,       mrb_ui_seq_dump_end,       MRB_ARGS_REQ(2));
+    DEF(_seq_load_begin,     mrb_ui_seq_load_begin,     MRB_ARGS_NONE());
+    DEF(_seq_load_feed,      mrb_ui_seq_load_feed,      MRB_ARGS_REQ(1));
+    DEF(_seq_load_commit,    mrb_ui_seq_load_commit,    MRB_ARGS_REQ(1));
+    DEF(_seq_load_abort,     mrb_ui_seq_load_abort,     MRB_ARGS_NONE());
+    DEF(_seq_load_error,     mrb_ui_seq_load_error,     MRB_ARGS_REQ(1));
+    DEF(_seq_take_request,   mrb_ui_seq_take_request,   MRB_ARGS_NONE());
+    DEF(_seq_set_files,      mrb_ui_seq_set_files,      MRB_ARGS_REQ(1));
+    DEF(_seq_status,         mrb_ui_seq_status,         MRB_ARGS_REQ(1));
 
     /* Tempo */
     DEF(_tempo_bit,              mrb_ui_tempo_bit,              MRB_ARGS_NONE());

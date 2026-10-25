@@ -720,6 +720,61 @@ void picoruby_ui_seq_receive(int cin, int b1, int b2, int b3)
     ui_seq_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
 }
 
+bool picoruby_ui_seq_dump_begin(bool dirty_flag)
+{
+    return ui_seq_dump_begin(dirty_flag);
+}
+
+int picoruby_ui_seq_dump_next(uint8_t *buf, int cap)
+{
+    return ui_seq_dump_next(buf, cap);
+}
+
+void picoruby_ui_seq_dump_end(bool saved, bool autosave)
+{
+    ui_seq_dump_end(saved, autosave);
+}
+
+bool picoruby_ui_seq_load_begin(void)
+{
+    return ui_seq_load_begin();
+}
+
+int picoruby_ui_seq_load_feed(const uint8_t *data, int len)
+{
+    return ui_seq_load_feed(data, len);
+}
+
+int picoruby_ui_seq_load_commit(bool autosave)
+{
+    return ui_seq_load_commit(autosave);
+}
+
+void picoruby_ui_seq_load_abort(void)
+{
+    ui_seq_load_abort();
+}
+
+const char *picoruby_ui_seq_load_error_name(int err)
+{
+    return ui_seq_load_error_name(err);
+}
+
+int picoruby_ui_seq_take_request(char *name, int size)
+{
+    return ui_seq_take_request(name, size);
+}
+
+void picoruby_ui_seq_set_files(const char *names)
+{
+    ui_seq_set_files(names);
+}
+
+void picoruby_ui_seq_set_status(const char *message)
+{
+    ui_seq_set_status(message);
+}
+
 /* --- Tempo --- */
 
 int picoruby_ui_tempo_bit(void)

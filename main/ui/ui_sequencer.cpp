@@ -58,6 +58,32 @@ static uint8_t s_bit;                  // Transport registry bit, 0 if none
 static volatile uint8_t s_outMask;     // Destinations of its own, besides the routes
 static volatile uint32_t s_dropped;    // Packets the queue had no room for
 
+// Saving (docs/SEQUENCER.md "保存と自動保存"). Edits are counted by the
+// engine; these remember the count as of the last save by name / autosave.
+static constexpr int64_t AUTOSAVE_QUIET_US = 5000000;    // After the last edit
+static constexpr int64_t AUTOSAVE_MAX_US = 60000000;     // Even while edits go on
+static constexpr int64_t STATUS_US = 3000000;
+static constexpr int MAX_FILES = 64;
+static uint32_t s_savedEdits;
+static uint32_t s_autosavedEdits;
+static uint32_t s_lastEditsSeen;
+static int64_t s_lastEditUs;
+static int64_t s_staleSinceUs;          // When the autosave fell behind
+static volatile bool s_stopPending;     // A Stop arrived since the last autosave
+static bool s_temporary;                // A script's own song: never autosaved
+static bool s_restored;                 // The autosave was loaded since power-up
+static seq_engine_t* s_dumpSong;        // What is being written
+static seq_dump_t s_dump;
+static uint32_t s_dumpEdits;
+static seq_loader_t* s_loader;
+static int s_reqOp;
+static char s_reqName[SEQ_SONG_NAME_LEN + 1];
+static char (*s_files)[SEQ_SONG_NAME_LEN + 1];   // Heap, MAX_FILES
+static int s_fileCount;
+static uint32_t s_filesSerial;
+static char s_status[32];
+static int64_t s_statusUs;
+
 // Clock timing (sequencer task only, but for s_clockGen read by the timer)
 static int64_t s_lastClock;
 static int64_t s_period;               // Measured F8 period (µs), 0 until known
@@ -197,6 +223,7 @@ static void handle_packet(const Item& it)
                     cancel_subticks();
                     Lock lock;
                     seq_engine_stop(s_eng);
+                    s_stopPending = true;
                     return;
                 }
                 default:
@@ -262,6 +289,9 @@ void ui_seq_init(void)
         return;
     }
 
+    // Nothing to save until something changes (the autosave is read later, from Ruby)
+    s_savedEdits = s_autosavedEdits = s_lastEditsSeen = s_eng->edits;
+
     s_bit = MIDI_transport_register(&s_transport);
     if (s_bit == 0) {
         ESP_LOGW(TAG, "MIDI transport registry full: the sequencer is no transport");
@@ -325,6 +355,32 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
     if (name_is(name, "chain_on")) {
         seq_set_chain_on(e, value != 0);
         return e->chain_on == (value != 0);
+    }
+    if (name_is(name, "temporary")) {
+        s_temporary = value != 0;
+        return true;
+    }
+    if (name_is(name, "restored")) {
+        s_restored = value != 0;
+        return true;
+    }
+    if (name_is(name, "mark_clean")) {
+        // Not dirty, but the autosave still to be written (a New song)
+        s_savedEdits = e->edits;
+        return true;
+    }
+    if (name_is(name, "bpm_x100")) {
+        if (value < 0 || value > 30000) return false;
+        if (e->bpm_x100 != value) {
+            e->bpm_x100 = (uint16_t)value;
+            e->edits++;
+        }
+        return true;
+    }
+    if (name_is(name, "mark_saved")) {
+        // As if just saved and autosaved (an empty New song)
+        s_savedEdits = s_autosavedEdits = s_lastEditsSeen = e->edits;
+        return true;
     }
 
     // Pattern
@@ -390,6 +446,21 @@ int ui_seq_get_i(int pattern, int line, const char* name)
     if (name_is(name, "song_notes"))   return e->song_notes;
     if (name_is(name, "edits"))        return (int)e->edits;
     if (name_is(name, "dropped"))      return (int)s_dropped;
+    if (name_is(name, "dirty"))        return e->edits != s_savedEdits ? 1 : 0;
+    if (name_is(name, "bpm_x100"))     return e->bpm_x100;
+    if (name_is(name, "temporary"))    return s_temporary ? 1 : 0;
+    if (name_is(name, "restored"))     return s_restored ? 1 : 0;
+    if (name_is(name, "autosave_due")) {
+        int64_t now = esp_timer_get_time();
+        if (e->edits != s_lastEditsSeen) {
+            if (s_lastEditsSeen == s_autosavedEdits) s_staleSinceUs = now;
+            s_lastEditsSeen = e->edits;
+            s_lastEditUs = now;
+        }
+        if (s_temporary || e->edits == s_autosavedEdits) return 0;
+        return (s_stopPending || now - s_lastEditUs >= AUTOSAVE_QUIET_US ||
+                now - s_staleSinceUs >= AUTOSAVE_MAX_US) ? 1 : 0;
+    }
 
     int p = seq_resolve_pattern(e, pattern);
     if (name_is(name, "length")) return (p >= 0 && e->patterns[p]) ? e->patterns[p]->length : 0;
@@ -577,6 +648,141 @@ void ui_seq_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
     enqueue(cin, b1, b2, b3);
 }
 
+// --- Files ---
+
+bool ui_seq_dump_begin(bool dirty_flag)
+{
+    if (!s_eng) return false;
+    if (s_dumpSong) seq_engine_free(s_dumpSong);   // One left by a write that failed
+    Lock lock;
+    s_dumpSong = seq_song_clone(s_eng);
+    if (!s_dumpSong) return false;
+    s_dumpEdits = s_eng->edits;
+    seq_dump_begin(&s_dump, dirty_flag ? SEQ_FILE_DIRTY : 0);
+    return true;
+}
+
+int ui_seq_dump_next(uint8_t* buf, int cap)
+{
+    if (!s_dumpSong) return 0;
+    return seq_dump_next(s_dumpSong, &s_dump, buf, cap);   // The copy: no lock
+}
+
+void ui_seq_dump_end(bool saved, bool autosave)
+{
+    if (s_dumpSong) {
+        seq_engine_free(s_dumpSong);
+        s_dumpSong = nullptr;
+    }
+    if (!s_eng) return;
+    Lock lock;
+    if (saved) {
+        s_savedEdits = s_dumpEdits;
+        s_temporary = false;
+    }
+    if (autosave) {
+        s_autosavedEdits = s_dumpEdits;
+        s_staleSinceUs = esp_timer_get_time();
+        s_stopPending = false;
+    }
+}
+
+bool ui_seq_load_begin(void)
+{
+    if (s_loader) seq_load_free(s_loader);
+    s_loader = seq_load_begin();
+    return s_loader != nullptr;
+}
+
+int ui_seq_load_feed(const uint8_t* data, int len)
+{
+    if (!s_loader) return SEQ_LOAD_NO_MEMORY;
+    return seq_load_feed(s_loader, data, len);
+}
+
+int ui_seq_load_commit(bool autosave)
+{
+    if (!s_loader || !s_eng) return SEQ_LOAD_NO_MEMORY;
+    seq_engine_t* song = nullptr;
+    uint8_t flags = 0;
+    int err = seq_load_finish(s_loader, &song, &flags);
+    seq_load_free(s_loader);
+    s_loader = nullptr;
+    if (err != SEQ_LOAD_OK) return err;
+
+    cancel_subticks();
+    Lock lock;
+    seq_engine_adopt(s_eng, song);
+    uint32_t edits = s_eng->edits;
+    // A file read by name is saved as it is; the autosave keeps whether it
+    // had been saved by name (and is the autosave as it is)
+    s_savedEdits = (autosave && (flags & SEQ_FILE_DIRTY)) ? edits - 1 : edits;
+    if (autosave) s_autosavedEdits = edits;
+    s_lastEditsSeen = edits;
+    s_lastEditUs = s_staleSinceUs = esp_timer_get_time();
+    s_temporary = false;
+    s_restored = true;
+    return SEQ_LOAD_OK;
+}
+
+void ui_seq_load_abort(void)
+{
+    if (s_loader) seq_load_free(s_loader);
+    s_loader = nullptr;
+}
+
+const char* ui_seq_load_error_name(int err)
+{
+    return seq_load_error_name(err);
+}
+
+int ui_seq_take_request(char* name, int size)
+{
+    if (!s_eng) return UI_SEQ_REQ_NONE;
+    Lock lock;
+    int op = s_reqOp;
+    s_reqOp = UI_SEQ_REQ_NONE;
+    if (name && size > 0) {
+        strncpy(name, s_reqName, (size_t)size - 1);
+        name[size - 1] = '\0';
+    }
+    return op;
+}
+
+void ui_seq_set_files(const char* names)
+{
+    if (!s_eng || !names) return;
+    Lock lock;
+    if (!s_files) {
+        s_files = (char (*)[SEQ_SONG_NAME_LEN + 1])calloc(MAX_FILES, SEQ_SONG_NAME_LEN + 1);
+        if (!s_files) return;
+    }
+    s_fileCount = 0;
+    const char* p = names;
+    while (*p && s_fileCount < MAX_FILES) {
+        const char* end = strchr(p, '\n');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        if (len > 0) {
+            size_t n = len < SEQ_SONG_NAME_LEN ? len : SEQ_SONG_NAME_LEN;
+            memcpy(s_files[s_fileCount], p, n);
+            s_files[s_fileCount][n] = '\0';
+            s_fileCount++;
+        }
+        if (!end) break;
+        p = end + 1;
+    }
+    s_filesSerial++;
+}
+
+void ui_seq_set_status(const char* message)
+{
+    if (!s_eng || !message) return;
+    Lock lock;
+    strncpy(s_status, message, sizeof(s_status) - 1);
+    s_status[sizeof(s_status) - 1] = '\0';
+    s_statusUs = esp_timer_get_time();
+}
+
 }  // extern "C"
 
 // --- For the screen ----------------------------------------------------------
@@ -679,6 +885,52 @@ static void chord_velocities(const seq_engine_t* e, int line, uint8_t* vels)
 {
     uint8_t fixed = e->lines[line].velocity;
     for (int i = 0; i < e->chord_n; i++) vels[i] = fixed ? fixed : e->chord_vel[i];
+}
+
+void request(int op, const char* name)
+{
+    if (!s_eng) return;
+    Lock lock;
+    s_reqOp = op;
+    strncpy(s_reqName, name ? name : "", SEQ_SONG_NAME_LEN);
+    s_reqName[SEQ_SONG_NAME_LEN] = '\0';
+}
+
+uint32_t files_serial()
+{
+    return s_filesSerial;
+}
+
+int file_count()
+{
+    return s_fileCount;
+}
+
+bool file_name(int index, char* buf, int size)
+{
+    if (!s_eng || !buf || size <= 0) return false;
+    Lock lock;
+    if (index < 0 || index >= s_fileCount || !s_files) return false;
+    strncpy(buf, s_files[index], (size_t)size - 1);
+    buf[size - 1] = '\0';
+    return true;
+}
+
+bool status(char* buf, int size)
+{
+    if (!s_eng || !buf || size <= 0) return false;
+    Lock lock;
+    if (!s_status[0] || esp_timer_get_time() - s_statusUs > STATUS_US) return false;
+    strncpy(buf, s_status, (size_t)size - 1);
+    buf[size - 1] = '\0';
+    return true;
+}
+
+bool dirty()
+{
+    if (!s_eng) return false;
+    Lock lock;
+    return s_eng->edits != s_savedEdits;
 }
 
 uint8_t ensure_clock()

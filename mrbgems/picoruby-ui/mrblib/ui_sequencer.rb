@@ -82,6 +82,9 @@ module UI
         raise ArgumentError, "lines must be 1..#{MAX_LINES}"
       end
       UI._seq_reset(lines)
+      # The script's own song is never autosaved, and gives way to the user's
+      # (the autosave) when the script ends -- unless autosave: true
+      UI._seq_set_i(SONG, SONG, :temporary, autosave ? 0 : 1)
       self.device = device
       self.view = view if view
       @clock = clock == :tempo ? Sequencer.default_clock : clock
@@ -356,6 +359,348 @@ module UI
     # Bring the Sequencer screen to the front
     def show
       UI.show(:sequencer)
+    end
+
+    # --- Saving ---
+
+    # Saves the song as `name` (in UI::Sequencer.dir, or a full path); with
+    # no name, under its own name, or a new SONGnnn. Returns the name.
+    def save(name = nil)
+      n = name || self.name
+      n = Sequencer.next_auto_name if n.nil? || n.empty?
+      Sequencer.save_as(n)
+    end
+
+    # Loads a song saved by name (or a full path). tempo: true also sets the
+    # Tempo to the BPM it was saved at.
+    def load(name, tempo: false)
+      Sequencer.load_from(name, tempo: tempo)
+      self
+    end
+
+    # Changed since it was last saved by name
+    def dirty?
+      UI._seq_get_i(SONG, SONG, :dirty) != 0
+    end
+
+    # The song as plain Ruby data, to keep in a script and give back to restore
+    def to_h
+      h = { name: name, lines: [], patterns: {}, chain: chain, chain_on: chain_on? }
+      lines.times do |i|
+        l = line(i)
+        h[:lines] << { name: l.name, mode: l.mode, channel: l.channel, mute: l.mute?,
+                       velocity: l.velocity, gate: l.gate, quantize: l.quantize,
+                       rec_mode: l.rec_mode }
+      end
+      MAX_PATTERNS.times do |p|
+        pat = pattern(p)
+        next unless pat.used?
+        ph = { length: pat.length, lines: [] }
+        lines.times do |i|
+          pl = pat.line(i)
+          ph[:lines] << { steps: pl.steps, rate: pl.rate, bars: pl.bars,
+                          grid: UI._seq_notes(p, i, 0), rt: UI._seq_notes(p, i, 1) }
+        end
+        h[:patterns][p] = ph
+      end
+      h
+    end
+
+    # Replaces the song with one from to_h
+    def restore(h)
+      line_hashes = h[:lines] || []
+      raise ArgumentError, "restore: no lines" if line_hashes.empty?
+      UI._seq_reset(line_hashes.size)
+      self.name = h[:name].to_s
+      line_hashes.each_with_index do |lh, i|
+        l = line(i)
+        l.name = lh[:name].to_s
+        l.mode = lh[:mode] if lh[:mode]
+        l.channel = lh[:channel] if lh[:channel]
+        l.mute = lh[:mute] ? true : false
+        l.velocity = lh[:velocity] if lh[:velocity]
+        l.gate = lh[:gate] if lh[:gate]
+        l.quantize = lh[:quantize]
+        l.rec_mode = lh[:rec_mode] if lh[:rec_mode]
+      end
+      (h[:patterns] || {}).each do |p, ph|
+        pat = pattern(p)
+        pat.length = ph[:length] || :auto
+        (ph[:lines] || []).each_with_index do |plh, i|
+          next if i >= line_hashes.size
+          pl = pat.line(i)
+          pl.steps = plh[:steps] if plh[:steps]
+          pl.rate = plh[:rate] if plh[:rate]
+          pl.bars = plh[:bars] if plh[:bars]
+          (plh[:grid] || []).each { |pos, len, n, v| UI._seq_place(p, i, pos, len, [n], [v]) }
+          (plh[:rt] || []).each { |pos, len, n, v| UI._seq_add_event(p, i, pos, len, n, v) }
+        end
+      end
+      self.chain = h[:chain] || []
+      self.chain_on = h[:chain_on] ? true : false if (h[:chain] || []).size > 0
+      self
+    end
+
+    # Requests from the File sheet (ui_seq_request_t)
+    REQ_SAVE     = 1
+    REQ_SAVE_NEW = 2
+    REQ_LOAD     = 3
+    REQ_NEW      = 4
+    REQ_DELETE   = 5
+    REQ_LIST     = 6
+
+    EXT = ".mseq"
+    AUTOSAVE = "_autosave"
+    NAME_MAX = 16
+    AUTOSAVE_RETRY_MS = 10000
+
+    class << self
+      # Where songs go: the SD card when there is one, else the flash
+      def dir
+        $sd_available ? "/sd/patterns" : "/patterns"
+      end
+
+      # The saved songs, by name (the autosave and other "_" files left out)
+      def songs
+        names = []
+        begin
+          Dir.open(dir) do |d|
+            while entry = d.read
+              next if entry.start_with?("_") || !entry.end_with?(EXT)
+              names << entry[0, entry.size - EXT.size]
+            end
+          end
+        rescue => e
+          return []   # No directory yet
+        end
+        names.sort
+      end
+
+      def next_auto_name
+        taken = songs
+        n = 1
+        n += 1 while taken.include?(format_auto(n))
+        format_auto(n)
+      end
+
+      def format_auto(n)
+        s = n.to_s
+        s = "0" + s while s.size < 3
+        "SONG" + s
+      end
+
+      # A name given by hand: letters, digits, - and _, not starting with _
+      def check_name(name)
+        ok = name.size >= 1 && name.size <= NAME_MAX && !name.start_with?("_")
+        name.each_char do |c|
+          ok = false unless (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") ||
+                            (c >= "0" && c <= "9") || c == "-" || c == "_"
+        end
+        raise ArgumentError, "bad song name: #{name.inspect}" unless ok
+        name
+      end
+
+      def path_for(name)
+        return name if name.include?("/")
+        "#{dir}/#{name}#{EXT}"
+      end
+
+      def basename(name)
+        base = name.include?("/") ? name.split("/").last : name
+        base.end_with?(EXT) ? base[0, base.size - EXT.size] : base
+      end
+
+      def ensure_dir
+        Dir.mkdir(dir) unless Dir.exist?(dir)
+      rescue => e
+        nil
+      end
+
+      def save_as(name)
+        base = basename(name)
+        check_name(base) unless name.include?("/")
+        ensure_dir
+        UI._seq_set_name(SONG, base)
+        _store_tempo
+        unless write_file(path_for(name), false, true, false)
+          raise IOError, "cannot save #{base}"
+        end
+        base
+      end
+
+      def load_from(name, tempo: false)
+        base = basename(name)
+        err = read_file(path_for(name), false)
+        raise IOError, "#{base}: not found" if err == :missing
+        raise IOError, "#{base}: #{UI._seq_load_error(err)}" if err != 0
+        if tempo
+          bpm = UI._seq_get_i(SONG, SONG, :bpm_x100)
+          UI::Tempo.bpm = bpm / 100.0 if bpm > 0
+        end
+        base
+      end
+
+      def delete(name)
+        path = path_for(name)
+        raise IOError, "#{basename(name)}: not found" unless File.exist?(path)
+        File.unlink(path)
+        File.unlink(path + ".bak") if File.exist?(path + ".bak")
+        true
+      end
+
+      # Writes the song to path: into path.tmp first, then swapped in (FAT
+      # cannot rename over a file, so the old one goes to path.bak meanwhile;
+      # a reader falls back to it). Returns whether it worked.
+      def write_file(path, dirty_flag, saved, autosave)
+        return false unless UI._seq_dump_begin(dirty_flag)
+        tmp = path + ".tmp"
+        bak = path + ".bak"
+        ok = false
+        begin
+          File.open(tmp, "w") do |f|
+            while piece = UI._seq_dump_next
+              f.write(piece)
+            end
+          end
+          File.unlink(bak) if File.exist?(bak)
+          File.rename(path, bak) if File.exist?(path)
+          File.rename(tmp, path)
+          File.unlink(bak) if File.exist?(bak)
+          ok = true
+        rescue => e
+          ok = false
+        ensure
+          UI._seq_dump_end(ok && saved, ok && autosave)
+        end
+        ok
+      end
+
+      # Reads path (or what was left in path.bak) into the song. Returns 0,
+      # :missing, or a negative error.
+      def read_file(path, autosave)
+        target = File.exist?(path) ? path : (File.exist?(path + ".bak") ? path + ".bak" : nil)
+        return :missing unless target
+        return -8 unless UI._seq_load_begin
+        err = 0
+        File.open(target, "r") do |f|
+          while err == 0 && (buf = f.read(1024))
+            err = UI._seq_load_feed(buf)
+          end
+        end
+        if err != 0
+          UI._seq_load_abort
+          return err
+        end
+        UI._seq_load_commit(autosave)
+      rescue => e
+        UI._seq_load_abort
+        -7
+      end
+
+      def _store_tempo
+        bpm = UI::Tempo.bpm
+        UI._seq_set_i(SONG, SONG, :bpm_x100, (bpm * 100).to_i) if bpm && bpm > 0
+      rescue => e
+        nil
+      end
+
+      def autosave_now
+        ensure_dir
+        _store_tempo
+        dirty = UI._seq_get_i(SONG, SONG, :dirty) != 0
+        write_file(path_for(AUTOSAVE), dirty, false, true)
+      end
+
+      # The user's song back: the autosave, or an empty song when there is none
+      def restore_autosave
+        err = read_file(path_for(AUTOSAVE), true)
+        return true if err == 0
+        puts "Sequencer: autosave #{UI._seq_load_error(err)}" if err != :missing
+        UI._seq_reset(DEFAULT_LINES)
+        UI._seq_set_i(SONG, SONG, :temporary, 0)
+        UI._seq_set_i(SONG, SONG, :mark_saved, 1)
+        false
+      end
+
+      # At start-up, in every mode (main_task_base.rb): the autosave the first
+      # time after power-up, and again after a script's own song; then follow
+      # the File sheet and the autosave from every run of the MIDI filters.
+      def _setup
+        return if UI._seq_get_i(SONG, SONG, :transport_bit) == 0   # No sequencer here
+        if UI._seq_get_i(SONG, SONG, :restored) == 0 || UI._seq_get_i(SONG, SONG, :temporary) != 0
+          restore_autosave
+          UI._seq_set_i(SONG, SONG, :restored, 1)
+        end
+        _send_list
+        _hook
+      end
+
+      def _hook
+        return if $ui_seq_hooked
+        $ui_seq_hooked = true
+        $__midi_filter_hooks__ << lambda { Sequencer._poll }
+      end
+
+      def _send_list
+        UI._seq_set_files(songs.join("\n"))
+      end
+
+      def _now_ms
+        MIDI.respond_to?(:_uptime_ms) ? MIDI._uptime_ms : 0
+      end
+
+      def _poll
+        return if $ui_seq_polling   # A filter run from inside file I/O
+        $ui_seq_polling = true
+        begin
+          req = UI._seq_take_request
+          _handle(req[0], req[1]) if req
+          _autosave_if_due
+        ensure
+          $ui_seq_polling = false
+        end
+      end
+
+      # Failed autosaves (no card...) are retried every AUTOSAVE_RETRY_MS
+      def _autosave_if_due
+        return if UI._seq_get_i(SONG, SONG, :autosave_due) == 0
+        retry_at = $ui_seq_autosave_retry_at
+        return if retry_at && _now_ms < retry_at
+        if autosave_now
+          $ui_seq_autosave_retry_at = nil
+        else
+          $ui_seq_autosave_retry_at = _now_ms + AUTOSAVE_RETRY_MS
+          UI._seq_status("Autosave failed")
+        end
+      end
+
+      def _handle(op, name)
+        case op
+        when REQ_SAVE
+          n = save_as(name.empty? ? next_auto_name : name)
+          UI._seq_status("Saved " + n)
+          _send_list
+        when REQ_SAVE_NEW
+          n = save_as(next_auto_name)
+          UI._seq_status("Saved " + n)
+          _send_list
+        when REQ_LOAD
+          UI._seq_status("Loaded " + load_from(name))
+        when REQ_NEW
+          UI._seq_reset(DEFAULT_LINES)
+          UI._seq_set_i(SONG, SONG, :temporary, 0)
+          UI._seq_set_i(SONG, SONG, :mark_clean, 1)
+          UI._seq_status("New song")
+        when REQ_DELETE
+          delete(name)
+          UI._seq_status("Deleted " + name)
+          _send_list
+        when REQ_LIST
+          _send_list
+        end
+      rescue => e
+        UI._seq_status(e.message)
+      end
     end
 
     # Internal

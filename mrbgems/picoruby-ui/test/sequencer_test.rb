@@ -33,7 +33,8 @@ def reset_stub
   $stub[:routes] = []
   $seq = {
     lines: 8, sets: [], notes: {}, chord: [[60, 100]], chain: [], names: {}, resets: [],
-    values: {}
+    values: {}, song: "", edits: 1, saved_edits: 1, autosaved_edits: 1, dump_ends: [],
+    commits: [], requests: [], due: false
   }
 end
 
@@ -68,6 +69,7 @@ module UI
       when :play_pattern then 3
       when :next_pattern, :edit_pattern then -1
       when :pattern_tick then 384 + 96 * 2 + 10
+      when :gate then $seq[:values][[:gate, line]] || 100
       else $seq[:values][[name, line]] || 0
       end
     end
@@ -113,6 +115,52 @@ module UI
     def _seq_clear_pattern(p); true; end
     def _seq_copy_pattern(s, d); $seq[:copied] = [s, d]; true; end
     def _seq_receive(*a); $seq[:received] = a; end
+
+    # Files: the "song" written is $seq[:song], a String, in two pieces
+    def _seq_dump_begin(dirty)
+      return false if $seq[:dump_fail]
+      $seq[:dump] = ["MSEQ" + (dirty ? "D" : "C"), $seq[:song].to_s]
+      $seq[:dump_edits] = $seq[:edits]
+      true
+    end
+    def _seq_dump_next; $seq[:dump].shift; end
+    def _seq_dump_end(saved, autosave)
+      $seq[:saved_edits] = $seq[:dump_edits] if saved
+      $seq[:autosaved_edits] = $seq[:dump_edits] if autosave
+      $seq[:dump_ends] << [saved, autosave]
+    end
+    def _seq_load_begin; $seq[:loading] = ""; true; end
+    def _seq_load_feed(str)
+      $seq[:loading] << str
+      $seq[:loading].start_with?("MSEQ") || $seq[:loading].size < 4 ? 0 : -1
+    end
+    def _seq_load_commit(autosave)
+      $seq[:song] = $seq[:loading][5..-1]
+      $seq[:commits] << autosave
+      $seq[:edits] += 1
+      $seq[:saved_edits] = $seq[:edits]
+      0
+    end
+    def _seq_load_abort; $seq[:loading] = nil; end
+    def _seq_load_error(code); "error #{code}"; end
+    def _seq_take_request; $seq[:requests].shift; end
+    def _seq_set_files(names); $seq[:files] = names; end
+    def _seq_status(msg); $seq[:status] = msg; end
+  end
+end
+
+# The C state the save code reads, on top of _seq_get_i's table
+module UI
+  class << self
+    alias_method :_seq_get_i_base, :_seq_get_i
+    def _seq_get_i(pattern, line, name)
+      case name
+      when :dirty then $seq[:edits] != $seq[:saved_edits] ? 1 : 0
+      when :autosave_due then $seq[:due] ? 1 : 0
+      when :temporary, :restored, :bpm_x100 then $seq[:values][[name, -1]] || 0
+      else _seq_get_i_base(pattern, line, name)
+      end
+    end
   end
 end
 
@@ -301,6 +349,144 @@ check("position", pos == { pattern: 3, tick: 586, bar: 1, beat: 2 })
 # --- transport ---
 seq.send_packet(0, 0xF, 0xF8, 0, 0)
 check("send_packet", $seq[:received] == [0xF, 0xF8, 0, 0])
+
+# --- Saving ---
+require "tmpdir"
+$tmp = Dir.mktmpdir("seqtest")
+class << UI::Sequencer
+  def dir; $tmp + "/patterns"; end
+end
+module MIDI
+  def self._uptime_ms; $now_ms || 0; end
+end
+module UI
+  module Tempo
+    def self.bpm; 123.5; end
+    def self.bpm=(v); $tempo_set = v; end
+  end
+end
+S = UI::Sequencer
+def file(name); File.join(S.dir, name); end
+
+reset_stub
+seq = S.new(clock: nil)
+check("new marks the song temporary", $seq[:values][[:temporary, -1]] == 1)
+S.new(clock: nil, autosave: true)
+check("autosave: true keeps it the user's", $seq[:values][[:temporary, -1]] == 0)
+
+$seq[:song] = "first"
+check("save returns the name", seq.save("groove") == "groove")
+check("file written", File.read(file("groove.mseq")) == "MSEQCfirst")
+check("no .tmp / .bak left", !File.exist?(file("groove.mseq.tmp")) && !File.exist?(file("groove.mseq.bak")))
+check("name set before writing", $seq[:names][-1] == "groove")
+check("tempo stored", $seq[:values][[:bpm_x100, -1]] == 12350)
+check("marked saved, not autosaved", $seq[:dump_ends].last == [true, false])
+$seq[:song] = "second"
+seq.save("groove")
+check("overwrite", File.read(file("groove.mseq")) == "MSEQCsecond")
+
+$seq[:song] = "x"
+seq.load("groove", tempo: true)
+check("load", $seq[:song] == "second" && $seq[:commits].last == false)
+check("load tempo", $tempo_set == 123.5)
+# A save cut off between the renames: only the .bak is there
+File.rename(file("groove.mseq"), file("groove.mseq.bak"))
+seq.load("groove")
+check("falls back to .bak", $seq[:song] == "second")
+File.rename(file("groove.mseq.bak"), file("groove.mseq"))
+File.write(file("junk.mseq"), "JUNKJUNK")
+check("bad file raises", (begin; seq.load("junk"); false; rescue IOError => e; e.message.include?("error"); end))
+check("missing file raises", (begin; seq.load("nope"); false; rescue IOError; true; end))
+check("bad name", raises? { seq.save("bad name") })
+check("reserved name", raises? { seq.save("_x") })
+$seq[:names][-1] = ""
+check("no name: SONG001", seq.save == "SONG001")
+check("then SONG002", S.next_auto_name == "SONG002")
+File.write(file("_autosave.mseq"), "MSEQDauto")
+check("songs: sorted, no _ files", S.songs == ["SONG001", "groove", "junk"])
+$seq[:dump_fail] = true
+check("failed write -> IOError", (begin; seq.save("other"); false; rescue IOError; true; end))
+$seq[:dump_fail] = false
+
+# Autosave: when C says it is due, with the dirty flag; retried later on failure
+$seq[:due] = true
+$seq[:edits] = 50
+S._poll
+check("autosave written", File.read(file("_autosave.mseq")) == "MSEQD" + $seq[:song])
+check("marked autosaved only", $seq[:dump_ends].last == [false, true])
+$seq[:dump_fail] = true
+$now_ms = 1000
+n = $seq[:dump_ends].size
+S._poll
+check("failure reported", $seq[:status] == "Autosave failed")
+$seq[:dump_fail] = false
+$now_ms = 5000
+S._poll
+check("no retry before 10 s", $seq[:dump_ends].size == n)
+$now_ms = 12000
+S._poll
+check("retried after 10 s", $seq[:dump_ends].size == n + 1 && $seq[:dump_ends].last == [false, true])
+$seq[:due] = false
+
+# Start-up: the autosave once, and again after a temporary song
+$seq[:values][[:restored, -1]] = 0
+$seq[:song] = "script"
+$seq[:values][[:transport_bit, -1]] = nil
+S._setup
+check("restored at start-up", $seq[:commits].last == true && $seq[:song] != "script")
+check("restored flag set", $seq[:values][[:restored, -1]] == 1)
+check("file list sent", $seq[:files].split("\n").include?("groove"))
+c = $seq[:commits].size
+S._setup
+check("not again", $seq[:commits].size == c)
+$seq[:values][[:temporary, -1]] = 1
+S._setup
+check("again after a temporary song", $seq[:commits].size == c + 1)
+File.unlink(file("_autosave.mseq"))
+$seq[:values][[:temporary, -1]] = 1
+r = $seq[:resets].size
+S._setup
+check("no autosave: an empty song", $seq[:resets].size == r + 1 && $seq[:values][[:mark_saved, -1]] == 1)
+check("... no longer temporary", $seq[:values][[:temporary, -1]] == 0)
+
+# Requests from the File sheet
+$seq[:requests] = [[S::REQ_SAVE, "live"]]
+S._poll
+check("request save", File.exist?(file("live.mseq")) && $seq[:status] == "Saved live")
+$seq[:requests] = [[S::REQ_SAVE, ""]]
+S._poll
+check("request save without a name", $seq[:status] == "Saved SONG002")
+$seq[:requests] = [[S::REQ_SAVE_NEW, "live"]]
+S._poll
+check("request save as new", $seq[:status] == "Saved SONG003")
+$seq[:requests] = [[S::REQ_LOAD, "groove"]]
+S._poll
+check("request load", $seq[:status] == "Loaded groove")
+$seq[:requests] = [[S::REQ_DELETE, "junk"]]
+S._poll
+check("request delete", !File.exist?(file("junk.mseq")) && !$seq[:files].include?("junk"))
+$seq[:requests] = [[S::REQ_LOAD, "junk"]]
+S._poll
+check("errors become the status", $seq[:status].include?("not found"))
+r = $seq[:resets].size
+$seq[:requests] = [[S::REQ_NEW, ""]]
+S._poll
+check("request new", $seq[:resets].size == r + 1 && $seq[:values][[:mark_clean, -1]] == 1)
+
+# to_h / restore
+reset_stub
+seq = S.new(clock: nil, lines: 2)
+seq.name = "keep"
+seq.line(0, name: "Kick", channel: 9).pattern("x...x...", notes: [36])
+h = seq.to_h
+check("to_h lines", h[:lines].size == 2 && h[:lines][0][:name] == "Kick")
+reset_stub
+seq = S.new(clock: nil)
+seq.restore(h)
+check("restore resets to the saved line count", $seq[:resets].last == 2)
+check("restore name", $seq[:names][-1] == "keep")
+
+FileUtils.rm_rf($tmp) if defined?(FileUtils)
 
 if $failures == 0
   puts "all sequencer tests passed"

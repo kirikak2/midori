@@ -56,6 +56,7 @@ private:
         BTN_VIEW,
         BTN_FOLLOW,
         BTN_PLAY,
+        BTN_FILE,                       // Song name; opens the File sheet
         BTN_COUNT,
     };
 
@@ -67,12 +68,20 @@ private:
         SB_COUNT,
     };
 
+    enum FileButton {
+        FB_SAVE = 0, FB_SAVE_NEW, FB_LOAD, FB_NEW, FB_DELETE, FB_CLOSE,
+        FB_COUNT,
+    };
+    static constexpr int MAX_FILES = 64;
+
     enum TouchKind : uint8_t {
         T_NONE = 0,
         T_BUTTON,      // A header button
         T_CELL,        // A grid cell: place / lengthen / remove
         T_LINE,        // A line's name: select, mute, settings, scroll
         T_PLUS,        // "+ Line"
+        T_FILE_ROW,    // A song in the File sheet's list (select, scroll)
+        T_FILE_BTN,    // A File sheet button
         T_SHEET,       // A settings sheet button
         T_IGNORE,      // Landed on nothing; held until lifted
     };
@@ -121,6 +130,20 @@ private:
     Touch m_touch[MAX_TOUCH_POINTS];
     Rect m_clip;                 // What paint() is repainting: render skips the rest
 
+    // File sheet (saving is Ruby's: the buttons queue requests, ui_seq::request)
+    bool m_fileSheet;
+    int m_fileSel;               // Selected song, or -1
+    int m_fileScroll;
+    int m_fileConfirm;           // FileButton waiting for a second tap, or -1
+    int m_fileCount;
+    uint32_t m_filesSerial;
+    char (*m_files)[SEQ_SONG_NAME_LEN + 1];   // Heap, MAX_FILES
+    Rect m_fileBtn[FB_COUNT];
+    Rect m_fileList;
+    int m_fileRowH, m_fileRows;
+    bool m_dirty;                // Shown on the File button
+    char m_status[32];           // Fresh status message, or ""
+
     void computeGeom();
     bool refresh(bool notes);
     void clampScroll();
@@ -141,6 +164,12 @@ private:
     void renderLine(LovyanGFX* g, int ox, int oy, int line, int y);
     void renderPlus(LovyanGFX* g, int ox, int oy, int y);
     void renderSheet(LovyanGFX* g, int ox, int oy);
+    void renderFiles(LovyanGFX* g, int ox, int oy);
+    bool sheetOpen() const { return m_sheetLine >= 0 || m_fileSheet; }
+    void openFiles();
+    void pressFile(int id);
+    void takeFiles();
+    void clampFileScroll();
     void button(LovyanGFX* g, int ox, int oy, const Rect& r, const char* label,
                 uint16_t bg, uint16_t fg, bool outline = false);
 

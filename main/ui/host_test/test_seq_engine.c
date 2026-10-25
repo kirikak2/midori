@@ -596,6 +596,245 @@ static void test_reset(void)
     EXPECT_EQ(g_e->line_count, SEQ_MAX_LINES);
 }
 
+/* --- Files --- */
+
+static uint8_t g_file[200000];
+static int g_file_n;
+
+static void dump_to_buffer(const seq_engine_t *e, uint8_t flags)
+{
+    static uint8_t piece[SEQ_DUMP_MAX_CHUNK];
+    seq_dump_t d;
+    seq_dump_begin(&d, flags);
+    g_file_n = 0;
+    int n;
+    while ((n = seq_dump_next(e, &d, piece, sizeof(piece))) > 0) {
+        memcpy(g_file + g_file_n, piece, (size_t)n);
+        g_file_n += n;
+    }
+}
+
+/* Feeds g_file[0..len) in pieces of `step` bytes; returns the error */
+static int load_buffer(int len, int step, seq_engine_t **song, uint8_t *flags)
+{
+    seq_loader_t *ld = seq_load_begin();
+    int err = SEQ_LOAD_OK;
+    for (int i = 0; i < len && err == SEQ_LOAD_OK; i += step) {
+        int n = len - i < step ? len - i : step;
+        err = seq_load_feed(ld, g_file + i, n);
+    }
+    if (err == SEQ_LOAD_OK) err = seq_load_finish(ld, song, flags);
+    else *song = NULL;
+    seq_load_free(ld);
+    return err;
+}
+
+static void expect_same_song(const seq_engine_t *a, const seq_engine_t *b)
+{
+    EXPECT_EQ(a->line_count, b->line_count);
+    EXPECT_EQ(strcmp(a->name, b->name), 0);
+    EXPECT_EQ(a->bpm_x100, b->bpm_x100);
+    EXPECT_EQ(a->chain_len, b->chain_len);
+    EXPECT_EQ(a->chain_on, b->chain_on);
+    EXPECT_EQ(a->play_pattern, b->play_pattern);
+    EXPECT_EQ(a->song_notes, b->song_notes);
+    for (int i = 0; i < a->chain_len; i++) {
+        EXPECT_EQ(a->chain[i].pattern, b->chain[i].pattern);
+        EXPECT_EQ(a->chain[i].repeat, b->chain[i].repeat);
+    }
+    for (int l = 0; l < a->line_count; l++) {
+        const seq_line_t *x = &a->lines[l], *y = &b->lines[l];
+        EXPECT_EQ(x->mode, y->mode);
+        EXPECT_EQ(x->channel, y->channel);
+        EXPECT_EQ(x->mute, y->mute);
+        EXPECT_EQ(x->velocity, y->velocity);
+        EXPECT_EQ(x->gate, y->gate);
+        EXPECT_EQ(x->quantize, y->quantize);
+        EXPECT_EQ(x->rec_mode, y->rec_mode);
+        EXPECT_EQ(strcmp(x->name, y->name), 0);
+    }
+    for (int p = 0; p < SEQ_MAX_PATTERNS; p++) {
+        EXPECT_EQ(a->patterns[p] == NULL, b->patterns[p] == NULL);
+        if (!a->patterns[p]) continue;
+        EXPECT_EQ(a->patterns[p]->length, b->patterns[p]->length);
+        for (int l = 0; l < a->line_count; l++) {
+            const seq_pattern_line_t *x = &a->patterns[p]->lines[l], *y = &b->patterns[p]->lines[l];
+            EXPECT_EQ(x->steps, y->steps);
+            EXPECT_EQ(x->rate, y->rate);
+            EXPECT_EQ(x->bars, y->bars);
+            EXPECT_EQ(x->grid.n, y->grid.n);
+            EXPECT_EQ(x->rt.n, y->rt.n);
+            if (x->grid.n) EXPECT_EQ(memcmp(x->grid.v, y->grid.v, x->grid.n * sizeof(seq_note_t)), 0);
+            if (x->rt.n) EXPECT_EQ(memcmp(x->rt.v, y->rt.v, x->rt.n * sizeof(seq_note_t)), 0);
+        }
+    }
+}
+
+static void build_song(void)
+{
+    fresh();
+    seq_line_add(g_e);
+    strcpy(g_e->name, "groove");
+    g_e->bpm_x100 = 12350;
+    strcpy(g_e->lines[0].name, "Kick");
+    g_e->lines[0].channel = 9;
+    g_e->lines[1].gate = 80;
+    g_e->lines[1].velocity = 90;
+    g_e->lines[2].mode = SEQ_MODE_REALTIME;
+    g_e->lines[2].quantize = SEQ_RATE_16 + 1;
+    g_e->lines[2].rec_mode = 1;
+    g_e->lines[3].mute = 1;
+    uint8_t kick = 36, chord[3] = { 60, 64, 67 }, vel[3] = { 90, 80, 70 };
+    for (int s = 0; s < 16; s += 4) seq_grid_place(g_e, 0, 0, s, 1, &kick, NULL, 1);
+    seq_grid_place(g_e, 0, 1, 0, 6, chord, vel, 3);
+    seq_pline_set_steps(g_e, 0, 1, 32);
+    seq_pline_set_rate(g_e, 0, 1, SEQ_RATE_8T);
+    seq_pline_set_bars(g_e, 0, 2, 2);
+    seq_rt_add(g_e, 0, 2, 13, 50, 72, 99);
+    seq_rt_add(g_e, 0, 2, 700, 100, 74, 40);
+    seq_pattern_copy(g_e, 0, 5);
+    seq_pattern_set_length(g_e, 5, 4);
+    seq_pattern_get(g_e, 9, true);   /* used but empty */
+    seq_chain_entry_t chain[2] = { { 0, 2 }, { 5, 1 } };
+    seq_set_chain(g_e, chain, 2);
+    seq_set_chain_on(g_e, true);
+    seq_select_pattern(g_e, 5);       /* turns the chain off again */
+    seq_set_chain_on(g_e, true);
+    seq_select_pattern(g_e, -1);
+    g_e->play_pattern = 5;
+}
+
+static void test_file_round_trip(void)
+{
+    printf("file round trip\n");
+    build_song();
+    dump_to_buffer(g_e, SEQ_FILE_DIRTY);
+    EXPECT_EQ(memcmp(g_file, "MSEQ", 4), 0);
+    int steps[] = { 1, 7, 13, 4096, 1 << 20 };
+    for (int i = 0; i < 5; i++) {
+        seq_engine_t *song;
+        uint8_t flags = 0;
+        EXPECT_EQ(load_buffer(g_file_n, steps[i], &song, &flags), SEQ_LOAD_OK);
+        EXPECT_EQ(flags & SEQ_FILE_DIRTY, SEQ_FILE_DIRTY);
+        EXPECT_EQ(flags & SEQ_FILE_CHAIN_ON, SEQ_FILE_CHAIN_ON);
+        expect_same_song(g_e, song);
+        seq_engine_free(song);
+    }
+
+    /* An empty song: just the head, the lines and the CRC */
+    fresh();
+    dump_to_buffer(g_e, 0);
+    seq_engine_t *song;
+    EXPECT_EQ(load_buffer(g_file_n, 5, &song, NULL), SEQ_LOAD_OK);
+    expect_same_song(g_e, song);
+    seq_engine_free(song);
+}
+
+static void test_file_errors(void)
+{
+    printf("file errors\n");
+    build_song();
+    dump_to_buffer(g_e, 0);
+    seq_engine_t *song;
+
+    /* Cut short anywhere */
+    for (int len = 0; len < g_file_n; len += 37) {
+        EXPECT_EQ(load_buffer(len, 64, &song, NULL) != SEQ_LOAD_OK, 1);
+        EXPECT_EQ(song == NULL, 1);
+    }
+    EXPECT_EQ(load_buffer(g_file_n - 1, 64, &song, NULL), SEQ_LOAD_TRUNCATED);
+
+    /* Any flipped byte is caught */
+    for (int i = 0; i < g_file_n; i += 11) {
+        g_file[i] ^= 0x5A;
+        EXPECT_EQ(load_buffer(g_file_n, 64, &song, NULL) != SEQ_LOAD_OK, 1);
+        g_file[i] ^= 0x5A;
+    }
+    g_file[0] = 'X';
+    EXPECT_EQ(load_buffer(g_file_n, 64, &song, NULL), SEQ_LOAD_BAD_MAGIC);
+    g_file[0] = 'M';
+    g_file[4] = 2;
+    EXPECT_EQ(load_buffer(g_file_n, 64, &song, NULL), SEQ_LOAD_BAD_VERSION);
+    g_file[4] = 1;
+    EXPECT_EQ(load_buffer(g_file_n, 64, &song, NULL), SEQ_LOAD_OK);
+    seq_engine_free(song);
+    EXPECT_EQ(strcmp(seq_load_error_name(SEQ_LOAD_BAD_CRC), "checksum mismatch"), 0);
+}
+
+/* A chunk this version does not know is skipped (and counted in the CRC) */
+static void test_file_unknown_chunk(void)
+{
+    printf("unknown chunks are skipped\n");
+    build_song();
+    dump_to_buffer(g_e, 0);
+    /* Drop the CRC, append an unknown chunk, then a new CRC */
+    int n = g_file_n - 12;
+    uint8_t extra[8 + 5] = { 'X', 'T', 'R', 'A', 5, 0, 0, 0, 1, 2, 3, 4, 5 };
+    memcpy(g_file + n, extra, sizeof(extra));
+    n += sizeof(extra);
+    /* CRC32 the same way the engine does */
+    uint32_t crc = ~0u;
+    for (int i = 0; i < n; i++) {
+        crc ^= g_file[i];
+        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    crc = ~crc;
+    memcpy(g_file + n, "CRC ", 4);
+    g_file[n + 4] = 4; g_file[n + 5] = 0; g_file[n + 6] = 0; g_file[n + 7] = 0;
+    for (int k = 0; k < 4; k++) g_file[n + 8 + k] = (uint8_t)(crc >> (8 * k));
+    n += 12;
+    seq_engine_t *song;
+    EXPECT_EQ(load_buffer(n, 9, &song, NULL), SEQ_LOAD_OK);
+    expect_same_song(g_e, song);
+    seq_engine_free(song);
+}
+
+static void test_file_full_song(void)
+{
+    printf("file of a full song\n");
+    fresh();
+    uint8_t chord[8];
+    for (int i = 0; i < 8; i++) chord[i] = (uint8_t)(40 + i);
+    for (int p = 0; p < 2; p++)
+        for (int l = 0; l < 8; l++)
+            for (int s = 0; s < 64; s++) seq_grid_place(g_e, p, l, s, 1, chord, NULL, 8);
+    EXPECT_EQ(g_e->song_notes, SEQ_MAX_SONG_NOTES);
+    dump_to_buffer(g_e, 0);
+    seq_engine_t *song;
+    EXPECT_EQ(load_buffer(g_file_n, 1000, &song, NULL), SEQ_LOAD_OK);
+    expect_same_song(g_e, song);
+    seq_engine_free(song);
+}
+
+static void test_clone_and_adopt(void)
+{
+    printf("clone, adopt\n");
+    build_song();
+    seq_engine_t *copy = seq_song_clone(g_e);
+    expect_same_song(g_e, copy);
+    /* Independent of the original */
+    seq_grid_remove(g_e, 0, 0, 0, -1);
+    EXPECT_EQ(copy->patterns[0]->lines[0].grid.n, 4);
+    EXPECT_EQ(g_e->patterns[0]->lines[0].grid.n, 3);
+
+    /* Adopted while playing: what sounds goes off, play goes on from the top */
+    fresh();
+    uint8_t n = 50;
+    seq_grid_place(g_e, 0, 0, 0, 16, &n, NULL, 1);
+    seq_engine_start(g_e);
+    run_ticks(10);
+    EXPECT_EQ(count_on(50), 1);
+    int before = g_n;
+    seq_engine_adopt(g_e, copy);
+    EXPECT_EQ(g_n, before + 1);
+    EXPECT_EQ(g_ev[g_n - 1].on, 0);
+    EXPECT_EQ(g_e->running, 1);
+    EXPECT_EQ(g_e->play_pattern, 5);
+    EXPECT_EQ(g_e->pattern_tick, 0);
+    EXPECT_EQ(g_e->line_count, 9);
+    EXPECT_EQ(g_e->patterns[5]->length, 4);
+}
+
 int main(void)
 {
     test_defaults();
@@ -615,6 +854,11 @@ int main(void)
     test_chord_input();
     test_edit_while_playing();
     test_reset();
+    test_file_round_trip();
+    test_file_errors();
+    test_file_unknown_chunk();
+    test_file_full_song();
+    test_clone_and_adopt();
     seq_engine_free(g_e);
     printf("all sequencer engine tests passed\n");
     return 0;

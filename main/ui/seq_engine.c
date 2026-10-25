@@ -925,3 +925,558 @@ int seq_engine_pending(const seq_engine_t *e)
 {
     return e->pending;
 }
+
+// --- Files (.mseq) -----------------------------------------------------------
+
+#define CHUNK_ID(a, b, c, d) \
+    ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+
+static const uint32_t ID_HEAD = CHUNK_ID('H', 'E', 'A', 'D');
+static const uint32_t ID_LINE = CHUNK_ID('L', 'I', 'N', 'E');
+static const uint32_t ID_CHAN = CHUNK_ID('C', 'H', 'A', 'N');
+static const uint32_t ID_PATN = CHUNK_ID('P', 'A', 'T', 'N');
+static const uint32_t ID_PLIN = CHUNK_ID('P', 'L', 'I', 'N');
+static const uint32_t ID_GRID = CHUNK_ID('G', 'R', 'I', 'D');
+static const uint32_t ID_RTEV = CHUNK_ID('R', 'T', 'E', 'V');
+static const uint32_t ID_CRC  = CHUNK_ID('C', 'R', 'C', ' ');
+
+// Payload sizes (a reader takes longer ones, for fields added later)
+#define HEAD_SIZE  24
+#define LINE_SIZE  16
+#define PATN_SIZE  2
+#define PLIN_SIZE  6
+#define NOTE_SIZE  8
+
+#define DUMP_HEAD  0
+#define DUMP_LINES 1
+#define DUMP_CHAIN 2
+#define DUMP_PATS  3
+#define DUMP_CRC   4
+#define DUMP_DONE  5
+
+static uint32_t crc32_update(uint32_t crc, const uint8_t *p, int n)
+{
+    crc = ~crc;
+    while (n-- > 0) {
+        crc ^= *p++;
+        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
+
+static void put16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void put32(uint8_t *p, uint32_t v) { put16(p, (uint16_t)v); put16(p + 2, (uint16_t)(v >> 16)); }
+static uint16_t get16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t get32(const uint8_t *p) { return get16(p) | ((uint32_t)get16(p + 2) << 16); }
+
+seq_engine_t *seq_song_clone(const seq_engine_t *e)
+{
+    seq_engine_t *c = (seq_engine_t *)mem_calloc(1, sizeof(seq_engine_t));
+    if (!c) return NULL;
+    c->line_count = e->line_count;
+    memcpy(c->lines, e->lines, sizeof(c->lines));
+    memcpy(c->chain, e->chain, sizeof(c->chain));
+    c->chain_len = e->chain_len;
+    c->chain_on = e->chain_on;
+    memcpy(c->name, e->name, sizeof(c->name));
+    c->bpm_x100 = e->bpm_x100;
+    c->play_pattern = e->play_pattern;
+    c->next_pattern = -1;
+    c->edit_pattern = -1;
+    for (int p = 0; p < SEQ_MAX_PATTERNS; p++) {
+        const seq_pattern_t *src = e->patterns[p];
+        if (!src) continue;
+        seq_pattern_t *copy = (seq_pattern_t *)mem_calloc(1, sizeof(seq_pattern_t));
+        if (!copy) {
+            seq_engine_free(c);
+            return NULL;
+        }
+        *copy = *src;
+        // Empty first: a failed copy must not leave the source's arrays to be freed
+        for (int l = 0; l < SEQ_MAX_LINES; l++) {
+            copy->lines[l].grid = (seq_notes_t){ NULL, 0, 0 };
+            copy->lines[l].rt = (seq_notes_t){ NULL, 0, 0 };
+        }
+        c->patterns[p] = copy;
+        for (int l = 0; l < SEQ_MAX_LINES; l++) {
+            if (!notes_copy(c, &copy->lines[l].grid, &src->lines[l].grid) ||
+                !notes_copy(c, &copy->lines[l].rt, &src->lines[l].rt)) {
+                seq_engine_free(c);
+                return NULL;
+            }
+        }
+    }
+    return c;
+}
+
+// Writes a chunk header; returns where its payload starts
+static uint8_t *chunk_start(uint8_t *buf, uint32_t id, uint32_t size)
+{
+    put32(buf, id);
+    put32(buf + 4, size);
+    return buf + 8;
+}
+
+static int chunk_head(uint8_t *buf, const seq_engine_t *e, uint8_t flags)
+{
+    uint8_t *p = chunk_start(buf, ID_HEAD, HEAD_SIZE);
+    memset(p, 0, HEAD_SIZE);
+    put16(p, SEQ_PPQN);
+    p[2] = e->line_count;
+    p[3] = flags;
+    put16(p + 4, e->bpm_x100);
+    p[6] = (uint8_t)e->play_pattern;
+    strncpy((char *)p + 8, e->name, SEQ_SONG_NAME_LEN);
+    return 8 + HEAD_SIZE;
+}
+
+static int chunk_line(uint8_t *buf, const seq_engine_t *e, int index)
+{
+    const seq_line_t *l = &e->lines[index];
+    uint8_t *p = chunk_start(buf, ID_LINE, LINE_SIZE);
+    memset(p, 0, LINE_SIZE);
+    p[0] = (uint8_t)index;
+    p[1] = l->mode;
+    p[2] = l->channel;
+    p[3] = l->mute ? 1 : 0;
+    p[4] = l->velocity;
+    p[5] = l->gate;
+    p[6] = l->quantize;
+    p[7] = l->rec_mode;
+    strncpy((char *)p + 8, l->name, SEQ_NAME_LEN);
+    return 8 + LINE_SIZE;
+}
+
+static int chunk_chain(uint8_t *buf, const seq_engine_t *e)
+{
+    uint32_t size = 2 + 2u * e->chain_len;
+    uint8_t *p = chunk_start(buf, ID_CHAN, size);
+    p[0] = e->chain_len;
+    p[1] = 0;
+    for (int i = 0; i < e->chain_len; i++) {
+        p[2 + i * 2] = e->chain[i].pattern;
+        p[3 + i * 2] = e->chain[i].repeat;
+    }
+    return 8 + (int)size;
+}
+
+static int chunk_notes(uint8_t *buf, uint32_t id, int pattern, int line, const seq_notes_t *a)
+{
+    uint32_t size = 4 + (uint32_t)a->n * NOTE_SIZE;
+    uint8_t *p = chunk_start(buf, id, size);
+    p[0] = (uint8_t)pattern;
+    p[1] = (uint8_t)line;
+    put16(p + 2, a->n);
+    p += 4;
+    for (int i = 0; i < a->n; i++, p += NOTE_SIZE) {
+        put16(p, a->v[i].pos);
+        put16(p + 2, a->v[i].len);
+        p[4] = a->v[i].note;
+        p[5] = a->v[i].velocity;
+        p[6] = a->v[i].flags;
+        p[7] = 0;
+    }
+    return 8 + (int)size;
+}
+
+static bool pline_is_default(const seq_pattern_line_t *pl)
+{
+    return pl->steps == 16 && pl->rate == SEQ_RATE_16 && pl->bars == 1 && pl->flags == 0;
+}
+
+// The next chunk of the patterns: PATN, then per line PLIN (unless default),
+// GRID and RTEV (unless empty). 0 when there are no more.
+static int dump_pattern_chunk(const seq_engine_t *e, seq_dump_t *d, uint8_t *buf)
+{
+    for (;;) {
+        if (d->pattern >= SEQ_MAX_PATTERNS) return 0;
+        const seq_pattern_t *pat = e->patterns[d->pattern];
+        if (!pat) {
+            d->pattern++;
+            continue;
+        }
+        if (d->part == 0) {
+            d->part = 1;
+            d->line = 0;
+            uint8_t *p = chunk_start(buf, ID_PATN, PATN_SIZE);
+            p[0] = d->pattern;
+            p[1] = pat->length;
+            return 8 + PATN_SIZE;
+        }
+        if (d->line >= e->line_count) {
+            d->pattern++;
+            d->part = 0;
+            continue;
+        }
+        int l = d->line, part = d->part;
+        if (++d->part > 3) {
+            d->part = 1;
+            d->line++;
+        }
+        const seq_pattern_line_t *pl = &pat->lines[l];
+        if (part == 1 && !pline_is_default(pl)) {
+            uint8_t *p = chunk_start(buf, ID_PLIN, PLIN_SIZE);
+            p[0] = d->pattern;
+            p[1] = (uint8_t)l;
+            p[2] = pl->steps;
+            p[3] = pl->rate;
+            p[4] = pl->bars;
+            p[5] = pl->flags;
+            return 8 + PLIN_SIZE;
+        }
+        if (part == 2 && pl->grid.n) return chunk_notes(buf, ID_GRID, d->pattern, l, &pl->grid);
+        if (part == 3 && pl->rt.n) return chunk_notes(buf, ID_RTEV, d->pattern, l, &pl->rt);
+    }
+}
+
+void seq_dump_begin(seq_dump_t *d, uint8_t flags)
+{
+    memset(d, 0, sizeof(*d));
+    d->flags = flags;
+}
+
+int seq_dump_next(const seq_engine_t *e, seq_dump_t *d, uint8_t *buf, int cap)
+{
+    if (cap < SEQ_DUMP_MAX_CHUNK) return 0;
+    int n = 0;
+    while (n == 0) {
+        switch (d->phase) {
+            case DUMP_HEAD: {
+                memcpy(buf, "MSEQ", 4);
+                put16(buf + 4, SEQ_FILE_VERSION);
+                put16(buf + 6, 0);
+                uint8_t flags = (uint8_t)((d->flags & ~SEQ_FILE_CHAIN_ON) | (e->chain_on ? SEQ_FILE_CHAIN_ON : 0));
+                n = 8 + chunk_head(buf + 8, e, flags);
+                d->phase = DUMP_LINES;
+                d->line = 0;
+                break;
+            }
+            case DUMP_LINES:
+                if (d->line < e->line_count) {
+                    n = chunk_line(buf, e, d->line++);
+                } else {
+                    d->phase = DUMP_CHAIN;
+                }
+                break;
+            case DUMP_CHAIN:
+                d->phase = DUMP_PATS;
+                d->pattern = 0;
+                d->line = 0;
+                d->part = 0;
+                if (e->chain_len) n = chunk_chain(buf, e);
+                break;
+            case DUMP_PATS:
+                n = dump_pattern_chunk(e, d, buf);
+                if (n == 0) d->phase = DUMP_CRC;
+                break;
+            case DUMP_CRC:
+                // Covers everything before it, not itself
+                memcpy(buf, "CRC ", 4);
+                put32(buf + 4, 4);
+                put32(buf + 8, d->crc);
+                d->phase = DUMP_DONE;
+                return 12;
+            default:
+                return 0;
+        }
+    }
+    d->crc = crc32_update(d->crc, buf, n);
+    return n;
+}
+
+// --- Reading ---
+
+enum { LD_MAGIC = 0, LD_HEADER, LD_PAYLOAD, LD_SKIP, LD_AFTER };
+
+struct seq_loader {
+    seq_engine_t *song;
+    uint8_t  flags;
+    uint8_t  state;
+    uint8_t  hdr[8];
+    int      hdr_n;
+    uint32_t id, size, got;
+    uint8_t *buf;
+    uint32_t crc;
+    bool     seen_head;
+    int      error;
+};
+
+seq_loader_t *seq_load_begin(void)
+{
+    seq_loader_t *ld = (seq_loader_t *)calloc(1, sizeof(seq_loader_t));
+    if (!ld) return NULL;
+    ld->buf = (uint8_t *)mem_calloc(1, SEQ_DUMP_MAX_CHUNK);
+    ld->song = seq_engine_new(NULL);
+    if (!ld->buf || !ld->song) {
+        seq_load_free(ld);
+        return NULL;
+    }
+    ld->state = LD_MAGIC;
+    return ld;
+}
+
+void seq_load_free(seq_loader_t *ld)
+{
+    if (!ld) return;
+    if (ld->song) seq_engine_free(ld->song);
+    mem_free(ld->buf);
+    free(ld);
+}
+
+static bool steps_ok(int v) { return v == 4 || v == 8 || v == 16 || v == 32 || v == 64; }
+static bool bars_ok(int v) { return v == 1 || v == 2 || v == 4 || v == 8; }
+
+static int load_notes(seq_loader_t *ld, bool grid, const uint8_t *p, uint32_t size)
+{
+    seq_engine_t *s = ld->song;
+    if (size < 4) return SEQ_LOAD_BAD_CHUNK;
+    int pattern = p[0], line = p[1], count = get16(p + 2);
+    if (pattern >= SEQ_MAX_PATTERNS || !s->patterns[pattern] || line >= s->line_count) return SEQ_LOAD_BAD_CHUNK;
+    if (size < 4 + (uint32_t)count * NOTE_SIZE) return SEQ_LOAD_BAD_CHUNK;
+    if (count > SEQ_MAX_NOTES) return SEQ_LOAD_TOO_MANY_NOTES;
+    if (s->song_notes + count > SEQ_MAX_SONG_NOTES) return SEQ_LOAD_TOO_MANY_NOTES;
+    seq_notes_t *a = grid ? &s->patterns[pattern]->lines[line].grid : &s->patterns[pattern]->lines[line].rt;
+    if (a->n) return SEQ_LOAD_BAD_CHUNK;   // Twice for one line
+    if (count == 0) return SEQ_LOAD_OK;
+    a->v = (seq_note_t *)mem_realloc(NULL, (size_t)count * sizeof(seq_note_t));
+    if (!a->v) return SEQ_LOAD_NO_MEMORY;
+    a->cap = (uint16_t)count;
+    p += 4;
+    for (int i = 0; i < count; i++, p += NOTE_SIZE) {
+        seq_note_t nt = { get16(p), get16(p + 2), p[4], p[5], p[6], 0 };
+        bool ok = nt.note <= 127 && nt.velocity >= 1 && nt.velocity <= 127 && nt.len >= 1;
+        if (grid) {
+            ok = ok && nt.pos < SEQ_MAX_STEPS && nt.pos + nt.len <= SEQ_MAX_STEPS;
+        } else {
+            ok = ok && nt.pos < SEQ_MAX_BARS * SEQ_TICKS_PER_BAR && nt.len <= SEQ_MAX_BARS * SEQ_TICKS_PER_BAR;
+        }
+        // Strictly sorted by (pos, note)
+        if (ok && i > 0) ok = notes_less(&a->v[i - 1], nt.pos, nt.note);
+        if (!ok) return SEQ_LOAD_BAD_VALUE;
+        a->v[a->n++] = nt;
+        s->song_notes++;
+    }
+    return SEQ_LOAD_OK;
+}
+
+static int load_chunk(seq_loader_t *ld, uint32_t id, const uint8_t *p, uint32_t size)
+{
+    seq_engine_t *s = ld->song;
+    if (id == ID_HEAD) {
+        if (ld->seen_head || size < HEAD_SIZE) return SEQ_LOAD_BAD_CHUNK;
+        ld->seen_head = true;
+        if (get16(p) != SEQ_PPQN || p[2] < 1 || p[2] > SEQ_MAX_LINES || p[6] >= SEQ_MAX_PATTERNS) {
+            return SEQ_LOAD_BAD_VALUE;
+        }
+        s->line_count = p[2];
+        ld->flags = p[3];
+        s->bpm_x100 = get16(p + 4);
+        s->play_pattern = (int8_t)p[6];
+        memcpy(s->name, p + 8, SEQ_SONG_NAME_LEN);
+        s->name[SEQ_SONG_NAME_LEN] = '\0';
+        return SEQ_LOAD_OK;
+    }
+    if (!ld->seen_head) return SEQ_LOAD_BAD_CHUNK;
+
+    if (id == ID_LINE) {
+        if (size < LINE_SIZE) return SEQ_LOAD_BAD_CHUNK;
+        if (p[0] >= s->line_count) return SEQ_LOAD_BAD_CHUNK;
+        if (p[1] > SEQ_MODE_REALTIME || p[2] > 15 || p[4] > 127 || p[5] < 1 || p[5] > 100 ||
+            p[6] > SEQ_RATE_COUNT || p[7] > 1) {
+            return SEQ_LOAD_BAD_VALUE;
+        }
+        seq_line_t *l = &s->lines[p[0]];
+        l->mode = p[1];
+        l->channel = p[2];
+        l->mute = p[3] & 1;
+        l->velocity = p[4];
+        l->gate = p[5];
+        l->quantize = p[6];
+        l->rec_mode = p[7];
+        memcpy(l->name, p + 8, SEQ_NAME_LEN);
+        l->name[SEQ_NAME_LEN] = '\0';
+        return SEQ_LOAD_OK;
+    }
+    if (id == ID_CHAN) {
+        if (size < 2 || size < 2 + 2u * p[0]) return SEQ_LOAD_BAD_CHUNK;
+        if (p[0] > SEQ_MAX_CHAIN) return SEQ_LOAD_BAD_VALUE;
+        for (int i = 0; i < p[0]; i++) {
+            uint8_t pat = p[2 + i * 2], rep = p[3 + i * 2];
+            if (pat >= SEQ_MAX_PATTERNS || rep < 1 || rep > SEQ_MAX_REPEAT) return SEQ_LOAD_BAD_VALUE;
+            s->chain[i].pattern = pat;
+            s->chain[i].repeat = rep;
+        }
+        s->chain_len = p[0];
+        return SEQ_LOAD_OK;
+    }
+    if (id == ID_PATN) {
+        if (size < PATN_SIZE) return SEQ_LOAD_BAD_CHUNK;
+        if (p[0] >= SEQ_MAX_PATTERNS || s->patterns[p[0]]) return SEQ_LOAD_BAD_CHUNK;
+        if (p[1] > SEQ_MAX_BARS) return SEQ_LOAD_BAD_VALUE;
+        seq_pattern_t *pat = seq_pattern_get(s, p[0], true);
+        if (!pat) return SEQ_LOAD_NO_MEMORY;
+        pat->length = p[1];
+        return SEQ_LOAD_OK;
+    }
+    if (id == ID_PLIN) {
+        if (size < PLIN_SIZE) return SEQ_LOAD_BAD_CHUNK;
+        if (p[0] >= SEQ_MAX_PATTERNS || !s->patterns[p[0]] || p[1] >= s->line_count) return SEQ_LOAD_BAD_CHUNK;
+        if (!steps_ok(p[2]) || p[3] >= SEQ_RATE_COUNT || !bars_ok(p[4])) return SEQ_LOAD_BAD_VALUE;
+        seq_pattern_line_t *pl = &s->patterns[p[0]]->lines[p[1]];
+        pl->steps = p[2];
+        pl->rate = p[3];
+        pl->bars = p[4];
+        pl->flags = p[5];
+        return SEQ_LOAD_OK;
+    }
+    if (id == ID_GRID) return load_notes(ld, true, p, size);
+    if (id == ID_RTEV) return load_notes(ld, false, p, size);
+    return SEQ_LOAD_OK;
+}
+
+static bool known_chunk(uint32_t id)
+{
+    return id == ID_HEAD || id == ID_LINE || id == ID_CHAN || id == ID_PATN ||
+           id == ID_PLIN || id == ID_GRID || id == ID_RTEV || id == ID_CRC;
+}
+
+// A chunk's payload is all there
+static void payload_done(seq_loader_t *ld)
+{
+    if (ld->id == ID_CRC) {
+        if (get32(ld->buf) != ld->crc) {
+            ld->error = SEQ_LOAD_BAD_CRC;
+        } else if (!ld->seen_head) {
+            ld->error = SEQ_LOAD_BAD_CHUNK;
+        } else {
+            ld->state = LD_AFTER;
+        }
+        return;
+    }
+    ld->crc = crc32_update(ld->crc, ld->buf, (int)ld->size);
+    ld->error = load_chunk(ld, ld->id, ld->buf, ld->size);
+    ld->state = LD_HEADER;
+}
+
+int seq_load_feed(seq_loader_t *ld, const uint8_t *data, int len)
+{
+    if (!ld) return SEQ_LOAD_NO_MEMORY;
+    while (len > 0 && ld->error == SEQ_LOAD_OK) {
+        switch (ld->state) {
+            case LD_MAGIC:
+            case LD_HEADER: {
+                int take = 8 - ld->hdr_n;
+                if (take > len) take = len;
+                memcpy(ld->hdr + ld->hdr_n, data, (size_t)take);
+                ld->hdr_n += take;
+                data += take;
+                len -= take;
+                if (ld->hdr_n < 8) break;
+                ld->hdr_n = 0;
+                if (ld->state == LD_MAGIC) {
+                    if (memcmp(ld->hdr, "MSEQ", 4) != 0) {
+                        ld->error = SEQ_LOAD_BAD_MAGIC;
+                    } else if (get16(ld->hdr + 4) != SEQ_FILE_VERSION) {
+                        ld->error = SEQ_LOAD_BAD_VERSION;
+                    } else {
+                        ld->crc = crc32_update(ld->crc, ld->hdr, 8);
+                        ld->state = LD_HEADER;
+                    }
+                    break;
+                }
+                ld->id = get32(ld->hdr);
+                ld->size = get32(ld->hdr + 4);
+                ld->got = 0;
+                if (ld->id != ID_CRC) ld->crc = crc32_update(ld->crc, ld->hdr, 8);
+                if (!known_chunk(ld->id)) {
+                    ld->state = LD_SKIP;
+                } else if (ld->size > SEQ_DUMP_MAX_CHUNK - 8 || (ld->id == ID_CRC && ld->size != 4)) {
+                    ld->error = SEQ_LOAD_BAD_CHUNK;
+                } else {
+                    ld->state = LD_PAYLOAD;
+                    if (ld->size == 0) payload_done(ld);
+                }
+                break;
+            }
+            case LD_PAYLOAD: {
+                uint32_t take = ld->size - ld->got;
+                if (take > (uint32_t)len) take = (uint32_t)len;
+                memcpy(ld->buf + ld->got, data, take);
+                ld->got += take;
+                data += take;
+                len -= (int)take;
+                if (ld->got == ld->size) payload_done(ld);
+                break;
+            }
+            case LD_SKIP: {
+                uint32_t take = ld->size - ld->got;
+                if (take > (uint32_t)len) take = (uint32_t)len;
+                ld->crc = crc32_update(ld->crc, data, (int)take);
+                ld->got += take;
+                data += take;
+                len -= (int)take;
+                if (ld->got == ld->size) ld->state = LD_HEADER;
+                break;
+            }
+            default:
+                return SEQ_LOAD_OK;   // Anything after the CRC is ignored
+        }
+    }
+    return ld->error;
+}
+
+int seq_load_finish(seq_loader_t *ld, seq_engine_t **song, uint8_t *flags)
+{
+    *song = NULL;
+    if (!ld) return SEQ_LOAD_NO_MEMORY;
+    if (ld->error != SEQ_LOAD_OK) return ld->error;
+    if (ld->state != LD_AFTER) return SEQ_LOAD_TRUNCATED;
+    seq_engine_t *s = ld->song;
+    s->chain_on = (ld->flags & SEQ_FILE_CHAIN_ON) && s->chain_len > 0;
+    if (flags) *flags = ld->flags;
+    ld->song = NULL;
+    *song = s;
+    return SEQ_LOAD_OK;
+}
+
+const char *seq_load_error_name(int err)
+{
+    switch (err) {
+        case SEQ_LOAD_OK:             return "ok";
+        case SEQ_LOAD_BAD_MAGIC:      return "not a sequencer file";
+        case SEQ_LOAD_BAD_VERSION:    return "unsupported version";
+        case SEQ_LOAD_BAD_CHUNK:      return "broken file";
+        case SEQ_LOAD_BAD_VALUE:      return "value out of range";
+        case SEQ_LOAD_TOO_MANY_NOTES: return "too many notes";
+        case SEQ_LOAD_BAD_CRC:        return "checksum mismatch";
+        case SEQ_LOAD_TRUNCATED:      return "file cut short";
+        case SEQ_LOAD_NO_MEMORY:      return "out of memory";
+        default:                      return "error";
+    }
+}
+
+void seq_engine_adopt(seq_engine_t *e, seq_engine_t *song)
+{
+    all_notes_off(e);
+    for (int p = 0; p < SEQ_MAX_PATTERNS; p++) {
+        pattern_free(e, p);
+        e->patterns[p] = song->patterns[p];
+        song->patterns[p] = NULL;
+    }
+    e->line_count = song->line_count;
+    memcpy(e->lines, song->lines, sizeof(e->lines));
+    memcpy(e->chain, song->chain, sizeof(e->chain));
+    e->chain_len = song->chain_len;
+    e->chain_on = song->chain_on;
+    memcpy(e->name, song->name, sizeof(e->name));
+    e->bpm_x100 = song->bpm_x100;
+    e->song_notes = song->song_notes;
+    song->song_notes = 0;
+    e->next_pattern = -1;
+    e->edit_pattern = -1;
+    e->chain_pos = 0;
+    e->chain_repeat = 0;
+    set_play_pattern(e, song->play_pattern);
+    e->edits++;
+    seq_engine_free(song);
+}

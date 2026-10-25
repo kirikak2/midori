@@ -74,6 +74,17 @@ bool replace_with_chord(int line, int step);
 // script set anything up. 0 when there is no clock to route.
 uint8_t ensure_clock();
 
+// The File sheet: ask Ruby to do something (UI_SEQ_REQ_*), and what it
+// listed (files_serial changes with each new list)
+void request(int op, const char* name);
+uint32_t files_serial();
+int  file_count();
+bool file_name(int index, char* buf, int size);
+// A message for the header, while it is fresh
+bool status(char* buf, int size);
+// Changed since it was saved by name
+bool dirty();
+
 // How many notes start at `step`, and the longest of them
 int  starting_at(int line, int step, int* longest);
 

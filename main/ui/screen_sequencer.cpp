@@ -100,7 +100,20 @@ ScreenSequencer::ScreenSequencer()
     , m_lastPlay(-1), m_lastNext(-1), m_lastEdit(-1)
     , m_lastRunning(false), m_lastChain(false)
     , m_lastUsed(0)
+    , m_fileSheet(false)
+    , m_fileSel(-1)
+    , m_fileScroll(0)
+    , m_fileConfirm(-1)
+    , m_fileCount(0)
+    , m_filesSerial(0)
+    , m_files(nullptr)
+    , m_fileRowH(24)
+    , m_fileRows(1)
+    , m_dirty(false)
 {
+    m_status[0] = '\0';
+    memset(m_fileBtn, 0, sizeof(m_fileBtn));
+    memset(&m_fileList, 0, sizeof(m_fileList));
 #if !defined(UI_LAYOUT_LARGE)
     m_viewSteps = 8;
 #endif
@@ -230,6 +243,20 @@ void ScreenSequencer::computeGeom()
     m_btn[BTN_FOLLOW] = { x, y2, followW, bh };
     int playW = wide ? 160 : 56;
     m_btn[BTN_PLAY] = { right - playW, y2, playW, bh };
+    int fileW = wide ? 200 : 50;
+    m_btn[BTN_FILE] = { right - playW - gap - fileW, y2, fileW, bh };
+
+    // File sheet: the songs on the left, the buttons down the right
+    int listW = m_areaW * 3 / 5;
+    m_fileList = { m_areaX, g.linesY, listW, m_areaY + m_areaH - g.linesY };
+    m_fileRowH = wide ? 48 : 24;
+    m_fileRows = m_fileList.h / m_fileRowH;
+    if (m_fileRows < 1) m_fileRows = 1;
+    int fbx = m_areaX + listW + gap * 2;
+    int fbh = (m_areaY + m_areaH - g.linesY) / FB_COUNT;
+    for (int i = 0; i < FB_COUNT; i++) {
+        m_fileBtn[i] = { fbx, g.linesY + i * fbh + gap, right - fbx, fbh - gap * 2 };
+    }
 
     // Settings sheet: a title row, then 4 x 4 buttons
     memset(m_sheetBtn, 0, sizeof(m_sheetBtn));
@@ -376,6 +403,14 @@ void ScreenSequencer::renderHeader(LovyanGFX* g, int ox, int oy)
            m_follow ? COL_ON : COL_BTN, COL_WHITE);
     button(g, ox, oy, m_btn[BTN_PLAY], v.running ? "Stop" : "Play",
            v.running ? COL_SLOT_PLAY : COL_SLOT_USED, COL_WHITE);
+    // The song's name (* while unsaved), or a fresh message from saving
+    if (m_status[0]) {
+        snprintf(buf, sizeof(buf), "%s", m_status);
+    } else {
+        snprintf(buf, sizeof(buf), "%s%s", v.name[0] ? v.name : "File", m_dirty ? "*" : "");
+    }
+    button(g, ox, oy, m_btn[BTN_FILE], buf, m_fileSheet ? COL_ON : COL_BTN,
+           m_status[0] ? COL_YELLOW : COL_WHITE);
 }
 
 void ScreenSequencer::renderLine(LovyanGFX* g, int ox, int oy, int line, int y)
@@ -561,11 +596,43 @@ void ScreenSequencer::renderSheet(LovyanGFX* g, int ox, int oy)
     button(g, ox, oy, m_sheetBtn[SB_CLOSE], "Close", COL_SLOT_USED, COL_WHITE);
 }
 
+void ScreenSequencer::renderFiles(LovyanGFX* g, int ox, int oy)
+{
+    int ts = m_g.textSize;
+    const Rect& lr = m_fileList;
+    if (m_fileCount == 0) {
+        text(g, ox, oy, lr.x + 8, lr.y + 8, lr.w - 16, "No songs saved yet", COL_TEXT_DIM, ts);
+    }
+    for (int r = 0; r < m_fileRows; r++) {
+        int i = m_fileScroll + r;
+        if (i >= m_fileCount) break;
+        int y = lr.y + r * m_fileRowH;
+        g->fillRect(lr.x - ox, y - oy, lr.w, m_fileRowH - 1, i == m_fileSel ? COL_NAME_SEL : COL_NAME_BG);
+        bool current = m_haveView && strcmp(m_files[i], m_view->name) == 0;
+        text(g, ox, oy, lr.x + 8, y + (m_fileRowH - GLYPH_H * ts) / 2, lr.w - 16, m_files[i],
+             current ? COL_YELLOW : COL_WHITE, ts);
+    }
+
+    bool sel = m_fileSel >= 0 && m_fileSel < m_fileCount;
+    static const char* LABELS[FB_COUNT] = { "Save", "Save new", "Load", "New", "Delete", "Close" };
+    for (int b = 0; b < FB_COUNT; b++) {
+        bool confirm = m_fileConfirm == b;
+        bool enabled = (b != FB_LOAD && b != FB_DELETE) || sel;
+        uint16_t bg = confirm ? COL_RED : (b == FB_CLOSE ? COL_SLOT_USED : COL_BTN);
+        button(g, ox, oy, m_fileBtn[b], confirm ? "Sure?" : LABELS[b], bg,
+               enabled ? COL_WHITE : COL_TEXT_DIM);
+    }
+}
+
 void ScreenSequencer::render(LovyanGFX* g, int ox, int oy)
 {
     if (!m_haveView) return;
     int clipEnd = m_clip.y + m_clip.h;
     if (m_clip.y < m_areaY + m_g.headerH) renderHeader(g, ox, oy);
+    if (m_fileSheet) {
+        renderFiles(g, ox, oy);
+        return;
+    }
     if (m_sheetLine >= 0) {
         renderSheet(g, ox, oy);
         return;
@@ -622,7 +689,7 @@ void ScreenSequencer::paintRow(int row)
 
 void ScreenSequencer::paintCell(int line, int col)
 {
-    if (col < 0 || line < m_scroll || line >= m_scroll + m_g.rows || m_sheetLine >= 0) return;
+    if (col < 0 || line < m_scroll || line >= m_scroll + m_g.rows || sheetOpen()) return;
     Rect r;
     cellRect(line, col, m_view->lines[line].shown, r);
     paint(r.x, r.y, r.w, r.h);
@@ -656,6 +723,7 @@ void ScreenSequencer::leave()
     m_isActive = false;
     memset(m_touch, 0, sizeof(m_touch));
     m_sheetLine = -1;
+    m_fileSheet = false;
 }
 
 void ScreenSequencer::draw()
@@ -676,7 +744,7 @@ void ScreenSequencer::moveWindow(int delta)
 void ScreenSequencer::follow()
 {
     const ui_seq::View& v = *m_view;
-    if (!m_follow || !v.running || v.shown != v.play || m_sheetLine >= 0) return;
+    if (!m_follow || !v.running || v.shown != v.play || sheetOpen()) return;
     int l = m_selected >= 0 && m_selected < v.lineCount ? m_selected : 0;
     const ui_seq::LineView& lv = v.lines[l];
     if (lv.cols <= m_viewSteps || lv.pos < 0) return;
@@ -747,6 +815,23 @@ void ScreenSequencer::update()
         paintHeader();
     }
 
+    // The File button: unsaved mark, messages from saving
+    bool dirty = ui_seq::dirty();
+    char status[sizeof(m_status)];
+    if (!ui_seq::status(status, sizeof(status))) status[0] = '\0';
+    if (dirty != m_dirty || strcmp(status, m_status) != 0) {
+        m_dirty = dirty;
+        strcpy(m_status, status);
+        paintHeader();
+    }
+
+    if (m_fileSheet) {
+        if (ui_seq::files_serial() != m_filesSerial) {
+            takeFiles();
+            paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
+        }
+        return;
+    }
     if (m_sheetLine >= 0) return;
     for (int l = 0; l < v.lineCount; l++) {
         int col = playColOf(l);
@@ -798,6 +883,14 @@ void ScreenSequencer::pressButton(int id)
             m_follow = !m_follow;
             paintHeader();
             break;
+        case BTN_FILE:
+            if (m_fileSheet) {
+                m_fileSheet = false;
+                closeSheet();
+            } else {
+                openFiles();
+            }
+            break;
         case BTN_PLAY: {
             // The Tempo's Play / Stop when the clock comes from the Tempo (its
             // other destinations start and stop along with it); with another
@@ -837,6 +930,7 @@ void ScreenSequencer::longPressButton(int id)
 
 void ScreenSequencer::openSheet(int line)
 {
+    m_fileSheet = false;
     m_sheetLine = line;
     m_selected = line;
     m_confirmDelete = false;
@@ -845,6 +939,7 @@ void ScreenSequencer::openSheet(int line)
 
 void ScreenSequencer::closeSheet()
 {
+    m_fileSheet = false;
     m_sheetLine = -1;
     m_confirmDelete = false;
     refresh(true);
@@ -912,6 +1007,93 @@ void ScreenSequencer::pressSheet(int id)
     paintAll();
 }
 
+// --- File sheet --------------------------------------------------------------
+
+void ScreenSequencer::takeFiles()
+{
+    m_filesSerial = ui_seq::files_serial();
+    if (!m_files) {
+        m_files = (char (*)[SEQ_SONG_NAME_LEN + 1])calloc(MAX_FILES, SEQ_SONG_NAME_LEN + 1);
+        if (!m_files) {
+            m_fileCount = 0;
+            return;
+        }
+    }
+    int n = ui_seq::file_count();
+    if (n > MAX_FILES) n = MAX_FILES;
+    m_fileCount = 0;
+    for (int i = 0; i < n; i++) {
+        if (ui_seq::file_name(i, m_files[m_fileCount], SEQ_SONG_NAME_LEN + 1)) m_fileCount++;
+    }
+    if (m_fileSel >= m_fileCount) m_fileSel = -1;
+    clampFileScroll();
+}
+
+void ScreenSequencer::clampFileScroll()
+{
+    int maxScroll = m_fileCount - m_fileRows;
+    if (maxScroll < 0) maxScroll = 0;
+    if (m_fileScroll > maxScroll) m_fileScroll = maxScroll;
+    if (m_fileScroll < 0) m_fileScroll = 0;
+}
+
+void ScreenSequencer::openFiles()
+{
+    m_sheetLine = -1;
+    m_fileSheet = true;
+    m_fileConfirm = -1;
+    takeFiles();
+    // The current song selected, so Load / Delete have a target at once
+    m_fileSel = -1;
+    for (int i = 0; m_haveView && i < m_fileCount; i++) {
+        if (strcmp(m_files[i], m_view->name) == 0) m_fileSel = i;
+    }
+    ui_seq::request(UI_SEQ_REQ_LIST, "");
+    paintAll();
+}
+
+void ScreenSequencer::pressFile(int id)
+{
+    bool sel = m_fileSel >= 0 && m_fileSel < m_fileCount;
+    bool confirmed = m_fileConfirm == id;
+    m_fileConfirm = -1;
+    switch (id) {
+        case FB_SAVE:
+            ui_seq::request(UI_SEQ_REQ_SAVE, m_haveView ? m_view->name : "");
+            break;
+        case FB_SAVE_NEW:
+            ui_seq::request(UI_SEQ_REQ_SAVE_NEW, "");
+            break;
+        case FB_LOAD:
+        case FB_NEW:
+            if (id == FB_LOAD && !sel) break;
+            // Unsaved changes: a second tap to go ahead (the autosave still has them)
+            if (m_dirty && !confirmed) {
+                m_fileConfirm = id;
+                break;
+            }
+            ui_seq::request(id == FB_LOAD ? UI_SEQ_REQ_LOAD : UI_SEQ_REQ_NEW,
+                            id == FB_LOAD ? m_files[m_fileSel] : "");
+            closeSheet();
+            return;
+        case FB_DELETE:
+            if (!sel) break;
+            if (!confirmed) {
+                m_fileConfirm = id;
+                break;
+            }
+            ui_seq::request(UI_SEQ_REQ_DELETE, m_files[m_fileSel]);
+            m_fileSel = -1;
+            break;
+        case FB_CLOSE:
+            closeSheet();
+            return;
+        default:
+            return;
+    }
+    paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
+}
+
 // --- Touch -------------------------------------------------------------------
 
 // Buttons that act on release, so a long press can mean something else
@@ -958,6 +1140,17 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             t.kind = T_BUTTON;
             t.target = (int8_t)b;
             if (!holdsForLongPress(b)) pressButton(b);
+            return;
+        }
+        if (m_fileSheet) {
+            for (int b = 0; b < FB_COUNT; b++) {
+                if (!m_fileBtn[b].has(x, y)) continue;
+                t.kind = T_FILE_BTN;
+                t.target = (int8_t)b;
+                pressFile(b);
+                return;
+            }
+            if (m_fileList.has(x, y)) t.kind = T_FILE_ROW;
             return;
         }
         if (m_sheetLine >= 0) {
@@ -1028,6 +1221,14 @@ void ScreenSequencer::onTouch(int touchId, int x, int y, bool pressed)
             }
             break;
         }
+        case T_FILE_ROW:
+            if (!t.moved) {
+                int i = m_fileScroll + (t.y0 - m_fileList.y) / m_fileRowH;
+                m_fileSel = i < m_fileCount ? i : -1;
+                m_fileConfirm = -1;
+                paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
+            }
+            break;
         case T_PLUS:
             if (!t.moved) {
                 int index = ui_seq_add_line();
@@ -1074,6 +1275,18 @@ void ScreenSequencer::onTouchMove(int touchId, int x, int y)
                 m_scroll += steps;
                 clampScroll();
                 if (m_scroll != before) paintAll();
+            }
+            break;
+        }
+        case T_FILE_ROW: {
+            if (far) t.moved = true;
+            int steps = (t.lastY - y) / m_fileRowH;
+            if (steps != 0 && t.moved) {
+                t.lastY -= steps * m_fileRowH;
+                int before = m_fileScroll;
+                m_fileScroll += steps;
+                clampFileScroll();
+                if (m_fileScroll != before) paint(m_areaX, m_g.linesY, m_areaW, m_g.linesH);
             }
             break;
         }

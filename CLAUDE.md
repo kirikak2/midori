@@ -824,8 +824,9 @@ keys.show
 
 ## Sequencer（UI::Sequencer / 2026-10-25）
 
-詳細は [docs/SEQUENCER.md](docs/SEQUENCER.md)（設計と段階）。段階 1・2・4（エンジン・パターン・チェーン・Ruby API・
-画面 [main/ui/screen_sequencer.cpp](main/ui/screen_sequencer.cpp)・レイアウトの `sequencer`）まで実装、保存・録音は未。
+詳細は [docs/SEQUENCER.md](docs/SEQUENCER.md)（設計と段階）。段階 1〜4（エンジン・パターン・チェーン・Ruby API・
+保存と自動保存・画面 [main/ui/screen_sequencer.cpp](main/ui/screen_sequencer.cpp)・レイアウトの `sequencer`）まで実装、録音は未。
+保存（`.mseq`、`/sd/patterns/`、自動保存 `_autosave.mseq`）はビルドとホストテストのみで実機未確認。
 Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-25）。外部クロック同期・CoreS3 / CrowPanel は未確認。
 
 - ソング（ライン最大 16 本 × パターン 16 個 + チェーン）と再生は **ESP-IDF 非依存の
@@ -838,7 +839,11 @@ Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-
 - ノートは (pattern, line) ごとの**ソート済み配列**（`seq_note_t` 8 byte、grid はステップ単位・realtime は tick 単位）。
   配列ごと 512 / ソング全体 8192 ノート、PSRAM。エンジンは非スレッドセーフで、`ui_sequencer.cpp` が再帰ミューテックスで包む
 - ラインの設定（チャンネル・方式・ミュートなど）はソング共通、steps / rate / bars とノートはパターンごと
-- スクリプトが終わってもソングは残る（停止と `device:` の解除だけ）。Ruby: `UI::Sequencer.current` で取り直す
+- スクリプトが終わってもソングは残る（停止と `device:` の解除だけ）。Ruby: `UI::Sequencer.current` で取り直す。
+  `UI::Sequencer.new` のソングは一時的（自動保存しない）で、UI モードに戻ると自動保存のソングに戻る
+- 保存のファイル I/O は Ruby（C の `fopen` は `/sd` に届かない）。C は `.mseq` への直列化・検証だけ
+  （`seq_dump_*` / `seq_load_*`、書き出しはソングのコピーから）。UI モードはスクリプトのたびに起動し直すので、
+  自動保存を読むのは電源投入後の最初（C の `restored`）と一時的なソングの後だけ（`main_task_base.rb` の `setup_sequencer`）
 - Ruby のホストテスト: `ruby test/sequencer_test.rb`（picoruby-ui ディレクトリで）
 - 画面はエンジンを直接読まない。`ui_seq::snapshot()`（[main/ui/ui_sequencer.h](main/ui/ui_sequencer.h)）で見えている範囲を
   ヒープの View に写してから描く（描画中にロックを持つとシーケンサータスクが止まり、拍が遅れる）

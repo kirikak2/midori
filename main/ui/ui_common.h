@@ -677,9 +677,11 @@ void ui_seq_reset(int lines);            // An empty song of `lines` lines (1..1
 
 // Named parameters. The name decides what `pattern` / `line` mean:
 //   song     (both ignored): out_mask play_pattern (set: picks it, queued
-//            while running) edit_pattern (-1 follows) switch chain_on;
+//            while running) edit_pattern (-1 follows) switch chain_on
+//            bpm_x100 temporary restored; set-only: mark_clean mark_saved;
 //            read-only: transport_bit running line_count next_pattern
-//            chain_len song_tick pattern_tick song_notes edits
+//            chain_len song_tick pattern_tick song_notes edits dirty
+//            autosave_due
 //   line     (line):          mode channel mute velocity gate quantize rec_mode
 //   pattern  (pattern):       length (0 auto, 1..8 bars); read-only: used ticks
 //   pattern line (both):      steps rate bars; read-only: ticks
@@ -717,6 +719,39 @@ bool ui_seq_set_chain(const uint8_t* patterns, const uint8_t* repeats, int n);
 
 // The sequencer as a destination: what its transport's send_packet does
 void ui_seq_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
+
+// Files (.mseq). File I/O is Ruby's -- only PicoRuby's VFS reaches /sd --
+// so C turns the song into pieces and back. One write and one read at a
+// time. Writing copies the song first (begin), so edits made while Ruby
+// writes cannot tear the file. dump_end tells what the file was: saved by
+// name (no longer dirty) and / or the autosave.
+bool ui_seq_dump_begin(bool dirty_flag);
+int  ui_seq_dump_next(uint8_t* buf, int cap);       // 0 once done; cap >= UI_SEQ_DUMP_MAX
+void ui_seq_dump_end(bool saved, bool autosave);
+#define UI_SEQ_DUMP_MAX  (8 + 4 + 512 * 8)
+// Reading: nothing changes until commit, which checks the file and swaps the
+// song in (autosave: it was the autosave, whose dirty flag is kept). Returns
+// 0 or a negative error (ui_seq_load_error_name).
+bool ui_seq_load_begin(void);
+int  ui_seq_load_feed(const uint8_t* data, int len);
+int  ui_seq_load_commit(bool autosave);
+void ui_seq_load_abort(void);
+const char* ui_seq_load_error_name(int err);
+
+// What the screen's File sheet asks Ruby to do: the operation, and the file
+// name (without directory or extension) in name.
+typedef enum {
+    UI_SEQ_REQ_NONE = 0,
+    UI_SEQ_REQ_SAVE,       // Under its name (a new one if it has none)
+    UI_SEQ_REQ_SAVE_NEW,   // Under a new name
+    UI_SEQ_REQ_LOAD,
+    UI_SEQ_REQ_NEW,        // An empty song
+    UI_SEQ_REQ_DELETE,
+    UI_SEQ_REQ_LIST,       // List the files again
+} ui_seq_request_t;
+int  ui_seq_take_request(char* name, int size);
+void ui_seq_set_files(const char* names);           // Newline-separated, for the sheet
+void ui_seq_set_status(const char* message);        // Shown in the header for a while
 
 // --- Layouts ----------------------------------------------------------------
 // Script-defined screens of pads, knobs, XYPad... placed on a grid by Ruby

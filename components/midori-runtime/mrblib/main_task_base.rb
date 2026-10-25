@@ -231,6 +231,16 @@ rescue => e
   puts "MIDI devices setup failed: #{e.message}"
 end
 
+# The Sequencer's song (docs/SEQUENCER.md): the autosave is read the first
+# time after power-up and after a script's own song (UI::Sequencer.new), and
+# from then on the File sheet and the autosave are served from every run of
+# the MIDI filters (UI.process / MIDI.sleep_ms). Every mode, after the SD card.
+def setup_sequencer
+  UI::Sequencer._setup
+rescue => e
+  puts "Sequencer setup failed: #{e.message}"
+end
+
 # Named MIDI filters kept on the SD card (docs/MIDI_FILTER_REGISTRY.md):
 # every /sd/filters/*.rb, by name, each expected to MIDI.register_filter
 # what it defines. Subdirectories and files starting with "_" are left for
@@ -491,6 +501,7 @@ if sm.irb_requested?
 
   load_filters
   setup_midi_devices
+  setup_sequencer
   run_irb_session
   puts "irb finished, exiting to supervisor"
 
@@ -520,6 +531,7 @@ elsif script_to_run
 
   load_filters
   setup_midi_devices
+  setup_sequencer
   run_script(script_to_run)
   puts "Script completed, exiting to supervisor"
   # main_task.rb ends here, supervisor will detect and restart in UI mode
@@ -585,6 +597,7 @@ else
   # come first so the saved chains find theirs.
   load_filters
   setup_midi_devices
+  setup_sequencer
 
   GC.start
 
@@ -647,6 +660,7 @@ else
       if $sd_available
         notify_scripts_to_c
         load_filters
+        UI::Sequencer._send_list rescue nil
         puts "SD card re-initialized successfully"
       else
         puts "SD card not available"

@@ -256,6 +256,69 @@ void seq_notes_clear(seq_engine_t *e, int pattern, int line, int mode);
 
 void seq_set_chord(seq_engine_t *e, const uint8_t *notes, const uint8_t *velocities, int n);
 
+// --- Files (.mseq) ------------------------------------------------------------
+//
+// A song as a file: "MSEQ", version, then chunks (id, u32 size, payload),
+// little-endian, ending in a CRC32 of everything before it. Chunks a reader
+// does not know are skipped. See docs/SEQUENCER.md for the layout.
+
+#define SEQ_FILE_VERSION      1
+// The largest piece seq_dump_next() writes (a full note array's chunk)
+#define SEQ_DUMP_MAX_CHUNK    (8 + 4 + SEQ_MAX_NOTES * 8)
+
+// HEAD flags
+#define SEQ_FILE_CHAIN_ON     0x01
+#define SEQ_FILE_DIRTY        0x02   // Changed since it was last saved by name (autosave)
+
+// A deep copy of the song (lines, patterns, chain, name, current pattern),
+// with no output and nothing playing; NULL when out of memory. Free with
+// seq_engine_free(). Writing goes from a copy so edits made meanwhile
+// cannot tear the file.
+seq_engine_t *seq_song_clone(const seq_engine_t *e);
+
+typedef struct {
+    uint8_t  phase;
+    uint8_t  pattern;
+    uint8_t  line;
+    uint8_t  part;
+    uint8_t  flags;
+    uint32_t crc;
+} seq_dump_t;
+
+void seq_dump_begin(seq_dump_t *d, uint8_t flags);
+// The next piece of the file into buf (cap at least SEQ_DUMP_MAX_CHUNK).
+// Returns its length; 0 once the whole file has been written.
+int  seq_dump_next(const seq_engine_t *e, seq_dump_t *d, uint8_t *buf, int cap);
+
+typedef enum {
+    SEQ_LOAD_OK = 0,
+    SEQ_LOAD_BAD_MAGIC = -1,
+    SEQ_LOAD_BAD_VERSION = -2,
+    SEQ_LOAD_BAD_CHUNK = -3,      // Out of order, too short, or a size that cannot be
+    SEQ_LOAD_BAD_VALUE = -4,      // A value out of range, unsorted notes...
+    SEQ_LOAD_TOO_MANY_NOTES = -5,
+    SEQ_LOAD_BAD_CRC = -6,
+    SEQ_LOAD_TRUNCATED = -7,
+    SEQ_LOAD_NO_MEMORY = -8,
+} seq_load_error_t;
+
+typedef struct seq_loader seq_loader_t;
+
+// Reading: feed the file in pieces of any size, then finish. Nothing of the
+// live song is touched until seq_engine_adopt().
+seq_loader_t *seq_load_begin(void);
+int  seq_load_feed(seq_loader_t *ld, const uint8_t *data, int len);   // SEQ_LOAD_*
+// Checks the file is whole (CRC included); hands over the song it holds
+// and the HEAD flags. On error *song is NULL.
+int  seq_load_finish(seq_loader_t *ld, seq_engine_t **song, uint8_t *flags);
+void seq_load_free(seq_loader_t *ld);
+const char *seq_load_error_name(int err);
+
+// Moves a loaded song into the live engine (its notes off first, stopped
+// or not: it keeps playing from the top of the song's current pattern) and
+// frees what is left of `song`.
+void seq_engine_adopt(seq_engine_t *e, seq_engine_t *song);
+
 #ifdef __cplusplus
 }
 #endif

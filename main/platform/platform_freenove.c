@@ -636,6 +636,66 @@ void ui_seq_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
     (void)cin; (void)b1; (void)b2; (void)b3;
 }
 
+bool ui_seq_dump_begin(bool dirty_flag)
+{
+    (void)dirty_flag;
+    return false;
+}
+
+int ui_seq_dump_next(uint8_t *buf, int cap)
+{
+    (void)buf; (void)cap;
+    return 0;
+}
+
+void ui_seq_dump_end(bool saved, bool autosave)
+{
+    (void)saved; (void)autosave;
+}
+
+bool ui_seq_load_begin(void)
+{
+    return false;
+}
+
+int ui_seq_load_feed(const uint8_t *data, int len)
+{
+    (void)data; (void)len;
+    return -8;
+}
+
+int ui_seq_load_commit(bool autosave)
+{
+    (void)autosave;
+    return -8;
+}
+
+void ui_seq_load_abort(void)
+{
+}
+
+const char *ui_seq_load_error_name(int err)
+{
+    (void)err;
+    return "no sequencer";
+}
+
+int ui_seq_take_request(char *name, int size)
+{
+    if (name && size > 0) name[0] = '\0';
+    return 0;
+}
+
+void ui_seq_set_files(const char *names)
+{
+    (void)names;
+}
+
+void ui_seq_set_status(const char *message)
+{
+    (void)message;
+}
+
 // MIDI Devices stubs (docs/UI_MIDI_DEVICES.md) - no screen to patch on. The
 // list stays empty, so UI::MIDIDevices has no devices, no selection and
 // nothing saved; MIDI.route itself works as everywhere.

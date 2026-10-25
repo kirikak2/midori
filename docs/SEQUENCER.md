@@ -1,7 +1,8 @@
 # Sequencer（UI::Sequencer）
 
-> **状態: 段階 1・2・4 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
-> 和音の取り込み）、トランスポート、Ruby API、画面とレイアウト部品まで。保存・録音は未実装（「段階」を参照）。
+> **状態: 段階 1〜4 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
+> 和音の取り込み）、トランスポート、Ruby API、保存と自動保存、画面とレイアウト部品まで。録音は未実装（「段階」を参照）。
+> 保存（段階 3）はビルドとホストのテストのみで、実機では未確認。
 > Tab5 の実機で画面の表示と Play / Stop による再生を確認（2026-10-25）。それ以外（編集操作の細部、外部クロック同期、
 > CoreS3 / CrowPanel）は未確認。
 > 改訂: 和音・16 ライン・保存・1/2 ページ送り → パターン（スロット + チェーン）・自動保存（いずれも 2026-10-25）
@@ -12,14 +13,15 @@
 |---|---|
 | 1. エンジン + grid + Ruby API | 済。`main/ui/seq_engine.{h,c}`、`main/ui/ui_sequencer.cpp`、`mrblib/ui_sequencer.rb` |
 | 2. パターンとチェーン | 済（エンジンと Ruby API。画面の操作は段階 4） |
-| 3. 保存と自動保存 | 未 |
+| 3. 保存と自動保存 | 済（実機未確認）。`.mseq` の読み書きは `seq_engine.c`（`seq_song_clone` / `seq_dump_*` / `seq_load_*` / `seq_engine_adopt`）、自動保存の判定と画面の要求は `ui_sequencer.cpp`、ファイル I/O は `mrblib/ui_sequencer.rb`（`save` / `load` / `songs` / `to_h` / `restore` / `_setup` / `_poll`）、起動時は `main_task_base.rb` の `setup_sequencer`、画面は File ボタンとシート |
 | 4. 画面 + レイアウト | 済（下記の一部を除く）。`main/ui/screen_sequencer.{h,cpp}`、`UI_SCREEN_SEQUENCER`（= 12）/ `:sequencer` / `UI.sequencer` / `seq.show`、レイアウトの `sequencer`（`UI_WIDGET_SEQUENCER` = 6） |
 | 5. リアルタイム録音 | 未（realtime ラインの**再生**と `add_event` / `notes=` は済） |
 | 6. 仕上げ | MIDI Devices への登録は済（内蔵デバイス `seq`）。既定パッチ Tempo → seq と `on_*` は未 |
 
 - 段階 4 で**まだ無いもの**: スロット長押しのメニュー（Copy / Paste / Clear / Length。いまの長押しは
   「再生中のまま編集」の切り替えだけ）、Chain の編集シート（チェーンは Ruby の `seq.chain =` で組む）、
-  File ボタン（段階 3）、ライン名の編集、Chord の試聴、ラインごとの Copy / Paste
+  ライン名の編集、Chord の試聴、ラインごとの Copy / Paste、ファイル名の入力（画面からの保存は
+  いまの名前か `SONGnnn`。名前は Ruby の `seq.save("name")` で付ける）
 - 画面は 1 フレームに 1 回 `ui_seq::snapshot()` で見えている範囲だけをヒープ（PSRAM）の View に写して描く
   （描画中にエンジンのロックを持たない）。曲が変わったら全体、再生位置は出入りしたマスだけを描き直す
 - テスト: `make -C main/ui/host_test`（C、ASan / UBSan 付き）、`ruby test/sequencer_test.rb`（picoruby-ui ディレクトリで）
@@ -27,7 +29,15 @@
 - `ui_seq_init()` は UIManager の初期化で `ui_tempo_init()` の直後に呼ぶ。トランスポートのビットは Clock の次に取るので、
   Keys のビットは以前より 1 つ後ろにずれる（MIDI Devices のパッチは名前で保存しているので影響なし）
 - スクリプト終了時（`UIManager::scriptCleanup`）は停止して `device:` を外すだけで、ソングは残る。
-  「一時的なソング」（`UI::Sequencer.new` で作ったものを自動保存のソングに戻す）は段階 3 で入れる
+  `UI::Sequencer.new` の一時的なソングは、UI モードの `setup_sequencer` が自動保存のソングに戻す
+- **UI モードはスクリプトが終わるたびに新しい VM で起動し直す**ので、自動保存を読むのは C の `restored`
+  （電源投入後に一度読んだか）が 0 のときと、`temporary`（一時的なソング）が 1 のときだけ。それ以外は C の
+  ソングをそのまま使う（読み直すと画面で作業中のソングを古い自動保存で上書きしてしまう）
+- 書き出しは `ui_seq_dump_begin` がロックを取ってソングを丸ごとコピー（PSRAM、最大 70KB 程度）し、以後は
+  コピーから 1 チャンクずつ渡す（Ruby がチャンクを書いている間の編集でファイルが食い違わないように）。
+  読み込みは別のソングに組み立て、CRC と中身を検証してから `seq_engine_adopt` で差し替える
+- `.mseq` のテスト: 往復（1 byte ずつ〜一括で読ませる）、途中で切れたファイル、1 byte でも壊れたファイル、
+  違う種類 / 版のファイル、知らないチャンクの読み飛ばし、上限いっぱい（8192 ノート）のソング
 
 複数のライン（トラック）を持つステップ / リアルタイム兼用のシーケンサー。
 Keys と同じく **picoruby-midi のトランスポート**で、`MIDI.route` の送信元（midi out）にも
@@ -331,7 +341,7 @@ offset  size  内容
 | チャンク | 個数 | payload |
 |---|---|---|
 | `HEAD` | 1 | `ppqn u16`(=96)、`line_count u8`、`flags u8`（bit0 = chain_on）、`bpm_x100 u16`（0 = 不明）、`current_pattern u8`、`reserved u8`、`name[16]`（NUL 埋め） |
-| `LINE` | ライン数 | `index u8`、`mode u8`、`channel u8`、`flags u8`（bit0 = mute）、`velocity u8`（0 = `:input`）、`gate u8`、`quantize u8`（0 = なし）、`rec_mode u8`、`name[8]` |
+| `LINE` | ライン数 | `index u8`、`mode u8`、`channel u8`、`flags u8`（bit0 = mute）、`velocity u8`（0 = `:input`）、`gate u8`、`quantize u8`（0 = なし）、`rec_mode u8`、`name[8]`（計 16 byte） |
 | `CHAN` | 0..1 | `count u8`、`reserved u8`、`(pattern u8, repeat u8) × count` |
 | `PATN` | 使っているスロット数 | `index u8`、`length u8`（0 = auto） |
 | `PLIN` | PATN ごとに 0..ライン数 | `pattern u8`、`line u8`、`steps u8`、`rate u8`、`bars u8`、`flags u8` |
@@ -366,13 +376,15 @@ offset  size  内容
 ### 置き場所と画面からの操作
 
 - 既定のディレクトリは **`/sd/patterns/`**（無ければ作る）。SD が無ければ littlefs の `/patterns/`
-- 画面のヘッダの **File** ボタンでシートを開く: ファイル一覧（Ruby が `Dir.open` で列挙して C に渡す。
-  `_` で始まるファイルは出さない）、**Save**（いまの名前で上書き。未保存なら `SONG001` から空いている番号）、
-  **Save as new**、**Load**、**New**（既定の空ソング）、**Delete**（確認あり）。変更があるとヘッダのソング名に `*`
+- ヘッダ 2 段目の **File** ボタン（ソング名を表示。未保存なら `groove*`、保存の結果などのメッセージは 3 秒間ここに出る）で
+  シートを開く: 左にファイル一覧（Ruby が `Dir.open` で列挙して C に渡す。`_` で始まるファイルは出さない。
+  いまのソングは黄色）、右にボタン **Save**（いまの名前で上書き。名前が無ければ `SONG001` から空いている番号）、
+  **Save new**（新しい `SONGnnn`）、**Load**、**New**（既定の空ソング）、**Delete**（2 回押しで確定）、**Close**
 - 画面の操作は C 側に「要求」（操作とファイル名）を 1 件積むだけで、実際の I/O は Ruby の
-  `UI::Sequencer._poll` が `UI.process` の中で行う（`UI::MIDIDevices._poll` と同じ方式）。
-  UI モードのループは `UI.process` を回しているので、スクリプトが無いときも動く。
-  スクリプト実行中は、そのスクリプトが `UI.process` を回している間だけ動く
+  `UI::Sequencer._poll` が行う。`_poll` は `$__midi_filter_hooks__` に載せてあり、`MIDI.run_filters` の先頭で
+  呼ばれる（`MIDI.sleep_ms` が 50ms ごとに呼ぶ。`UI::MIDIDevices._poll` と同じ）。UI モードのループは
+  `MIDI.sleep_ms(100)` を回しているので、スクリプトが無いときも動く。スクリプト実行中は、そのスクリプトが
+  `MIDI.sleep_ms` か `MIDI.run_filters` を回している間だけ動く
 - 未保存の変更があるまま Load / New しようとしたら確認を出す（自動保存があるので作業は失われないが、
   名前付きのファイルには入っていないことを知らせる）
 
@@ -389,11 +401,12 @@ offset  size  内容
   - Stop を受けたとき
 - **起動時**、どのモードでも `main_task_base.rb` の `setup_sequencer` が `_autosave.mseq` を読む
   （`load_filters` と `setup_midi_devices` の並び。読めなければ既定の空ソング）。`.bak` の扱いは通常の読み込みと同じ
-- 書き込みは Ruby（`_poll`）が行うので、`UI.process` を回していないスクリプトの実行中は書かれない。
+- 書き込みは Ruby（`_poll`）が行うので、`MIDI.sleep_ms` / `MIDI.run_filters` を回していないスクリプトの実行中は書かれない。
   スクリプトが終われば UI モードのループで書かれる。**その間に電源を切ると、最後の自動保存以降の変更は失われる**
-- SD への書き込み中も再生は止まらない（seq タスクは VM とは別のタスクで、モデルは読み出しの間だけロックする。
-  直列化はチャンクごとにロックを取り直すので、再生を長く止めない）
-- 書き込みに失敗したら（SD が抜けたなど）ヘッダに警告を出し、次の契機で再試行する
+- SD への書き込み中も再生は止まらない（seq タスクは VM とは別のタスクで、ロックを持つのは書き出しの最初に
+  ソングをコピーする間だけ）
+- 書き込みに失敗したら（SD が抜けたなど）File ボタンに「Autosave failed」を出し、10 秒おきに再試行する
+- 判定は C（`autosave_due`）: Ruby が見に来るたびに編集の回数を比べ、変わっていれば時刻を記録する
 
 #### スクリプトと自動保存
 

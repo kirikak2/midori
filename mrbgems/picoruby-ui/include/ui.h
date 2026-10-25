@@ -226,6 +226,19 @@ void picoruby_ui_seq_set_chord(const uint8_t *notes, const uint8_t *velocities, 
 int  picoruby_ui_seq_get_chain(uint8_t *patterns, uint8_t *repeats, int max);
 bool picoruby_ui_seq_set_chain(const uint8_t *patterns, const uint8_t *repeats, int n);
 void picoruby_ui_seq_receive(int cin, int b1, int b2, int b3);
+/* Files: C makes the pieces, Ruby does the I/O (see ui_common.h) */
+#define PICORUBY_UI_SEQ_DUMP_MAX (8 + 4 + 512 * 8)
+bool picoruby_ui_seq_dump_begin(bool dirty_flag);
+int  picoruby_ui_seq_dump_next(uint8_t *buf, int cap);
+void picoruby_ui_seq_dump_end(bool saved, bool autosave);
+bool picoruby_ui_seq_load_begin(void);
+int  picoruby_ui_seq_load_feed(const uint8_t *data, int len);
+int  picoruby_ui_seq_load_commit(bool autosave);
+void picoruby_ui_seq_load_abort(void);
+const char *picoruby_ui_seq_load_error_name(int err);
+int  picoruby_ui_seq_take_request(char *name, int size);
+void picoruby_ui_seq_set_files(const char *names);
+void picoruby_ui_seq_set_status(const char *message);
 
 /* Tempo (docs/TEMPO.md): a MIDI device that sends clock at the UI BPM.
  * tempo_bit is its transport bit (0 when the registry was full). */
