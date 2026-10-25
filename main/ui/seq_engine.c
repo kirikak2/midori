@@ -200,6 +200,9 @@ static void pline_defaults(seq_pattern_line_t *pl)
     pl->rate = SEQ_RATE_16;
     pl->bars = 1;
     pl->flags = 0;
+    pl->program = SEQ_PROGRAM_NONE;
+    pl->bank_msb = SEQ_PROGRAM_NONE;
+    pl->bank_lsb = SEQ_PROGRAM_NONE;
     pl->grid.v = NULL;
     pl->grid.n = pl->grid.cap = 0;
     pl->rt.v = NULL;
@@ -390,10 +393,72 @@ bool seq_pline_copy(seq_engine_t *e, int src_pattern, int src_line, int dst_patt
     to->rate = from->rate;
     to->bars = from->bars;
     to->flags = from->flags;
+    to->program = from->program;
+    to->bank_msb = from->bank_msb;
+    to->bank_lsb = from->bank_lsb;
     to->grid = grid;
     to->rt = rt;
     e->edits++;
     return true;
+}
+
+static int none_or(uint8_t v)
+{
+    return v == SEQ_PROGRAM_NONE ? -1 : v;
+}
+
+int seq_pline_program(const seq_engine_t *e, int pattern, int line)
+{
+    const seq_pattern_t *pat = pattern_peek(e, pattern);
+    return (pat && line >= 0 && line < SEQ_MAX_LINES) ? none_or(pat->lines[line].program) : -1;
+}
+
+int seq_pline_bank_msb(const seq_engine_t *e, int pattern, int line)
+{
+    const seq_pattern_t *pat = pattern_peek(e, pattern);
+    return (pat && line >= 0 && line < SEQ_MAX_LINES) ? none_or(pat->lines[line].bank_msb) : -1;
+}
+
+int seq_pline_bank_lsb(const seq_engine_t *e, int pattern, int line)
+{
+    const seq_pattern_t *pat = pattern_peek(e, pattern);
+    return (pat && line >= 0 && line < SEQ_MAX_LINES) ? none_or(pat->lines[line].bank_lsb) : -1;
+}
+
+bool seq_pline_set_program(seq_engine_t *e, int pattern, int line, int program)
+{
+    if (!line_ok(e, line) || program < -1 || program > 127) return false;
+    seq_pattern_t *pat = seq_pattern_get(e, pattern, true);
+    if (!pat) return false;
+    pat->lines[line].program = program < 0 ? SEQ_PROGRAM_NONE : (uint8_t)program;
+    e->edits++;
+    return true;
+}
+
+bool seq_pline_set_bank(seq_engine_t *e, int pattern, int line, int msb, int lsb)
+{
+    if (!line_ok(e, line) || msb < -1 || msb > 127 || lsb < -1 || lsb > 127) return false;
+    seq_pattern_t *pat = seq_pattern_get(e, pattern, true);
+    if (!pat) return false;
+    pat->lines[line].bank_msb = msb < 0 ? SEQ_PROGRAM_NONE : (uint8_t)msb;
+    pat->lines[line].bank_lsb = lsb < 0 ? SEQ_PROGRAM_NONE : (uint8_t)lsb;
+    e->edits++;
+    return true;
+}
+
+void seq_send_programs(seq_engine_t *e, int line)
+{
+    const seq_pattern_t *pat = e->patterns[e->play_pattern];
+    if (!pat || !e->out.message) return;
+    for (int l = 0; l < e->line_count; l++) {
+        if (line >= 0 && l != line) continue;
+        const seq_pattern_line_t *pl = &pat->lines[l];
+        if (pl->program == SEQ_PROGRAM_NONE) continue;
+        uint8_t ch = e->lines[l].channel & 0x0F;
+        if (pl->bank_msb != SEQ_PROGRAM_NONE) e->out.message(e->out.ctx, 0xB0 | ch, 0, pl->bank_msb);
+        if (pl->bank_lsb != SEQ_PROGRAM_NONE) e->out.message(e->out.ctx, 0xB0 | ch, 32, pl->bank_lsb);
+        e->out.message(e->out.ctx, 0xC0 | ch, pl->program, 0);
+    }
 }
 
 bool seq_pattern_set_length(seq_engine_t *e, int pattern, int bars)
@@ -499,6 +564,8 @@ static void set_play_pattern(seq_engine_t *e, int p)
     if (e->play_pattern != p) {
         e->play_pattern = (int8_t)p;
         e->pattern_changes++;
+        // A different pattern: its sounds (the same one looping sends nothing again)
+        e->programs_due = true;
     }
     e->pattern_tick = 0;
 }
@@ -876,6 +943,12 @@ static void process_tick(seq_engine_t *e)
         if (s->used && (int32_t)(e->song_tick - s->off_tick) >= 0) sounding_off(e, s);
     }
 
+    // A pattern starting: its sounds before its first notes
+    if (e->programs_due) {
+        e->programs_due = false;
+        seq_send_programs(e, -1);
+    }
+
     const seq_pattern_t *pat = e->patterns[e->play_pattern];
     if (pat) {
         for (int l = 0; l < e->line_count; l++) play_line(e, pat, l);
@@ -892,6 +965,7 @@ void seq_engine_start(seq_engine_t *e)
     e->song_tick = 0;
     e->pending = 0;
     e->next_pattern = -1;
+    e->programs_due = true;
     if (e->chain_on && e->chain_len > 0) {
         e->chain_pos = 0;
         e->chain_repeat = 0;
@@ -905,6 +979,7 @@ void seq_engine_continue(seq_engine_t *e)
 {
     e->running = true;
     e->pending = 0;
+    e->programs_due = true;
 }
 
 void seq_engine_stop(seq_engine_t *e)
@@ -985,7 +1060,7 @@ static const uint32_t ID_CRC  = CHUNK_ID('C', 'R', 'C', ' ');
 #define HEAD_SIZE  24
 #define LINE_SIZE  16
 #define PATN_SIZE  2
-#define PLIN_SIZE  6
+#define PLIN_SIZE  9    // 6 before programs: older files read with none
 #define NOTE_SIZE  8
 
 #define DUMP_HEAD  0
@@ -1122,7 +1197,9 @@ static int chunk_notes(uint8_t *buf, uint32_t id, int pattern, int line, const s
 
 static bool pline_is_default(const seq_pattern_line_t *pl)
 {
-    return pl->steps == 16 && pl->rate == SEQ_RATE_16 && pl->bars == 1 && pl->flags == 0;
+    return pl->steps == 16 && pl->rate == SEQ_RATE_16 && pl->bars == 1 && pl->flags == 0 &&
+           pl->program == SEQ_PROGRAM_NONE && pl->bank_msb == SEQ_PROGRAM_NONE &&
+           pl->bank_lsb == SEQ_PROGRAM_NONE;
 }
 
 // The next chunk of the patterns: PATN, then per line PLIN (unless default),
@@ -1163,6 +1240,9 @@ static int dump_pattern_chunk(const seq_engine_t *e, seq_dump_t *d, uint8_t *buf
             p[3] = pl->rate;
             p[4] = pl->bars;
             p[5] = pl->flags;
+            p[6] = pl->program;
+            p[7] = pl->bank_msb;
+            p[8] = pl->bank_lsb;
             return 8 + PLIN_SIZE;
         }
         if (part == 2 && pl->grid.n) return chunk_notes(buf, ID_GRID, d->pattern, l, &pl->grid);
@@ -1360,7 +1440,7 @@ static int load_chunk(seq_loader_t *ld, uint32_t id, const uint8_t *p, uint32_t 
         return SEQ_LOAD_OK;
     }
     if (id == ID_PLIN) {
-        if (size < PLIN_SIZE) return SEQ_LOAD_BAD_CHUNK;
+        if (size < 6) return SEQ_LOAD_BAD_CHUNK;
         if (p[0] >= SEQ_MAX_PATTERNS || !s->patterns[p[0]] || p[1] >= s->line_count) return SEQ_LOAD_BAD_CHUNK;
         if (!steps_ok(p[2]) || p[3] >= SEQ_RATE_COUNT || !bars_ok(p[4])) return SEQ_LOAD_BAD_VALUE;
         seq_pattern_line_t *pl = &s->patterns[p[0]]->lines[p[1]];
@@ -1368,6 +1448,14 @@ static int load_chunk(seq_loader_t *ld, uint32_t id, const uint8_t *p, uint32_t 
         pl->rate = p[3];
         pl->bars = p[4];
         pl->flags = p[5];
+        if (size >= PLIN_SIZE) {
+            for (int k = 6; k < 9; k++) {
+                if (p[k] > 127 && p[k] != SEQ_PROGRAM_NONE) return SEQ_LOAD_BAD_VALUE;
+            }
+            pl->program = p[6];
+            pl->bank_msb = p[7];
+            pl->bank_lsb = p[8];
+        }
         return SEQ_LOAD_OK;
     }
     if (id == ID_GRID) return load_notes(ld, true, p, size);
@@ -1518,6 +1606,7 @@ void seq_engine_adopt(seq_engine_t *e, seq_engine_t *song)
     e->chain_pos = 0;
     e->chain_repeat = 0;
     set_play_pattern(e, song->play_pattern);
+    e->programs_due = true;
     e->edits++;
     seq_engine_free(song);
 }

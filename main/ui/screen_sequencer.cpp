@@ -300,18 +300,19 @@ void ScreenSequencer::computeGeom()
         }
     }
 
-    // Settings sheet: a title row, then 4 x 4 buttons
+    // Settings sheet: a title row, then 5 x 4 buttons
     memset(m_sheetBtn, 0, sizeof(m_sheetBtn));
     int sy = g.linesY + g.headerRowH;
-    int sh = (m_areaY + m_areaH - sy) / 4;
+    int sh = (m_areaY + m_areaH - sy) / 5;
     int sw = m_areaW / 4;
-    static const int8_t GRID[4][4] = {
+    static const int8_t GRID[5][4] = {
         { SB_MODE, SB_CH_DN, SB_CH, SB_CH_UP },
         { SB_STEPS, SB_RATE, SB_BARS, SB_MUTE },
         { SB_GATE_DN, SB_GATE, SB_GATE_UP, SB_CLEAR },
+        { SB_PROG_DN, SB_PROG, SB_PROG_UP, SB_BANK },
         { SB_DELETE, SB_COPY, SB_PASTE, SB_CLOSE },
     };
-    for (int r = 0; r < 4; r++) {
+    for (int r = 0; r < 5; r++) {
         for (int c = 0; c < 4; c++) {
             int id = GRID[r][c];
             if (id < 0) continue;
@@ -477,7 +478,16 @@ void ScreenSequencer::renderLine(LovyanGFX* g, int ox, int oy, int line, int y)
     }
     int lineH = GLYPH_H * ts;
     int ty = y + (rowH - lineH * 2 - 4) / 2;
-    text(g, ox, oy, m_areaX + 8, ty, textW, buf, COL_WHITE, ts);
+    // This pattern's program, at the right of the name
+    int nameW = textW;
+    if (lv.program >= 0) {
+        char prog[8];
+        snprintf(prog, sizeof(prog), "P%d", lv.program + 1);
+        int pw = (int)strlen(prog) * GLYPH_W * ts;
+        nameW = textW - pw - 4;
+        text(g, ox, oy, mx - 6 - pw, ty, pw, prog, COL_YELLOW, ts);
+    }
+    text(g, ox, oy, m_areaX + 8, ty, nameW, buf, COL_WHITE, ts);
     if (grid) {
         snprintf(buf, sizeof(buf), ts > 1 ? "ch%d G %dx%s" : "c%d G%d", lv.channel + 1, lv.steps,
                  RATE_NAMES[lv.rate % SEQ_RATE_COUNT]);
@@ -635,6 +645,28 @@ void ScreenSequencer::renderSheet(LovyanGFX* g, int ox, int oy)
     bool last = m_haveView && m_view->lineCount <= 1;
     button(g, ox, oy, m_sheetBtn[SB_DELETE], m_confirmDelete ? "Sure?" : "Delete",
            m_confirmDelete ? COL_RED : COL_BTN, last ? COL_TEXT_DIM : COL_WHITE);
+    // Program / bank, sent when this pattern starts (shown 1..128, as synths number them)
+    int prog = ui_seq_get_i(p, line, "program");
+    int msb = ui_seq_get_i(p, line, "bank_msb");
+    int lsb = ui_seq_get_i(p, line, "bank_lsb");
+    button(g, ox, oy, m_sheetBtn[SB_PROG_DN], "Prog -", COL_BTN, COL_WHITE);
+    if (prog < 0) {
+        snprintf(buf, sizeof(buf), "Prog -");
+    } else {
+        snprintf(buf, sizeof(buf), "Prog %d", prog + 1);
+    }
+    button(g, ox, oy, m_sheetBtn[SB_PROG], prog < 0 ? "No prog" : buf, 0x1082,
+           prog < 0 ? COL_TEXT_DIM : COL_YELLOW);
+    button(g, ox, oy, m_sheetBtn[SB_PROG_UP], "Prog +", COL_BTN, COL_WHITE);
+    if (msb < 0 && lsb < 0) {
+        snprintf(buf, sizeof(buf), "No bank");
+    } else if (lsb < 0) {
+        snprintf(buf, sizeof(buf), "Bank %d", msb);
+    } else {
+        snprintf(buf, sizeof(buf), "Bank %d.%d", msb < 0 ? 0 : msb, lsb);
+    }
+    button(g, ox, oy, m_sheetBtn[SB_BANK], buf, COL_BTN, prog < 0 ? COL_TEXT_DIM : COL_WHITE);
+
     button(g, ox, oy, m_sheetBtn[SB_COPY], "Copy", COL_BTN, COL_WHITE);
     bool canPaste = m_lineClipLine >= 0 && !(m_lineClipLine == line && m_haveView &&
                                              m_lineClipPat == m_view->shown);
@@ -1314,6 +1346,27 @@ void ScreenSequencer::pressSheet(int id)
             if (m_selected >= line && m_selected > 0) m_selected--;
             closeSheet();
             return;
+        case SB_PROG_DN:
+        case SB_PROG_UP:
+        case SB_PROG: {
+            // - / + by one (below the first: none), the value itself by ten
+            int prog = ui_seq_get_i(p, line, "program");
+            if (id == SB_PROG_DN) {
+                prog = prog <= 0 ? -1 : prog - 1;
+            } else if (id == SB_PROG_UP) {
+                prog = prog < 0 ? 0 : (prog < 127 ? prog + 1 : 127);
+            } else {
+                prog = prog < 0 ? 0 : (prog + 10 > 127 ? -1 : prog + 10);
+            }
+            ui_seq_set_i(p, line, "program", prog);
+            break;
+        }
+        case SB_BANK: {
+            // MSB up by one, round to none (LSB: from Ruby)
+            int msb = ui_seq_get_i(p, line, "bank_msb");
+            ui_seq_set_i(p, line, "bank_msb", msb >= 127 ? -1 : msb + 1);
+            break;
+        }
         case SB_COPY:
             m_lineClipPat = m_haveView ? m_view->shown : 0;
             m_lineClipLine = line;

@@ -29,6 +29,7 @@ struct LineView {
     uint16_t s0;            // First unit on screen
     uint16_t shown;         // Units on screen
     uint32_t length;        // Ticks
+    int16_t  program;       // Sent when the pattern starts, -1 none
     int32_t  pos;           // Tick within the line now; -1 when not playing what is shown
     uint16_t n;
     bool     truncated;

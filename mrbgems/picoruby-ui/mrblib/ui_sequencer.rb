@@ -399,6 +399,7 @@ module UI
         lines.times do |i|
           pl = pat.line(i)
           ph[:lines] << { steps: pl.steps, rate: pl.rate, bars: pl.bars,
+                          program: pl.program, bank: pl.bank,
                           grid: UI._seq_notes(p, i, 0), rt: UI._seq_notes(p, i, 1) }
         end
         h[:patterns][p] = ph
@@ -432,6 +433,8 @@ module UI
           pl.steps = plh[:steps] if plh[:steps]
           pl.rate = plh[:rate] if plh[:rate]
           pl.bars = plh[:bars] if plh[:bars]
+          pl.program = plh[:program]
+          pl.bank = plh[:bank]
           (plh[:grid] || []).each { |pos, len, n, v| UI._seq_place(p, i, pos, len, [n], [v]) }
           (plh[:rt] || []).each { |pos, len, n, v| UI._seq_add_event(p, i, pos, len, n, v) }
         end
@@ -792,7 +795,8 @@ module UI
       end
 
       def configure(name: nil, mode: nil, channel: nil, mute: nil, velocity: nil, gate: nil,
-                    quantize: :keep, rec_mode: nil, steps: nil, rate: nil, bars: nil)
+                    quantize: :keep, rec_mode: nil, steps: nil, rate: nil, bars: nil,
+                    program: :keep, bank: :keep)
         self.name = name unless name.nil?
         self.mode = mode unless mode.nil?
         self.channel = channel unless channel.nil?
@@ -804,6 +808,8 @@ module UI
         self.steps = steps unless steps.nil?
         self.rate = rate unless rate.nil?
         self.bars = bars unless bars.nil?
+        self.program = program unless program == :keep
+        self.bank = bank unless bank == :keep
         self
       end
 
@@ -923,6 +929,45 @@ module UI
       # Its length in ticks (96 PPQN)
       def ticks
         get(:ticks)
+      end
+
+      # --- This pattern's sound ---
+
+      # Program Change sent on the line's channel when this pattern starts
+      # (Start, Continue, a switch to it -- not when it loops): 0..127, or nil
+      # for none (the line keeps whatever sound it had). Changing it on the
+      # playing pattern sends it at once.
+      def program
+        v = get(:program)
+        v < 0 ? nil : v
+      end
+
+      def program=(n)
+        if !n.nil? && (!n.is_a?(Integer) || n < 0 || n > 127)
+          raise ArgumentError, "program must be 0..127 or nil"
+        end
+        put(:program, n.nil? ? -1 : n)
+      end
+
+      # Bank Select sent before the program: [msb, lsb] (each 0..127 or nil),
+      # or nil when neither is set
+      def bank
+        msb = get(:bank_msb)
+        lsb = get(:bank_lsb)
+        return nil if msb < 0 && lsb < 0
+        [msb < 0 ? nil : msb, lsb < 0 ? nil : lsb]
+      end
+
+      # An Integer (MSB, CC 0), [msb, lsb] (CC 0 / CC 32), or nil for none
+      def bank=(value)
+        msb, lsb = value.is_a?(Array) ? value : [value, nil]
+        [msb, lsb].each do |v|
+          if !v.nil? && (!v.is_a?(Integer) || v < 0 || v > 127)
+            raise ArgumentError, "bank must be 0..127, [msb, lsb] or nil"
+          end
+        end
+        put(:bank_msb, msb.nil? ? -1 : msb)
+        put(:bank_lsb, lsb.nil? ? -1 : lsb)
       end
 
       # --- Grid notes (steps) ---

@@ -214,6 +214,7 @@ F8（24 PPQN = 120 BPM で約 21ms）のままではリアルタイム録音の�
 | ラインごと: `steps` | grid: **4 / 8 / 16 / 32 / 64** |
 | ラインごと: `rate` | grid: 1 ステップの長さ |
 | ラインごと: `bars` | realtime: ループの長さ 1 / 2 / 4 / 8 小節 |
+| ラインごと: `program` / `bank_msb` / `bank_lsb` | パターンが始まるときにラインのチャンネルへ送る Program Change と Bank Select（各 0..127 / なし。後述「Program Change」） |
 | ラインごと: `grid` / `rt` | ノート配列（下記） |
 
 - 長さ（`steps` / `rate` / `bars`）をパターンごとにしたのは、フィルのパターンだけ短くする・Aメロだけ 32 ステップ、
@@ -288,6 +289,26 @@ typedef struct {
 - realtime: `pos < bars × 384`。`len` はループの末尾をまたいでよい（再生では先頭へ回り込む）。
   overdub で同じ音程が重なることはあり得る（再生時に処理する。後述）
 
+## Program Change（2026-10-25）
+
+音色はパターン × ラインの設定として持つ（`seq_pattern_line_t` の `program` / `bank_msb` / `bank_lsb`、
+なしは `SEQ_PROGRAM_NONE` = 0xFF）。A メロとサビでラインの音色を替える、といった使い方のため。
+エンジンとファイルはホストのテスト済み、実機は未確認。
+
+- **送るとき**: Start / Continue、別のパターンに切り替わったとき（予約・チェーン・小節頭）、曲を読み込んだとき。
+  そのパターンの最初の tick に、**ノートより先に** CC#0（MSB）→ CC#32（LSB）→ Program Change の順で、
+  そのラインのチャンネルへ（設定されているものだけ）。送り先はノートと同じ（`device:` とルートの宛先）
+- **送らないとき**: 同じパターンがループしたとき・チェーンで同じパターンを繰り返したとき（音源によっては
+  PC で音が切れるため）。`program` がなしのラインは何も送らない（前の音色のまま）
+- **再生中のパターンの値を変えると、その場で送る**（画面やスクリプトで音色を試しやすいように）
+- ミュート中のラインも送る（ミュートを解いたときに音色が合っているように）
+- ラインのコピー（`seq_pline_copy` / `Line#copy_to`）とパターンのコピーで一緒に写る
+- 画面: ラインの設定シートの 4 行目 **Prog -** / **Prog N**（タップで +10、127 を超えたらなし）/ **Prog +** /
+  **Bank**（タップで MSB を +1、127 の次はなし。LSB は Ruby から）。ライン名の右に `P81` のように出す。
+  **画面の番号は 1〜128**（音源の表示に合わせる）、Ruby とファイルは 0〜127（MIDI の値そのもの）
+- Ruby: `l.program = 80`（nil でなし）、`l.bank = 3` / `[msb, lsb]` / nil、`l.program` / `l.bank`、
+  `line(n, program:, bank:)`。`to_h` / `restore` にも入る
+
 ## パターンの切り替えとチェーン
 
 ### 切り替え
@@ -353,7 +374,7 @@ offset  size  内容
 | `LINE` | ライン数 | `index u8`、`mode u8`、`channel u8`、`flags u8`（bit0 = mute）、`velocity u8`（0 = `:input`）、`gate u8`、`quantize u8`（0 = なし）、`rec_mode u8`、`name[8]`（計 16 byte） |
 | `CHAN` | 0..1 | `count u8`、`reserved u8`、`(pattern u8, repeat u8) × count` |
 | `PATN` | 使っているスロット数 | `index u8`、`length u8`（0 = auto） |
-| `PLIN` | PATN ごとに 0..ライン数 | `pattern u8`、`line u8`、`steps u8`、`rate u8`、`bars u8`、`flags u8` |
+| `PLIN` | PATN ごとに 0..ライン数 | `pattern u8`、`line u8`、`steps u8`、`rate u8`、`bars u8`、`flags u8`、`program u8`、`bank_msb u8`、`bank_lsb u8`（各 0xFF = なし。Program Change を足す前の 6 byte の PLIN は「なし」として読む） |
 | `GRID` | PATN ごとに 0..ライン数 | `pattern u8`、`line u8`、`count u16`、`seq_note_t[count]` |
 | `RTEV` | 同上 | 同上（realtime のノート） |
 
@@ -637,6 +658,7 @@ seq.chain_on = true
 l = seq.pattern(0).line(1)               # => UI::Sequencer::Line
 l.channel = 2; l.mute = true             # ライン設定（全パターン共通）
 l.steps = 32; l.rate = :"16t"            # 長さ（このパターンだけ）
+l.program = 80; l.bank = [0, 3]          # このパターンが始まるときに送る音色（nil でなし）
 
 # grid（位置・長さはステップ単位）
 l[0] = [48, 52, 55]                      # ステップ 0 に和音（長さ 1、velocity はライン設定）

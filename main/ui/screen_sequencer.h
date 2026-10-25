@@ -65,6 +65,7 @@ private:
         SB_STEPS, SB_RATE, SB_BARS, SB_MUTE,
         SB_GATE_DN, SB_GATE, SB_GATE_UP, SB_CLEAR,
         SB_DELETE, SB_COPY, SB_PASTE, SB_CLOSE,
+        SB_PROG_DN, SB_PROG, SB_PROG_UP, SB_BANK,
         SB_COUNT,
     };
 

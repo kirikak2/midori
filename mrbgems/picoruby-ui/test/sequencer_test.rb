@@ -70,6 +70,7 @@ module UI
       when :next_pattern, :edit_pattern then -1
       when :pattern_tick then 384 + 96 * 2 + 10
       when :gate then $seq[:values][[:gate, line]] || 100
+      when :program, :bank_msb, :bank_lsb then $seq[:values][[name, line]] || -1
       else $seq[:values][[name, line]] || 0
       end
     end
@@ -267,6 +268,25 @@ check("pattern line", seq.pattern(5).line(0).pattern_index == 5)
 seq.pattern(5).line(0, bars: 4)
 check("pattern line bars", set_of(:bars, 0)[0] == 5 && set_of(:bars, 0)[3] == 4)
 check("bad pattern", raises? { seq.pattern(16) })
+
+# --- program change ---
+pl = seq.pattern(2).line(1)
+check("no program by default", pl.program.nil? && pl.bank.nil?)
+pl.program = 81
+check("program", set_of(:program, 1)[3] == 81 && set_of(:program, 1)[0] == 2 && pl.program == 81)
+pl.program = nil
+check("program nil -> -1", set_of(:program, 1)[3] == -1)
+pl.bank = 3
+check("bank msb only", set_of(:bank_msb, 1)[3] == 3 && set_of(:bank_lsb, 1)[3] == -1)
+check("bank reads back", pl.bank == [3, nil])
+pl.bank = [1, 2]
+check("bank msb / lsb", pl.bank == [1, 2])
+pl.bank = nil
+check("bank nil", pl.bank.nil?)
+check("bad program", raises? { pl.program = 128 })
+check("bad bank", raises? { pl.bank = [0, 200] })
+seq.pattern(2).line(1, program: 5, bank: [0, 1])
+check("configure program / bank", pl.program == 5 && pl.bank == [0, 1])
 
 # --- grid notes ---
 reset_stub

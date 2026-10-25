@@ -838,7 +838,8 @@ Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-
   計測した F8 周期から esp_timer の one-shot で刻む（`CONFIG_FREERTOS_HZ=100` では刻めない）。次の F8 を追い越さない
 - ノートは (pattern, line) ごとの**ソート済み配列**（`seq_note_t` 8 byte、grid はステップ単位・realtime は tick 単位）。
   配列ごと 512 / ソング全体 8192 ノート、PSRAM。エンジンは非スレッドセーフで、`ui_sequencer.cpp` が再帰ミューテックスで包む
-- ラインの設定（チャンネル・方式・ミュートなど）はソング共通、steps / rate / bars とノートはパターンごと
+- ラインの設定（チャンネル・方式・ミュートなど）はソング共通、steps / rate / bars・音色（Program Change / Bank Select）・
+  ノートはパターンごと。音色はそのパターンが始まるとき（Start / Continue / 切り替え）にノートより先に送り、ループでは送らない
 - スクリプトが終わってもソングは残る（停止と `device:` の解除だけ）。Ruby: `UI::Sequencer.current` で取り直す。
   `UI::Sequencer.new` のソングは一時的（自動保存しない）で、UI モードに戻ると自動保存のソングに戻る
 - 保存のファイル I/O は Ruby（C の `fopen` は `/sd` に届かない）。C は `.mseq` への直列化・検証だけ

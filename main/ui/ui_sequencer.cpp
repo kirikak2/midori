@@ -124,6 +124,18 @@ static void out_note_off(void* ctx, uint32_t token, uint8_t channel, uint8_t not
     if (s_bit) MIDI_route_dispatch(s_bit, route, 0x8, status, note, 0);
 }
 
+// Bank Select / Program Change: to the same places a note would go
+static void out_message(void* ctx, uint8_t status, uint8_t d1, uint8_t d2)
+{
+    (void)ctx;
+    uint8_t cin = status >> 4;
+    uint8_t route = 0;
+    if (s_bit) route = MIDI_route_targets(s_bit, cin, status) & (uint8_t)~s_bit;
+    uint8_t mask = s_outMask & (uint8_t)~route & (uint8_t)~s_bit;
+    if (mask) MIDI_transport_send(mask, 0, cin, status, d1, d2);
+    if (s_bit) MIDI_route_dispatch(s_bit, route, cin, status, d1, d2);
+}
+
 // --- Transport ---------------------------------------------------------------
 
 static void enqueue(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
@@ -277,7 +289,7 @@ void ui_seq_init(void)
     if (s_eng) return;
     s_lock = xSemaphoreCreateRecursiveMutex();
     s_queue = xQueueCreate(QUEUE_LEN, sizeof(Item));
-    seq_output_t out = { out_note_on, out_note_off, nullptr };
+    seq_output_t out = { out_note_on, out_note_off, nullptr, out_message };
     s_eng = s_lock && s_queue ? seq_engine_new(&out) : nullptr;
     esp_timer_create_args_t targs = {};
     targs.callback = subtick_timer_cb;
@@ -392,6 +404,19 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
     if (name_is(name, "steps")) return seq_pline_set_steps(e, pattern, line, value);
     if (name_is(name, "rate"))  return seq_pline_set_rate(e, pattern, line, value);
     if (name_is(name, "bars"))  return seq_pline_set_bars(e, pattern, line, value);
+    if (name_is(name, "program") || name_is(name, "bank_msb") || name_is(name, "bank_lsb")) {
+        bool ok;
+        if (name_is(name, "program")) {
+            ok = seq_pline_set_program(e, pattern, line, value);
+        } else if (name_is(name, "bank_msb")) {
+            ok = seq_pline_set_bank(e, pattern, line, value, seq_pline_bank_lsb(e, pattern, line));
+        } else {
+            ok = seq_pline_set_bank(e, pattern, line, seq_pline_bank_msb(e, pattern, line), value);
+        }
+        // Changed on the pattern that plays: heard at once
+        if (ok && seq_resolve_pattern(e, pattern) == e->play_pattern) seq_send_programs(e, line);
+        return ok;
+    }
 
     // Line
     if (!line_ok(line)) return false;
@@ -474,6 +499,9 @@ int ui_seq_get_i(int pattern, int line, const char* name)
     if (name_is(name, "steps")) return seq_pline_steps(e, p, line);
     if (name_is(name, "rate"))  return seq_pline_rate(e, p, line);
     if (name_is(name, "bars"))  return seq_pline_bars(e, p, line);
+    if (name_is(name, "program"))  return seq_pline_program(e, p, line);
+    if (name_is(name, "bank_msb")) return seq_pline_bank_msb(e, p, line);
+    if (name_is(name, "bank_lsb")) return seq_pline_bank_lsb(e, p, line);
 
     if (!line_ok(line)) return 0;
     const seq_line_t* l = &e->lines[line];
@@ -814,6 +842,7 @@ static void fill_line(const seq_engine_t* e, int p, int l, int window, int view,
     lv.rate = (uint8_t)seq_pline_rate(e, p, l);
     lv.bars = (uint8_t)seq_pline_bars(e, p, l);
     lv.length = seq_line_ticks(e, p, l);
+    lv.program = (int16_t)seq_pline_program(e, p, l);
     bool grid = ln.mode == SEQ_MODE_GRID;
     lv.cols = grid ? lv.steps : (uint16_t)(lv.bars * 16);
     lv.shown = lv.cols < view ? lv.cols : (uint16_t)view;

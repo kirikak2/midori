@@ -73,12 +73,21 @@ typedef struct {
     uint16_t    cap;
 } seq_notes_t;
 
+// No program / bank (seq_pattern_line_t)
+#define SEQ_PROGRAM_NONE      0xFF
+
 // A line's part of a pattern
 typedef struct {
     uint8_t     steps;   // Grid: 4 / 8 / 16 / 32 / 64
     uint8_t     rate;    // Grid: seq_rate_t
     uint8_t     bars;    // Realtime: 1 / 2 / 4 / 8
     uint8_t     flags;   // Reserved
+    // Sent on the line's channel when the pattern starts (Start, Continue,
+    // a switch to it): Bank Select MSB (CC 0) / LSB (CC 32), then Program
+    // Change. Each 0..127 or SEQ_PROGRAM_NONE.
+    uint8_t     program;
+    uint8_t     bank_msb;
+    uint8_t     bank_lsb;
     seq_notes_t grid;
     seq_notes_t rt;
 } seq_pattern_line_t;
@@ -110,10 +119,15 @@ typedef struct {
 typedef uint32_t (*seq_note_on_fn)(void *ctx, uint8_t channel, uint8_t note, uint8_t velocity);
 typedef void (*seq_note_off_fn)(void *ctx, uint32_t token, uint8_t channel, uint8_t note);
 
+// Anything else it sends (Bank Select, Program Change): a channel message,
+// d2 unused for a two-byte one
+typedef void (*seq_message_fn)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);
+
 typedef struct {
     seq_note_on_fn  note_on;
     seq_note_off_fn note_off;
     void           *ctx;
+    seq_message_fn  message;
 } seq_output_t;
 
 typedef struct {
@@ -149,6 +163,7 @@ typedef struct {
     uint8_t           chain_pos;
     uint8_t           chain_repeat;   // Repeats of chain[chain_pos] done
     uint8_t           pending;        // Interpolated ticks left before the next F8
+    bool              programs_due;   // The playing pattern's programs go out on the next tick
     uint32_t          edits;          // Bumped by every change to the song
     uint32_t          pattern_changes;   // Bumped when play_pattern changes
     seq_sounding_t    sounding[SEQ_MAX_SOUNDING];
@@ -223,6 +238,15 @@ int  seq_pline_bars(const seq_engine_t *e, int pattern, int line);
 bool seq_pline_set_steps(seq_engine_t *e, int pattern, int line, int steps);
 bool seq_pline_set_rate(seq_engine_t *e, int pattern, int line, int rate);
 bool seq_pline_set_bars(seq_engine_t *e, int pattern, int line, int bars);
+// Program / bank: 0..127, or -1 for none
+int  seq_pline_program(const seq_engine_t *e, int pattern, int line);
+int  seq_pline_bank_msb(const seq_engine_t *e, int pattern, int line);
+int  seq_pline_bank_lsb(const seq_engine_t *e, int pattern, int line);
+bool seq_pline_set_program(seq_engine_t *e, int pattern, int line, int program);
+bool seq_pline_set_bank(seq_engine_t *e, int pattern, int line, int msb, int lsb);
+// Sends the playing pattern's bank / program now: one line, or every line
+// with line < 0 (lines without a program send nothing)
+void seq_send_programs(seq_engine_t *e, int line);
 
 // Plays `pattern` now if stopped, else queues it (seq_switch_t). Turns the
 // chain off. -1 cancels what is queued.

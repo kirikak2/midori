@@ -684,7 +684,9 @@ void ui_seq_reset(int lines);            // An empty song of `lines` lines (1..1
 //            autosave_due
 //   line     (line):          mode channel mute velocity gate quantize rec_mode
 //   pattern  (pattern):       length (0 auto, 1..8 bars); read-only: used ticks
-//   pattern line (both):      steps rate bars; read-only: ticks
+//   pattern line (both):      steps rate bars program bank_msb bank_lsb
+//            (-1: none; a change to the playing pattern is sent at once);
+//            read-only: ticks
 // `pattern` may be UI_SEQ_PATTERN_EDIT. set returns false for an unknown name
 // or a value out of range.
 bool ui_seq_set_i(int pattern, int line, const char* name, int value);

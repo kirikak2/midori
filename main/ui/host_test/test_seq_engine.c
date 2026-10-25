@@ -55,7 +55,22 @@ static void out_off(void *ctx, uint32_t token, uint8_t ch, uint8_t note)
     ev->token = token;
 }
 
-static void clear_events(void) { g_n = 0; }
+/* Other messages (bank select, program change), in order, with the event
+ * count at the time so their place among the notes can be checked */
+typedef struct { int status, d1, d2, at_event; uint32_t tick; } msg_t;
+static msg_t g_msg[256];
+static int g_msg_n;
+
+static void out_msg(void *ctx, uint8_t status, uint8_t d1, uint8_t d2)
+{
+    (void)ctx;
+    msg_t *m = &g_msg[g_msg_n++];
+    m->status = status; m->d1 = d1; m->d2 = d2;
+    m->at_event = g_n;
+    m->tick = g_e->song_tick;
+}
+
+static void clear_events(void) { g_n = 0; g_msg_n = 0; }
 
 /* Plays `ticks` ticks the way the device does: an F8 then three subticks */
 static void run_ticks(int ticks)
@@ -93,7 +108,7 @@ static const event_t *off_for(uint32_t token)
 static void fresh(void)
 {
     if (g_e) seq_engine_free(g_e);
-    seq_output_t out = { .note_on = out_on, .note_off = out_off, .ctx = NULL };
+    seq_output_t out = { .note_on = out_on, .note_off = out_off, .ctx = NULL, .message = out_msg };
     g_e = seq_engine_new(&out);
     clear_events();
 }
@@ -488,6 +503,80 @@ static void test_pline_copy(void)
     EXPECT_EQ(g_e->song_notes, 5);
 }
 
+static void test_program_change(void)
+{
+    printf("program change\n");
+    fresh();
+    uint8_t n = 60;
+    seq_grid_place(g_e, 0, 0, 0, 1, &n, NULL, 1);
+    seq_grid_place(g_e, 1, 0, 0, 1, &n, NULL, 1);
+    g_e->lines[0].channel = 2;
+    EXPECT_EQ(seq_pline_program(g_e, 0, 0), -1);
+    EXPECT_EQ(seq_pline_set_program(g_e, 0, 0, 81), 1);
+    EXPECT_EQ(seq_pline_set_bank(g_e, 0, 0, 1, -1), 1);
+    EXPECT_EQ(seq_pline_set_program(g_e, 1, 0, 5), 1);
+    EXPECT_EQ(seq_pline_set_program(g_e, 0, 0, 128), 0);
+    EXPECT_EQ(seq_pline_set_bank(g_e, 0, 0, 1, 200), 0);
+    EXPECT_EQ(seq_pline_program(g_e, 0, 0), 81);
+    EXPECT_EQ(seq_pline_bank_msb(g_e, 0, 0), 1);
+    EXPECT_EQ(seq_pline_bank_lsb(g_e, 0, 0), -1);
+
+    /* Start: bank MSB, then the program, before the first note */
+    seq_engine_start(g_e);
+    run_ticks(1);
+    EXPECT_EQ(g_msg_n, 2);
+    EXPECT_EQ(g_msg[0].status, 0xB2); EXPECT_EQ(g_msg[0].d1, 0); EXPECT_EQ(g_msg[0].d2, 1);
+    EXPECT_EQ(g_msg[1].status, 0xC2); EXPECT_EQ(g_msg[1].d1, 81);
+    EXPECT_EQ(g_msg[1].at_event, 0);           /* before the note on */
+    EXPECT_EQ(count_on(60), 1);
+
+    /* Looping the same pattern sends nothing again */
+    run_ticks(384 * 2);
+    EXPECT_EQ(g_msg_n, 2);
+
+    /* A switch to another pattern sends its programs at its first tick */
+    seq_select_pattern(g_e, 1);
+    run_ticks(384);
+    EXPECT_EQ(g_msg_n, 3);
+    EXPECT_EQ(g_msg[2].status, 0xC2); EXPECT_EQ(g_msg[2].d1, 5);
+    EXPECT_EQ(g_msg[2].tick % 384, 0);
+
+    /* Lines without a program send nothing; Continue sends them again */
+    seq_engine_stop(g_e);
+    clear_events();
+    seq_engine_continue(g_e);
+    run_ticks(1);
+    EXPECT_EQ(g_msg_n, 1);
+    EXPECT_EQ(g_msg[0].d1, 5);
+
+    /* Chain repeats of one pattern: once */
+    fresh();
+    seq_pline_set_program(g_e, 0, 0, 10);
+    seq_pline_set_program(g_e, 1, 0, 11);
+    seq_chain_entry_t chain[2] = { { 0, 3 }, { 1, 1 } };
+    seq_set_chain(g_e, chain, 2);
+    seq_set_chain_on(g_e, true);
+    seq_engine_start(g_e);
+    run_ticks(384 * 4 + 1);
+    EXPECT_EQ(g_msg_n, 3);   /* 10 at the start, 11 at bar 4, 10 again at bar 5 */
+    EXPECT_EQ(g_msg[0].d1, 10);
+    EXPECT_EQ(g_msg[1].d1, 11);
+    EXPECT_EQ(g_msg[2].d1, 10);
+
+    /* Sent at once on request (an edit to the playing pattern) */
+    clear_events();
+    seq_send_programs(g_e, 0);
+    EXPECT_EQ(g_msg_n, 1);
+
+    /* Copied with the line */
+    fresh();
+    seq_pline_set_program(g_e, 0, 0, 33);
+    seq_pline_set_bank(g_e, 0, 0, 2, 3);
+    seq_pline_copy(g_e, 0, 0, 4, 1);
+    EXPECT_EQ(seq_pline_program(g_e, 4, 1), 33);
+    EXPECT_EQ(seq_pline_bank_lsb(g_e, 4, 1), 3);
+}
+
 static void test_lines_add_remove(void)
 {
     printf("lines add / remove\n");
@@ -688,6 +777,9 @@ static void expect_same_song(const seq_engine_t *a, const seq_engine_t *b)
             EXPECT_EQ(x->steps, y->steps);
             EXPECT_EQ(x->rate, y->rate);
             EXPECT_EQ(x->bars, y->bars);
+            EXPECT_EQ(x->program, y->program);
+            EXPECT_EQ(x->bank_msb, y->bank_msb);
+            EXPECT_EQ(x->bank_lsb, y->bank_lsb);
             EXPECT_EQ(x->grid.n, y->grid.n);
             EXPECT_EQ(x->rt.n, y->rt.n);
             if (x->grid.n) EXPECT_EQ(memcmp(x->grid.v, y->grid.v, x->grid.n * sizeof(seq_note_t)), 0);
@@ -716,6 +808,8 @@ static void build_song(void)
     seq_pline_set_steps(g_e, 0, 1, 32);
     seq_pline_set_rate(g_e, 0, 1, SEQ_RATE_8T);
     seq_pline_set_bars(g_e, 0, 2, 2);
+    seq_pline_set_program(g_e, 0, 3, 81);
+    seq_pline_set_bank(g_e, 0, 3, 0, 5);
     seq_rt_add(g_e, 0, 2, 13, 50, 72, 99);
     seq_rt_add(g_e, 0, 2, 700, 100, 74, 40);
     seq_pattern_copy(g_e, 0, 5);
@@ -815,6 +909,40 @@ static void test_file_unknown_chunk(void)
     seq_engine_free(song);
 }
 
+/* A PLIN chunk as written before programs (6 bytes) reads with none */
+static void test_file_old_plin(void)
+{
+    printf("file with the old PLIN\n");
+    fresh();
+    seq_pline_set_steps(g_e, 0, 0, 32);
+    dump_to_buffer(g_e, 0);
+    /* Find the PLIN chunk, shrink it to 6 bytes, fix the CRC */
+    int at = -1;
+    for (int i = 0; i + 4 <= g_file_n; i++) {
+        if (memcmp(g_file + i, "PLIN", 4) == 0) { at = i; break; }
+    }
+    EXPECT_EQ(at >= 0, 1);
+    EXPECT_EQ(g_file[at + 4], 9);
+    g_file[at + 4] = 6;
+    memmove(g_file + at + 8 + 6, g_file + at + 8 + 9, (size_t)(g_file_n - (at + 8 + 9)));
+    int n = g_file_n - 3 - 12;
+    uint32_t crc = ~0u;
+    for (int i = 0; i < n; i++) {
+        crc ^= g_file[i];
+        for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    crc = ~crc;
+    memcpy(g_file + n, "CRC ", 4);
+    g_file[n + 4] = 4; g_file[n + 5] = 0; g_file[n + 6] = 0; g_file[n + 7] = 0;
+    for (int k = 0; k < 4; k++) g_file[n + 8 + k] = (uint8_t)(crc >> (8 * k));
+    seq_engine_t *song;
+    EXPECT_EQ(load_buffer(n + 12, 5, &song, NULL), SEQ_LOAD_OK);
+    EXPECT_EQ(seq_pline_steps(song, 0, 0), 32);
+    EXPECT_EQ(seq_pline_program(song, 0, 0), -1);
+    EXPECT_EQ(seq_pline_bank_msb(song, 0, 0), -1);
+    seq_engine_free(song);
+}
+
 static void test_file_full_song(void)
 {
     printf("file of a full song\n");
@@ -876,6 +1004,7 @@ int main(void)
     test_chain();
     test_pattern_copy_clear();
     test_pline_copy();
+    test_program_change();
     test_lines_add_remove();
     test_limits();
     test_chord_input();
@@ -884,6 +1013,7 @@ int main(void)
     test_file_round_trip();
     test_file_errors();
     test_file_unknown_chunk();
+    test_file_old_plin();
     test_file_full_song();
     test_clone_and_adopt();
     seq_engine_free(g_e);
