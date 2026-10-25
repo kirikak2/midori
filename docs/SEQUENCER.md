@@ -2,7 +2,7 @@
 
 > **状態: 段階 1〜5 を実装（2026-10-25）**。エンジン（grid / realtime の再生、パターンの切り替え、チェーン、
 > 和音の取り込み、リアルタイム録音）、トランスポート、Ruby API、保存と自動保存、画面とレイアウト部品まで。
-> 録音（段階 5）はビルドとホストのテストのみで、実機では未確認。
+> 録音（段階 5）は Tab5 の実機でリアルタイム入力の録音と再生を確認（2026-10-25）。
 > 保存（段階 3）はビルドとホストのテストのみで、実機では未確認。
 > Tab5 の実機で画面の表示と Play / Stop による再生を確認（2026-10-25）。それ以外（編集操作の細部、外部クロック同期、
 > CoreS3 / CrowPanel）は未確認。
@@ -16,7 +16,7 @@
 | 2. パターンとチェーン | 済（エンジンと Ruby API。画面の操作は段階 4） |
 | 3. 保存と自動保存 | 済（実機未確認）。`.mseq` の読み書きは `seq_engine.c`（`seq_song_clone` / `seq_dump_*` / `seq_load_*` / `seq_engine_adopt`）、自動保存の判定と画面の要求は `ui_sequencer.cpp`、ファイル I/O は `mrblib/ui_sequencer.rb`（`save` / `load` / `songs` / `to_h` / `restore` / `_setup` / `_poll`）、起動時は `main_task_base.rb` の `setup_sequencer`、画面は File ボタンとシート |
 | 4. 画面 + レイアウト | 済（下記の一部を除く）。`main/ui/screen_sequencer.{h,cpp}`、`UI_SCREEN_SEQUENCER`（= 12）/ `:sequencer` / `UI.sequencer` / `seq.show`、レイアウトの `sequencer`（`UI_WIDGET_SEQUENCER` = 6） |
-| 5. リアルタイム録音 | 済（実機未確認）。エンジンは `seq_engine.c` の「Realtime recording」（`seq_set_armed` / `seq_engine_input_at`）、時刻の換算は `ui_sequencer.cpp`、画面は REC ボタン・ラインの arm の印・設定シートの Quant / Overdub・Replace、Ruby は `Line#arm` / `disarm` / `armed?`、`seq.armed` / `disarm` / `recording?`。下記「リアルタイム録音」の実装メモ |
+| 5. リアルタイム録音 | 済（Tab5 の実機で録音と再生を確認）。エンジンは `seq_engine.c` の「Realtime recording」（`seq_set_armed` / `seq_engine_input_at`）、時刻の換算は `ui_sequencer.cpp`、画面は REC ボタン・ラインの arm の印・設定シートの Quant / Overdub・Replace、Ruby は `Line#arm` / `disarm` / `armed?`、`seq.armed` / `disarm` / `recording?`。下記「リアルタイム録音」の実装メモ |
 | 6. 仕上げ | MIDI Devices への登録は済（内蔵デバイス `seq`）。既定パッチ Tempo → seq と `on_*` は未 |
 
 - 段階 4 の残り（2026-10-25 に追加、ビルドとホストテストのみで実機未確認）:
