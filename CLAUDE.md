@@ -1032,9 +1032,12 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
   OTG1.1 を PHY0（USB-C）へ付け替えている。そのため I2S の起動で **USB-C の
   TinyUSB（CDC コンソール + USB-MIDI デバイス）が切れ**、PHY1 を実際に持つ USJ の
   パッドは I2S の下で生きたまま残っていた（2026-10-04、irb の `AMY.start` で
-  コンソールが止まり、パッドも無音）。gem の port（`p4_usb_pads_fixup()`）が I2S 設定の
-  前後でパッド有効フラグを保存・復元し、mux の実状に合わせて I2S のピン側の
-  コントローラだけを切る
+  コンソールが止まり、パッドも無音）。当初は I2S 設定の前後でパッド有効フラグを保存・復元して
+  いたが、設定中の数 ms でも D+ のプルアップが消えるとホストが切断とみなし、抜き差しするまで
+  戻らなかった（2026-10-25、スクリプトの読み込みで AMY を起動すると USB Device が Not connected）。
+  今は gem の port（`amy_port.c` の `route_pins()`）が **USB パッドに載る I2S のピンをドライバに
+  渡さず**（`I2S_GPIO_UNUSED`）、`gpio_func_sel()` を通さずに IO_MUX と GPIO マトリクスで直接つなぐ。
+  そのうえで mux の実状に合わせて I2S のピン側のコントローラだけを切る（`usb_pads_fixup()`）
 - オーディオタスク（Core 0）はコンソールに書かない（stdout / stderr を `/dev/null` に。
   起動ログは `AMY_GEM_start()` を呼んだ側で出す）。`AMY::FM` / `AMY::Synth` は synth フラグ 8
   （`SYNTH_FLAGS_NO_NOTE_WARNINGS`）を立て、esp_timer から届く自動ノートオフで

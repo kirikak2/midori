@@ -82,7 +82,8 @@ M5Stack Tab5 / Elecrow CrowPanel Advanced 7inch の内蔵スピーカーから�
    factory を 0x310000 へ移した（「メモリとフラッシュ」）
 2. **`AMY.start` でコンソールが止まり、パッドも無音**：I2S のピン（GPIO 26/27）が USB PHY1 の
    パッドで、ESP-IDF が既定の PHY mux を前提に USB-C 側の TinyUSB のパッドを切っていた。
-   gem の port でパッド有効フラグを mux の実状に合わせて直す（`p4_usb_pads_fixup()`）
+   gem の port でパッド有効フラグを mux の実状に合わせて直す（2026-10-25 からは USB パッドに載る
+   I2S のピンを自前でつなぎ、パッドを一度も切らない。下記「USB PHY のパッド」）
 
 まだ確認していないこと：
 
@@ -399,10 +400,21 @@ TinyUSB を動かすために **mux を入れ替えている**（OTG1.1 → PHY0
 - 本当に PHY1 を持っている USJ のパッドは有効のまま残り、I2S の信号の下で USB モード
   のまま。I2S が ES8388 に届かない（最初の「パッドで鳴らない」もこれと考えられる）
 
-対策（gem の `ports/esp32/amy_port.c`、ESP32-P4 のみ）：I2S を設定する前に両コントローラの
-パッド有効フラグを保存し、設定後に復元してから、`LP_SYS.usb_ctrl` の mux を見て
-**I2S が取ったピンの PHY に実際に繋がっているコントローラだけ**を切る
-（`p4_usb_pads_fixup()`）。
+対策（gem の `ports/esp32/amy_port.c`、ESP32-P4 のみ）：
+
+- 最初の対策（2026-10-04）は、I2S を設定する前に両コントローラのパッド有効フラグを保存し、設定後に
+  復元してから余計な方を切るものだった。しかし**設定にかかる数 ms の間 USB-C の D+ のプルアップが
+  消える**ので、ホストからは一度抜かれたように見え、抜き差しするまで列挙し直されなかった
+  （2026-10-25、`sequencer_events.rb` の読み込みで AMY が起動すると MIDI Devices の USB Device が
+  Not connected になり、CDC コンソールも `AMY running ...` の直後で止まった）
+- 今は **USB のパッド（GPIO 24〜27）に載る I2S のピンを I2S ドライバに渡さない**（`driver_pin()` が
+  `I2S_GPIO_UNUSED` にする）。チャネルを初期化したあと、`route_pins()` がドライバの
+  `i2s_gpio_check_and_set()` と同じこと（IO_MUX を GPIO に、`esp_rom_gpio_connect_out_signal()`
+  で `i2s_periph_signal[port]` の信号へ）を、`gpio_func_sel()`（= パッドを切る `gpio_ll_func_sel()`）を
+  通さずに行う。その直前に `usb_pads_fixup()` が `LP_SYS.usb_ctrl` の mux を見て
+  **I2S が取ったピンの PHY に実際に繋がっているコントローラだけ**を切る（Tab5 では USJ）。
+  USB-C の OTG のパッドには一度も触らない
+- MCLK（Tab5 は GPIO 30）など USB パッド以外のピンは従来どおりドライバが設定する
 CrowPanel（I2S は 21〜23）は対象外で、何もしない。
 
 #### コンソールに書かない
