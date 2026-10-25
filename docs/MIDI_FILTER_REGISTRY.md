@@ -15,7 +15,7 @@ filter を付け外しでき、パラメータも画面で変えられるよう�
 - 実装: picoruby-midi [midi_filter_class.rb](../mrbgems/picoruby-midi/mrblib/midi_filter_class.rb) /
   picoruby-ui [ui_midi_filters.rb](../mrbgems/picoruby-ui/mrblib/ui_midi_filters.rb) /
   [main/ui/ui_filters.cpp](../main/ui/ui_filters.cpp) / [main/ui/screen_midi_devices.cpp](../main/ui/screen_midi_devices.cpp)
-- サンプル: [examples/filters/](../examples/filters/) の `chord.rb` / `arp.rb` / `lumi.rb`（+ `lib/lumi_sysex.rb`。
+- サンプル: [examples/filters/](../examples/filters/) の `chord.rb` / `arp.rb` / `channel.rb` / `lumi.rb`（+ `lib/lumi_sysex.rb`。
   `/sd/filters/` にコピーして使う）
 
 ## 1. 要件
@@ -555,6 +555,23 @@ MIDI.register_filter(:lumi, LumiLights.new)
 ```
 
 `examples/midi_to_lumi.rb` はスクリプトとしても残す（filter 版は `examples/filters/lumi.rb`）。
+
+### 8.4 チャンネル変換（channel.rb、2026-10-25 追加）
+
+`ChannelMap`（登録名 `:chmap`、画面の名前 "Ch Map"）。受けたチャンネルメッセージのチャンネルを書き換える
+（例: ch5 → ch1）。`types` は宣言しない（全チャンネルメッセージ。クロックなどは C から直接届く）。
+
+| パラメータ | kind | 意味 |
+|------------|------|------|
+| `from1`〜`from3` / `to1`〜`to3` | `:channel` | 規則 3 本（In → Out）。In が "-" の規則は使わない。Out が "-" なら In のチャンネルを捨てる |
+| `other` | `:enum` `[:thru, :drop]` | どの規則にも当たらないチャンネル。`:drop` で規則に書いたチャンネルだけを通す |
+
+- 同じ In の規則が 2 本あれば両方へ送る（レイヤー）
+- note on / off は `NoteMap` を通すので、押さえている間に規則を変えても note off は note on のチャンネルへ行く
+- パネル（`layout`）は 6 列 × 4 行: 規則ごとに `[-][In][+][-][Out][+]`、最後の行に `param_pad :other` と Clear。
+  値のパッドの id を `param_<name>` にして、パラメータ画面での変更も `_param_shown` でラベルに出る。
+  `:channel` は `param_knob` だと -1..15 の数字で出るので、"-" / 1..16 で見えるパッドにした
+- ホストでは CRuby / mruby とも確認（チャンネルの書き換え・レイヤー・drop・note off の追従・パネルの操作）。**実機未確認**
 
 ## 9. 未決事項
 

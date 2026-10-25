@@ -1139,7 +1139,7 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
 - filter の `layout(ui)` は**チェーンで使われている間だけ**のレイアウト（Home のタイル）。外れたら消す
   （表示中なら MIDI Devices 画面へ戻ってから）。UI モードのループは `UI.process` + `MIDI.sleep_ms(100)` に変えた
   （以前の素の `sleep_ms` では filter もパネルも動かない）
-- サンプル: [examples/filters/](examples/filters/)（chord / arp / lumi。`/sd/filters/` にコピー）
+- サンプル: [examples/filters/](examples/filters/)（chord / arp / channel（チャンネル変換、`:chmap`）/ lumi。`/sd/filters/` にコピー）
 
 ## 既知の課題
 
