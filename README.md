@@ -27,7 +27,7 @@ end
 - **USB MIDI Host** — Plug synthesizers, keyboards and controllers straight into the board, with hot-plug detection and recovery
 - **USB MIDI Device** — In `midi_device` mode the board itself is a USB MIDI device to a computer (TinyUSB CDC + MIDI composite; appears as `Midori <board>`)
 - **UART MIDI / SAM2695** — Serial MIDI out to DIN gear or the onboard SAM2695 General MIDI sound module
-- **MIDI routing** — `MIDI.route(from, to, channel:)` forwards input to any output in C, without going through Ruby, so a keyboard can drive a synth with no added latency. The on-screen keyboard (`UI::Keys`) can be a source or a destination as well
+- **MIDI routing** — `MIDI.route(from, to, channel:)` forwards input to any output in C, without going through Ruby, so a keyboard can drive a synth with no added latency. The on-screen keyboard (`UI::Keys`) and the sequencer (`UI::Sequencer`) can be a source or a destination as well
 
 ### Script
 
@@ -47,6 +47,7 @@ end
   - **XY Pad** — Up to five fingers, each playing pitch (snapped to a scale, with glide) on X and a CC on Y (`UI::XYPad`, [docs](docs/XYPAD.md))
   - **Tombola** — A physics sequencer: balls bounce inside a rotating polygon and play a note on every wall hit (`UI::Tombola`, [docs](docs/TOMBOLA.md))
   - **Keys** — A 1 to 4 octave keyboard (13 to 49 keys) played with up to five fingers. It is a MIDI transport too: what you play can be routed anywhere, and notes sent to it light up the keys, like a light-up keyboard showing what is being played. Each key's colour can be set from scripts (`UI::Keys`, [docs](docs/KEYS.md))
+  - **Sequencer** — Up to 16 lines and 16 patterns chained into a song, played on the MIDI clock it receives (the Tempo screen's, or an external one). Each line is a step grid (4 to 64 steps; tap to place the last chord played into it, drag for length) or a realtime line, on a MIDI channel of its own, with an optional Program Change / Bank Select per pattern. Songs are saved to the SD card and the one being worked on is autosaved (`UI::Sequencer`, [docs](docs/SEQUENCER.md))
   - **Layouts** — Any mix of the above on one screen, placed on a grid by column and row (`UI.layout`, [docs](docs/UI_LAYOUT_DSL.md))
 - **AMY synthesizer** (Tab5 / CrowPanel) — The [AMY](https://github.com/shorepine/amy) engine plays through the built-in speaker, as an ordinary MIDI output: `AMY::FM` (DX7 presets) and `AMY::Synth` (subtractive, Juno-style), see [docs](docs/AMY_SYNTH.md)
 - **Rotary encoders** — DFRobot SEN0502 I2C encoders as physical knobs
@@ -278,6 +279,59 @@ RGB565 integers or `[r, g, b]` (`UI.rgb(r, g, b)`). The keyboard has its own
 Keys screen and can also go on a layout (`keys`). It has been built for Tab5
 but not yet tried on hardware. See [docs/KEYS.md](docs/KEYS.md).
 
+### Sequencer (UI::Sequencer)
+
+```ruby
+seq = UI::Sequencer.new(device: MIDIDevices.amy)   # the clock comes from UI::Tempo
+seq.line(0, name: "Kick", channel: 9).pattern("x...x...x...x...", notes: [36])
+seq.line(1, name: "Bass", channel: 0, steps: 32, gate: 80).set(0, notes: [36], length: 3)
+seq.line(2, name: "Keys", channel: 1)[0] = [60, 63, 67]   # a chord on step 0
+seq.line(2).program = 4                         # sent when this pattern starts
+
+seq.pattern(0).copy_to(1)                       # pattern 1: a variation
+seq.pattern(1).line(0).pattern("x...x...x.x.xxxx", notes: [36])
+seq.chain = [[0, 3], [1, 1]]                    # pattern 0 three times, then 1
+seq.chain_on = true
+
+seq.save("groove")                              # /sd/patterns/groove.mseq
+seq.show                                        # Play / Stop are on its screen
+```
+
+The sequencer is a MIDI transport like the keyboard. It moves on the MIDI clock
+routed to it (Timing Clock, Start / Continue / Stop, Song Position), so it
+follows the Tempo screen's BPM and Play button, or another device's clock
+(`clock: dev`). Notes routed to it (`input:`) become the chord the grid places.
+What it plays goes from a task of its own, in C, to `device:` and along every
+`MIDI.route` from it.
+
+- **Lines and patterns**: a line's channel, mode (grid / realtime) and mute are
+  the same in every pattern; its notes, length (steps, rate, bars) and sound
+  (Program Change / Bank Select) are each pattern's. Lines loop at their own
+  length, so lines of different lengths make a polymeter. A pattern lasts as
+  long as its longest line, unless its length is set. 8 lines by default, up to
+  16.
+- **Switching**: picking a pattern while playing queues it for the end of the
+  playing one (or the next bar). A chain plays patterns in order and goes back
+  to the top at its end.
+- **On screen**: a pattern slot strip, half-page scrolling with 8 or 16 steps in
+  view, Follow, Play / Stop. Tap a cell to place the chord, drag for its length,
+  tap a note's start to remove it, hold it to replace it with the chord. Hold a
+  line's name for its settings (channel, steps, rate, gate, program, copy /
+  paste), a slot for its menu (copy, paste, clear, length), Chain to edit the
+  chain. File saves, loads and deletes songs.
+- **Saving**: songs are `.mseq` files in `/sd/patterns/` (`/patterns` on the
+  flash without a card), checked with a CRC when read. The song being worked
+  on is autosaved to `_autosave.mseq` and comes back after a power cycle. A
+  script's `UI::Sequencer.new` song is its own: it is not autosaved, and the
+  user's song comes back when the script ends (`UI::Sequencer.current` uses the
+  user's song instead).
+
+The playback engine is plain C with host tests (`make -C main/ui/host_test`).
+Playing from the screen has been tried on a Tab5; saving, an external clock and
+the other boards have not been tried on hardware yet. Realtime recording is
+still to come. See [docs/SEQUENCER.md](docs/SEQUENCER.md) and
+[examples/sequencer.rb](examples/sequencer.rb).
+
 ### MIDI.bpm_loop
 
 ```ruby
@@ -305,7 +359,7 @@ end
 
 ### UI layouts (UI.layout)
 
-Put pads, knobs, the XY pad, the Tombola and the keyboard on one screen, placed on a grid
+Put pads, knobs, the XY pad, the Tombola, the keyboard, the tempo and the sequencer on one screen, placed on a grid
 by column and row (CoreS3 / Tab5 / CrowPanel):
 
 ```ruby
@@ -350,7 +404,9 @@ end
   them by weight, and `cols: [UI.px(60), 1, 1]` gives the first a fixed width.
   The same goes for `rows:`. `gap:` and `padding:` default to a per-board value.
 - **Widgets**: `pad`, `knob`, `xypad`, `tombola` and `keys` take the same keywords
-  as `UI.pad`, `UI.knob`, `UI::XYPad.new`, `UI::Tombola.new` and `UI::Keys.new`. `grid` nests
+  as `UI.pad`, `UI.knob`, `UI::XYPad.new`, `UI::Tombola.new` and `UI::Keys.new`.
+  `tempo` puts the Tempo screen in a cell, and `sequencer` the Sequencer screen
+  (the current song, or `sequencer: seq`). `grid` nests
   another grid. Write the blocks with `do ... end`, because `label: "x" { }`
   does not parse.
 - **Handles**: each widget returns a handle you can change later.
@@ -359,12 +415,12 @@ end
   `layout[:cutoff]`. `xypad`, `tombola` and `keys` return the `UI::XYPad` /
   `UI::Tombola` / `UI::Keys` instance (or pass an existing one with `pad:` /
   `tombola:` / `keys:`).
-- **Pages**: you can define up to four layouts. Each one gets a tile on the Home
-  screen and can be shown with `layout.show` or `UI.show(layout)`, for example
+- **Pages**: you can define as many layouts as memory allows. Each one gets a tile on the Home
+  screen (Home scrolls when there are many) and can be shown with `layout.show` or `UI.show(layout)`, for example
   from a `MIDI::Input` handler. Defining the same title again replaces that
   layout and resets its values. The layouts go away when the script ends.
-- **Limits**: a layout holds up to 32 widgets, with at most one `xypad`, one
-  `tombola` and one `keys`. Widgets may not overlap, and a cell outside the grid raises
+- **Limits**: a layout holds up to 32 widgets, with at most one each of `xypad`,
+  `tombola`, `keys`, `tempo` and `sequencer`. Widgets may not overlap, and a cell outside the grid raises
   `ArgumentError`. A widget too small to touch comfortably is still placed but
   logs a warning.
 - **Fitting each board**: weights scale with the screen. For larger changes,
@@ -394,6 +450,7 @@ when none is picked, so the same script works with whatever is plugged in.
 | [keys.rb](examples/keys.rb) | On-screen keyboard; a USB keyboard lights its keys, a scale shown in colour |
 | [keys_layout.rb](examples/keys_layout.rb) | The keyboard with knobs and pads on one screen |
 | [keys_amy.rb](examples/keys_amy.rb) | Play the built-in synth from the keyboard, with layout knobs and the Knobs screen |
+| [sequencer.rb](examples/sequencer.rb) | A drum, bass and keys song in two patterns and a chain, played on the Sequencer screen |
 | [amy_fm.rb](examples/amy_fm.rb) / [amy_synth.rb](examples/amy_synth.rb) | Play the built-in synth from pads, XY pad, knobs and a USB keyboard |
 | [bach_air.rb](examples/bach_air.rb) | MML playback |
 | [midi_monitor.rb](examples/midi_monitor.rb) | Log every incoming MIDI message |
@@ -410,6 +467,7 @@ Core 1  Supervisor task ─── PicoRuby task (created / deleted per script)
                                └─ main_task.rb → SD card script / irb
         Console task ─────── line editing, load / stop / irb, PicoModem
         MIDI input task ──── parsing, MIDI.route forwarding
+        Sequencer task ───── playback on the received MIDI clock
 Core 0  Main task ────────── app_main loop: touch UI (M5GFX / LovyanGFX)
         USB host tasks ───── USB MIDI host driver
         AMY audio task ───── synth render + I2S (Tab5 / CrowPanel)
