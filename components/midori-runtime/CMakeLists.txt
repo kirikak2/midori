@@ -418,6 +418,13 @@ if(HAS_AMY)
     # turning knobs. 0.9 still leaves the UI loop 10% of core 0.
     AMY_GEM_OVERLOAD_THRESHOLD=0.9f
   )
+  # For measurements only: `idf.py -DAMY_REVERB_INTERNAL_MIN_FREE=0 build`
+  # puts the reverb lines in internal RAM whatever is free (see
+  # docs/AMY_SYNTH.md). Left unset, the gem's default applies.
+  if(DEFINED AMY_REVERB_INTERNAL_MIN_FREE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+      AMY_GEM_REVERB_INTERNAL_MIN_FREE=${AMY_REVERB_INTERNAL_MIN_FREE})
+  endif()
 endif()
 
 configure_file(

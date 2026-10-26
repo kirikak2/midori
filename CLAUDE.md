@@ -1049,6 +1049,9 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
   スピーカーは SPK_EN だけで切る（**コーデック出力を切るとイヤホンも鳴らなくなる**）。
   CrowPanel はスピーカーのみで、gem の `AMY_GEM_set_output_gain()` でサンプルを減衰させる。
   詳細は docs/AMY_SYNTH.md の「マスターボリュームとヘッドホン」
+- 描画時間は `AMY.perf`（オーディオタスクがサイクルカウンタで毎ブロック測る。2026-10-25）。
+  menuconfig の `USB_MIDI_AMY_PROFILE` で AMY を `AMY_DEBUG` ビルドするとステージ別も出る（計測専用）。
+  ベンチマークは [examples/amy_perf.rb](examples/amy_perf.rb)。docs/AMY_SYNTH.md の「描画時間の計測」
 - Tab5 の MCLK は 128 × fs（ES8388 reg24 = 0x00 と対）。片方だけ変えるとピッチが 2 倍ずれる
 - スクリプト停止時に `picoruby_esp32_midi_cleanup()` が `AMY_GEM_reset()` を呼び、
   synth・パッチ・CC マッピングを消す（オーディオは止めない）

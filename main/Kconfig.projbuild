@@ -231,4 +231,16 @@ menu "USB MIDI Host Configuration"
                 Path to the Ruby script to execute on startup.
     endmenu
 
+    config USB_MIDI_AMY_PROFILE
+        bool "AMY: per-stage render profiling (AMY_DEBUG)"
+        depends on IDF_TARGET_ESP32P4
+        default n
+        help
+            Build the AMY engine with AMY_DEBUG, so that AMY.perf also reports
+            the time spent in each render stage (oscillators, filters, mix,
+            effects). For measurement only: the profiler times every stage
+            with esp_timer, which slows the render down a little, and
+            AMY_DEBUG makes AMY abort() on an allocation failure instead of
+            carrying on. AMY.perf's per-block render timing works without it.
+
 endmenu

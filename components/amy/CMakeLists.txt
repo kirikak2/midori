@@ -48,3 +48,10 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
   -Wno-maybe-uninitialized
   -Wno-format
 )
+
+# AMY's per-stage profiler for AMY.perf (CONFIG_USB_MIDI_AMY_PROFILE).
+# PUBLIC: amy.h declares the profiler only under AMY_DEBUG, and the gem's
+# port (in midori-runtime) reads it.
+if(CONFIG_USB_MIDI_AMY_PROFILE)
+  target_compile_definitions(${COMPONENT_LIB} PUBLIC AMY_DEBUG)
+endif()
