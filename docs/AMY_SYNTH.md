@@ -587,9 +587,10 @@ C 側の `send_packet` は USB-MIDI パケットを MIDI バイト列に戻し�
 AMY がボイス割り当て・ノートオフ・サステイン・ピッチベンド・プログラムチェンジを
 内部で処理する。入力（`read_available`）は当面空を返す（送信専用）。
 
-**チャンネルの対応**：AMY の `synth` 1–16 が MIDI チャンネル 1–16 に対応する。
-`MIDI::Device` のチャンネルは 0 始まりなので **`channel: 0` ＝ AMY の synth 1**。
-AMY は synth が定義されたチャンネルにしか反応しない（`_midi_channel_active`）。
+**チャンネルの対応**（2026-10-27 に変更。§6）：チャンネルと AMY の synth の対応は
+gem が持つ（`AMY_GEM_bind_synth()`）。パート（`add_fm` / `add_synth`）が自分の synth を
+指定のチャンネルに結び付け、`send_packet` はチャンネルメッセージをそのチャンネルに
+結び付いた synth すべてに配る。以前は AMY の既定どおり「`channel: N` ＝ synth N + 1」だった。
 
 ### 前提作業：picoruby-midi にトランスポート登録 API を足す
 
@@ -758,7 +759,7 @@ FM / エンベロープ / フィルタ / エフェクト系に絞って手で起
 **L2: FM シンセオブジェクト**（よく触るパラメータの名前付きアクセサ）
 
 ```ruby
-fm = AMY::FM.new(channel: 0, voices: 6, patch: 128)  # channel 0 = AMY synth 1
+fm = AMY.add_fm(channel: 0, voices: 6, patch: 128)
 fm.patch = 133                  # DX7 プリセット切り替え
 fm.algorithm = 5                # 1..32
 fm.feedback = 0.4               # 0.0..1.0
@@ -861,7 +862,7 @@ fm.op(2).attack = 30     # → 保持している decay / sustain / release と�
 #### 割り当て例
 
 ```ruby
-fm  = AMY::FM.new(channel: 0, voices: 6, patch: 128)
+fm  = AMY.add_fm(channel: 0, voices: 6, patch: 128)
 
 # 画面のノブ → 直接セット
 UI.knob(5, label: "Op2 Atk", value: 10) { |v| fm.op(2).attack  = AMY.scale(v, 1, 2000, log: true) }
@@ -887,7 +888,7 @@ CC 74 のように L3 でマップ済みの CC は、`MIDI.route` で AMY に流
 require 'midi'
 require 'amy'
 
-fm  = AMY::FM.new(channel: 0, voices: 6, patch: 128)
+fm  = AMY.add_fm(channel: 0, voices: 6, patch: 128)
 dev = MIDI::Device.new(fm.transport)
 
 fm.map_cc(74, :filter_freq, min: 100, max: 8000, log: true)
@@ -1094,7 +1095,7 @@ osc 5  OSC 4    ┘ （Juno: PULSE / SAW_UP / PULSE(サブ, -1 oct) / NOISE）
 （逃げ道）の 3 本立て。値は Ruby 側に現在値を持ち、`refresh` で AMY から読み戻す。
 
 ```ruby
-syn = AMY::Synth.new(channel: 1, voices: 6)   # channel 1 = AMY synth 2
+syn = AMY.add_synth(channel: 1, voices: 6)
 syn.patch = 5                     # Juno パッチ 0〜127 をプリセットとして呼ぶ（new では省略時は初期ボイス）
 syn.init_voice                    # 初期ボイスへ戻す
 
@@ -1204,7 +1205,7 @@ USB キーボードは `MIDI.route`）。
 - **エコー**：ディレイライン（約 512 KB、PSRAM）はレベルを初めて 0 より上げたときに
   確保され、以後は解放されない（`AMY.reset` でも残る。FM だけのスクリプトでは確保されない）
 - **ウェーブテーブル無し**、PCM は `pcm_tiny` の 11 サンプルのみ
-- `FM` と `Synth` は別の synth（チャンネル）に置けば同時に鳴らせる。
+- `FM` と `Synth` は同時に鳴らせる（それぞれ別の synth。チャンネルは同じでもよい。§6）。
   `AMY.reset`（スクリプト停止時）で両方消える
 - gem の `mrblib/` を変えたら `rm -rf components/midori-runtime/picoruby/build/esp32-picoruby`
   してからビルドする（CLAUDE.md）
@@ -1285,6 +1286,47 @@ fx V=1.0000 h=0.0000,0.8500,0.5000,3000.0 k=1.0000,512.0,0.5000,0.5000 M=0.0000,
 6. MIDI 経由のノートで、チェーンの各オシレータが 1 回だけ鳴っているか（音量が倍にならない）
 
 ---
+
+## 6. パート：`AMY.add_fm` / `AMY.add_synth`（2026-10-27）
+
+ホストテストのみで**実機未確認**（`ruby host_test/parts_test.rb`、picoruby-amy ディレクトリで）。
+
+1 つのエンジンに音源（パート）を最大 16 個載せ、それぞれに MIDI チャンネルを指定する。
+チャンネルは重複してよく、同じチャンネルのパートは一緒に鳴る（レイヤー）。
+エンジンは従来どおり 1 つのトランスポートなので、`MIDI::Device.new(MIDIDevices.amy)` /
+`MIDI.route(..., MIDIDevices.amy)` / MIDI Devices 画面はそのまま使え、チャンネルで
+パートを選ぶ。
+
+```ruby
+amy  = MIDIDevices.amy                                 # AMY::Transport
+bass = amy.add_synth(channel: 0, voices: 2, patch: 3)  # Juno プリセット
+pad  = amy.add_fm(channel: 1, voices: 6, patch: 130)   # DX7 プリセット
+bell = amy.add_fm(channel: 1, voices: 4, patch: 140)   # ch 1 に重ねる
+dev  = MIDI::Device.new(amy)
+dev.note_on(60, 100, channel: 1)                       # pad と bell が鳴る
+bell.channel = 2                                       # 付け替え（nil で無音）
+bell.remove                                            # 外す（AMY.remove_all で全部）
+```
+
+- `AMY.add_fm` / `AMY.add_synth` と、トランスポートの同名メソッドは同じもの。
+  `AMY::FM.new` / `AMY::Synth.new` も互換のため残してあり、同じく登録される
+- **synth 番号はチャンネルから決めず、空いている 1〜16 の小さい順に割り当てる**
+  （`part.synth_number`）。AMY の CC マッピングが synth 1〜16 しか持たない
+  （`AMY_NUM_MIDI_CHANNELS`）ので上限は 16。パラメータ・プリセット・CC マッピング・音量は
+  パートごと。エフェクト（reverb / chorus / echo）はバス共通
+- C 側（`amy_port.c`）はチャンネルごとに synth のビットマスク（`s_channel_synths[16]`）を持ち、
+  `send_packet` はチャンネルメッセージをビットの立った synth へ順に配る。配り方は AMY の
+  `amy_event_midi_message_received()` の中身（ペダル・All Notes Off・Bank Select・
+  Program Change・ピッチベンド → `midi_message_handler_to_queue()`）を synth 番号で呼ぶもの。
+  システムメッセージ（クロック等）は従来どおり AMY の MIDI 入力へ
+- マスクの書き込みは Ruby タスク、読み出しは送信元のタスク。要素は 16 bit の 1 回の
+  ストアなのでロックなし。`AMY_GEM_reset()` で全消去（スクリプト停止時に結び付けも消える）
+- Program Change / CC はそのチャンネルの全パートに届く（レイヤーごと音色が変わる）。
+  Program Change で変わった音色は Ruby のパートの値には反映されない（従来と同じ）
+- 削除は `iv0`（AMY の synth 削除）。番号を再利用する前に 2 ブロック待つ
+- `voices=` はパッチ（なければ初期ボイス）を読み込み直す
+- `AMY.command(synth:)` で手組みした synth は自動では鳴らない。`AMY.bind(synth, channel)`
+  でチャンネルに結び付ける（番号はパートと重ならないよう 16 から下を使う）
 
 ## 実装フェーズ（案）
 

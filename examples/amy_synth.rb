@@ -31,7 +31,7 @@ require 'machine'
 
 raise "AMY is not available on this board" unless MIDIDevices.amy
 
-syn = AMY::Synth.new(channel: 0, voices: 6)   # the initial voice
+syn = AMY.add_synth(channel: 0, voices: 6)   # the initial voice
 
 # MIDI (pads, XYPad, CC knobs) goes to the OUT chosen on the MIDI Devices
 # screen, which starts out as AMY. Picking another synth there sends the

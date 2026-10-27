@@ -1055,6 +1055,14 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
 - Tab5 の MCLK は 128 × fs（ES8388 reg24 = 0x00 と対）。片方だけ変えるとピッチが 2 倍ずれる
 - スクリプト停止時に `picoruby_esp32_midi_cleanup()` が `AMY_GEM_reset()` を呼び、
   synth・パッチ・CC マッピングを消す（オーディオは止めない）
+- **音源はパート**（2026-10-27）：`MIDIDevices.amy.add_fm(channel:, voices:, patch:)` /
+  `add_synth(...)`（`AMY.add_fm` / `AMY.add_synth` も同じ）で最大 16 個。チャンネルは重複可
+  （同じチャンネルのパートは一緒に鳴る）。synth 番号はチャンネルと無関係に空きから割り当て、
+  C（`AMY_GEM_bind_synth()`、`amy_port.c` の `s_channel_synths`）がチャンネルメッセージを
+  結び付いた synth すべてに配る（以前は AMY 既定の「channel N = synth N + 1」）。
+  `part.channel =` / `voices =` / `remove`、`AMY.parts(channel:)`。`AMY.command(synth:)` で
+  手組みした synth は `AMY.bind(synth, channel)`。ホストテスト `ruby host_test/parts_test.rb`
+  （picoruby-amy ディレクトリで）。docs/AMY_SYNTH.md §6。**実機未確認**
 - 音源クラスは 2 つ：`AMY::FM`（DX7 プリセット 128〜255）と `AMY::Synth`
   （オシレータ最大 4 + LFO 1 + フィルタ + ADSR × 2。Juno パッチ 0〜127 と同じ osc 配置で、
   読み込んだプリセットを `AMY._synth_state` で読み戻してノブに反映する。2026-10-04、実機未確認）。

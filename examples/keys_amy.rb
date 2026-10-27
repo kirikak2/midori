@@ -31,7 +31,7 @@ require 'ui'
 
 raise "AMY is not available on this board" unless MIDIDevices.amy
 
-syn = AMY::Synth.new(channel: 0, voices: 8)
+syn = AMY.add_synth(channel: 0, voices: 8)
 
 # 鍵盤と CC のノブは MIDI Devices 画面で選ぶ OUT へ送る。始めは AMY。
 # 画面で OUT を別の音源にすると演奏はそちらへ行く（音色のノブは AMY のまま）

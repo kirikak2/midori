@@ -37,7 +37,7 @@ require 'machine'
 raise "AMY is not available on this board" unless MIDIDevices.amy
 
 FIRST_PATCH = 128   # DX7 presets: 128..255
-fm  = AMY::FM.new(channel: 0, voices: 6, patch: FIRST_PATCH)
+fm  = AMY.add_fm(channel: 0, voices: 6, patch: FIRST_PATCH)
 
 # MIDI (pads, XYPad, CC knobs) goes to the OUT chosen on the MIDI Devices
 # screen, which starts out as AMY. Picking another synth there sends the

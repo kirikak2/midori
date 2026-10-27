@@ -49,7 +49,7 @@ end
   - **Keys** — A 1 to 4 octave keyboard (13 to 49 keys) played with up to five fingers. It is a MIDI transport too: what you play can be routed anywhere, and notes sent to it light up the keys, like a light-up keyboard showing what is being played. Each key's colour can be set from scripts (`UI::Keys`, [docs](docs/KEYS.md))
   - **Sequencer** — Up to 16 lines and 16 patterns chained into a song, played on the MIDI clock it receives (the Tempo screen's, or an external one). Each line is a step grid (4 to 64 steps; tap to place the last chord played into it, drag for length) or a realtime line, on a MIDI channel of its own, with an optional Program Change / Bank Select per pattern. Songs are saved to the SD card and the one being worked on is autosaved (`UI::Sequencer`, [docs](docs/SEQUENCER.md))
   - **Layouts** — Any mix of the above on one screen, placed on a grid by column and row (`UI.layout`, [docs](docs/UI_LAYOUT_DSL.md))
-- **AMY synthesizer** (Tab5 / CrowPanel) — The [AMY](https://github.com/shorepine/amy) engine plays through the built-in speaker, as an ordinary MIDI output: `AMY::FM` (DX7 presets) and `AMY::Synth` (subtractive, Juno-style), see [docs](docs/AMY_SYNTH.md)
+- **AMY synthesizer** (Tab5 / CrowPanel) — The [AMY](https://github.com/shorepine/amy) engine plays through the built-in speaker, as an ordinary MIDI output: parts added with `add_fm` (DX7 presets) and `add_synth` (subtractive, Juno-style), each on a MIDI channel of its own (layers allowed), see [docs](docs/AMY_SYNTH.md)
 - **Rotary encoders** — DFRobot SEN0502 I2C encoders as physical knobs
 
 ## The picoruby-midi Family

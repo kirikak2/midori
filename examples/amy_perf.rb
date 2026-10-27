@@ -49,7 +49,7 @@ end
 AMY.start
 measure("idle (no synth)")
 
-fm = AMY::FM.new(channel: 0, voices: 6, patch: 128)
+fm = AMY.add_fm(channel: 0, voices: 6, patch: 128)
 fm_dev = MIDI::Device.new(fm.transport)
 hold_chords("FM patch 128", fm_dev, 0)
 
@@ -64,7 +64,7 @@ end
 
 unless stopped?
   AMY.reset
-  syn = AMY::Synth.new(channel: 1, voices: 6, patch: 0)
+  syn = AMY.add_synth(channel: 1, voices: 6, patch: 0)
   hold_chords("Juno patch 0", MIDI::Device.new(syn.transport), 1)
 end
 
