@@ -384,6 +384,39 @@ void ui_widget_knob_event_post(int layout, uint8_t id, float value, bool final)
     portEXIT_CRITICAL(&s_event_mutex);
 }
 
+void ui_widget_env_event_post(int layout, uint8_t id, bool final)
+{
+    portENTER_CRITICAL(&s_event_mutex);
+
+    // Same coalescing as the knobs'. The event only says "moved", so the one
+    // already waiting covers this change too.
+    for (int i = s_event_tail; i != s_event_head; i = (i + 1) % UI_EVENT_QUEUE_SIZE) {
+        if (s_event_queue[i].type == UI_EVENT_WIDGET
+         && s_event_queue[i].data.widget.kind == UI_WIDGET_ENVELOPE
+         && s_event_queue[i].data.widget.layout == (uint16_t)layout
+         && s_event_queue[i].data.widget.id == id) {
+            if (final) s_event_queue[i].data.widget.final = true;
+            portEXIT_CRITICAL(&s_event_mutex);
+            return;
+        }
+    }
+
+    int next_head = (s_event_head + 1) % UI_EVENT_QUEUE_SIZE;
+    if (next_head != s_event_tail) {
+        ui_event_t& e = s_event_queue[s_event_head];
+        e.type = UI_EVENT_WIDGET;
+        e.data.widget.layout = (uint16_t)layout;
+        e.data.widget.id = id;
+        e.data.widget.kind = UI_WIDGET_ENVELOPE;
+        e.data.widget.phase = UI_WIDGET_CHANGE;
+        e.data.widget.state = false;
+        e.data.widget.final = final;
+        e.data.widget.value = 0.0f;
+        s_event_head = next_head;
+    }
+    portEXIT_CRITICAL(&s_event_mutex);
+}
+
 // --- Knobs ----------------------------------------------------------------
 
 knob_config_t  g_knob_bank0[UI_KNOB_COUNT] = {};

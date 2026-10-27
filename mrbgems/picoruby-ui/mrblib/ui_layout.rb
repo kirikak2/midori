@@ -1,6 +1,6 @@
 # Layout DSL (docs/UI_LAYOUT_DSL.md)
 #
-# Places pads, knobs, the XYPad, the Tombola and the Keys on one screen by grid column /
+# Places pads, knobs, envelopes, the XYPad, the Tombola and the Keys on one screen by grid column /
 # row. Everything grid-related -- tracks, areas, nesting, validation -- is
 # resolved here, once, when the layout is defined; the C++ side only ever
 # receives a list of pixel rectangles.
@@ -206,6 +206,7 @@ module UI
     KIND_KEYS    = 4
     KIND_TEMPO   = 5
     KIND_SEQUENCER = 6
+    KIND_ENVELOPE = 7
 
     # Below this a widget is hard to hit with a finger. Provisional numbers,
     # to be tuned on the hardware (docs/UI_LAYOUT_DSL.md D13): placing one
@@ -217,7 +218,8 @@ module UI
       tombola: [96, 96],
       keys:    [120, 48],
       tempo:   [120, 72],
-      sequencer: [240, 96]
+      sequencer: [240, 96],
+      envelope: [120, 64]
     }
 
     # Only one of these per layout: the C side holds a single model of each
@@ -331,6 +333,23 @@ module UI
         add(:knob, col, row, area, id, block,
             { label: label, color: color, value: value, min: min, max: max,
               step: step, origin: origin, sensitivity: sensitivity })
+      end
+
+      # An ADSR editor (docs/ENVELOPE.md). to: is where the values go (and
+      # where the ones not given are read from): env: :amp calls
+      # to.amp_envelope(attack:, ...), no env: calls to.envelope(...). The
+      # block gets { attack:, decay:, sustain:, release: } after that.
+      def envelope(col: nil, row: nil, area: nil, id: nil, label: "Env", color: :cyan,
+                   attack: nil, decay: nil, sustain: nil, release: nil,
+                   max_time: 2000, to: nil, env: nil, &block)
+        unless max_time.is_a?(Numeric) && max_time > 0
+          raise ArgumentError, "envelope: max_time must be a positive number of ms"
+        end
+        values = UI::Envelope.initial_values([attack, decay, sustain, release], to, env,
+                                             max_time.to_f)
+        add(:envelope, col, row, area, id, block,
+            { label: label.to_s, color: color, values: values, max_time: max_time.to_f,
+              to: to, env: env })
       end
 
       # Keywords are UI::XYPad.new's. pad: hands over an existing instance
@@ -500,11 +519,11 @@ module UI
       @widgets
     end
 
-    # Calls every knob's block with its current value. Defining knobs sends
-    # nothing; use this to push initial values, or to re-sync a synth that
-    # was plugged in later.
+    # Calls every knob's and envelope's block with its current value.
+    # Defining them sends nothing; use this to push initial values, or to
+    # re-sync a synth that was plugged in later.
     def send_all
-      @widgets.each { |w| w.send_value if w.is_a?(Knob) }
+      @widgets.each { |w| w.send_value if w.is_a?(Knob) || w.is_a?(UI::Envelope) }
       nil
     end
 
@@ -556,6 +575,16 @@ module UI
                                    pr[:sensitivity].to_f, spec[:block] ? true : false)
         end
         register(Knob.new(self, id, spec[:block]))
+      when :envelope
+        v = pr[:values]
+        notify = (spec[:block] || pr[:to]) ? true : false
+        id = -1
+        if live
+          id = UI._layout_add_envelope(x, y, w, h, pr[:label], color_code(pr[:color]),
+                                       v[0], v[1], v[2], v[3], pr[:max_time], notify)
+        end
+        register(UI::Envelope.new(self, id, v, pr[:max_time], pr[:to], pr[:env],
+                                  spec[:block]))
       when :xypad
         pad = pr[:instance] || UI::XYPad.new(**pr[:opts])
         UI._layout_add_view(KIND_XYPAD, x, y, w, h) if live
@@ -690,6 +719,151 @@ module UI
       rescue => e
         UI.log("Error in layout knob callback: " + e.message)
       end
+    end
+  end
+
+  # An ADSR envelope on a layout (docs/ENVELOPE.md), edited by dragging its
+  # breakpoints. Made by the layout DSL's `envelope`. The values live on the
+  # C side while the layout is on the device; this keeps a copy for boards
+  # without a display.
+  class Envelope
+    STAGES = [:attack, :decay, :sustain, :release]
+    DEFAULT = [10.0, 300.0, 0.7, 300.0]
+
+    # Clamped and rounded as the C side does: times to whole ms within
+    # 0..max_time, sustain to 0.01 within 0..1.
+    def self.quantize(stage, value, max_time)
+      v = value.to_f
+      if stage == 2
+        v = 0.0 if v < 0
+        v = 1.0 if v > 1
+        (v * 100).round / 100.0
+      else
+        v = 0.0 if v < 0
+        v = max_time if v > max_time
+        v.round.to_f
+      end
+    end
+
+    # Starting values: the ones given, else what target reports, else DEFAULT
+    def self.initial_values(given, target, env, max_time)
+      read = target ? read_from(target, env) : [nil, nil, nil, nil]
+      result = []
+      4.times do |i|
+        v = given[i]
+        v = read[i] if v.nil?
+        v = DEFAULT[i] if v.nil?
+        result << quantize(i, v, max_time)
+      end
+      result
+    end
+
+    # [attack, decay, sustain, release] as target has them (nil for any it
+    # does not answer): env: :amp reads amp_attack..., no env: attack...
+    def self.read_from(target, env)
+      prefix = env ? "#{env}_" : ""
+      STAGES.map do |stage|
+        m = (prefix + stage.to_s).to_sym
+        target.respond_to?(m) ? target.send(m) : nil
+      end
+    end
+
+    attr_reader :id, :max_time, :target, :env
+
+    def initialize(layout, id, values, max_time, target, env, block)
+      @layout = layout
+      @id = id
+      @values = values.dup
+      @initial = values.dup
+      @max_time = max_time
+      @target = target
+      @env = env
+      @block = block
+    end
+
+    # @return [Hash] { attack:, decay:, sustain:, release: }
+    def values
+      v = current
+      { attack: v[0], decay: v[1], sustain: v[2], release: v[3] }
+    end
+    alias to_h values
+
+    def attack;  current[0]; end
+    def decay;   current[1]; end
+    def sustain; current[2]; end
+    def release; current[3]; end
+
+    def attack=(ms);  set(attack: ms);  end
+    def decay=(ms);   set(decay: ms);   end
+    def sustain=(v);  set(sustain: v);  end
+    def release=(ms); set(release: ms); end
+
+    # Moves any of the four and, if that changed something, sends the values
+    # (to: and the block). notify: false updates the display only.
+    def set(attack: nil, decay: nil, sustain: nil, release: nil, notify: true)
+      given = [attack, decay, sustain, release]
+      before = current
+      if @id >= 0
+        UI._lw_env_set(@layout.slot, @id, given[0], given[1], given[2], given[3])
+      end
+      4.times do |i|
+        @values[i] = Envelope.quantize(i, given[i], @max_time) unless given[i].nil?
+      end
+      changed = current != before
+      send_value if changed && notify
+      changed
+    end
+
+    # Reads the values back from to: (after loading a patch, say) without
+    # sending them
+    def sync
+      return false unless @target
+      v = Envelope.read_from(@target, @env)
+      set(attack: v[0], decay: v[1], sustain: v[2], release: v[3], notify: false)
+    end
+
+    # Back to the values it was defined with (sent if that moved anything)
+    def reset
+      set(attack: @initial[0], decay: @initial[1], sustain: @initial[2],
+          release: @initial[3])
+    end
+
+    def send_value
+      h = values
+      if @target
+        m = @env ? "#{@env}_envelope".to_sym : :envelope
+        @target.send(m, attack: h[:attack], decay: h[:decay], sustain: h[:sustain],
+                     release: h[:release])
+      end
+      @block.call(h) if @block
+    rescue => e
+      UI.log("Error in envelope callback: " + e.message)
+    end
+
+    def label=(text)
+      UI._lw_set_label(@layout.slot, @id, text.to_s) if @id >= 0
+    end
+
+    def color=(color)
+      return if @id < 0
+      code = color.is_a?(Integer) ? color : UI.color_to_rgb565(color)
+      UI._lw_set_color(@layout.slot, @id, code)
+    end
+
+    # Internal: the UI event queue says a finger moved it
+    def dispatch(event)
+      send_value
+    end
+
+    private
+
+    def current
+      if @id >= 0
+        v = UI._lw_env_values(@layout.slot, @id)
+        # Rounded again: the C side keeps floats (0.7 comes back 0.69999...)
+        4.times { |i| @values[i] = Envelope.quantize(i, v[i], @max_time) } if v
+      end
+      @values.dup
     end
   end
 

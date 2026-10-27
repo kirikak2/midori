@@ -719,6 +719,12 @@ XYPad / Tombola / Main 上部 / Log は、画面ごとのスプライトでは�
 - 帯の中身はフレームをまたいで残らないので、差分消去はできない（毎回全面を描く）。
   スプライトのテキスト状態は帯ごとに既定値へ戻している（画面間で持ち越さないため）
 - 新しい画面でオフスクリーン描画が要るときも、自前のスプライトを確保せずこれを使う
+- **LovyanGFX の `drawWideLine` / `drawWedgeLine` / `drawSpot` / `*Smooth*` 系（wedgeline 実装）は使わない**。
+  呼び出し側のクリップ矩形を自分の箱（スプライト全体にしか clamp しない）で置き換え、終わると
+  `clearClipRect()` し、縁の半透明ピクセルはクリップなしで書く。帯のキャンバスでは帯の外の行が
+  バッファの外なので、ヒープを画素で上書きする（2026-10-27、Envelope の折れ線で amy_audio が
+  PC = 0xe007e006 = 緑の RGB565 に飛んで落ちた）。太線は `fillTriangle` + `fillCircle`
+  （`ui_widgets.cpp` の `thick_line`）で描く
 - **全画面の再描画（画面切り替え・`ui_request_redraw()`）も `ui_strip::compose()` で帯ごとに
   合成して置き換える**（2026-10-12。以前は `enter()` がコンテンツ領域を黒で塗ってから描いて
   いたので切り替えのたびにちらついた）。帯スプライトはバッファの先頭を帯の行ぶん手前に
@@ -922,7 +928,7 @@ Back は Home を除いた直前の画面で、押すたびに 2 画面を往復
 
 詳細は [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) を参照。
 
-pad / knob / XYPad / Tombola / Keys / Tempo を 1 画面にグリッドで並べる。レイアウトの数に上限はなく
+pad / knob / envelope / XYPad / Tombola / Keys / Tempo を 1 画面にグリッドで並べる。レイアウトの数に上限はなく
 （2026-10-24 まで 4）、それぞれが Home のタイル（多ければ Home を縦にスクロール）。**列・行は 0 始まり**、範囲は Range（`col: 0..2`）。
 
 ```ruby
@@ -957,6 +963,33 @@ end.show
   `ui_layout.rb` の `Builder` にメソッドを足す
 
 サンプル: [examples/layout.rb](examples/layout.rb)
+
+## Envelope（UI::Envelope / ADSR エディタ / 2026-10-27）
+
+詳細は [docs/ENVELOPE.md](docs/ENVELOPE.md)。Tab5 のビルドとホストテストのみで**実機未確認**。
+
+- レイアウト DSL の部品 `envelope`（専用画面はない）。ADSR の折れ線を描き、4 つのハンドル
+  （A: 横 / D: 横と縦 / S: 縦 / R: 横）を指でドラッグして編集する。指を置くと一番近い、
+  他の指が持っていないハンドルをつかむ。pad / knob と同じくレイアウトの中に設定を持つ部品なので何個でも置ける
+- 横軸は区間ごとの対数目盛り（A / D / R は同じ幅、sustain は半分の固定幅、`n = ln(1+t)/ln(1+max_time)`）で、
+  区間を数珠つなぎにしている（つかんだハンドルは指の下に留まる）。計算は `ui_widgets.cpp` の `ui_env_*`
+- C++ は値を持って描くだけ。`to: syn, env: :amp` なら Ruby が `syn.amp_envelope(...)` へ送る
+  （`env:` なしは `to.envelope(...)`。`AMY::FM` のオペレータ用）。イベントは値を載せず
+  （`kind: :envelope`、部品ごとに合流）、Ruby が `UI._lw_env_values` で読み直す
+- mruby 3.2（ホスト）は浮動小数のリテラルの解析が 1 ulp ずれることがある（`0.3` が `30.0/100` と一致しない）。
+  ホストテストの期待値は 2 進で正確に表せる値にする
+
+```ruby
+layout = UI.layout("Synth", cols: 2, rows: 2) do
+  envelope col: 0, row: 0, id: :amp, label: "Amp", to: syn, env: :amp
+  envelope col: 1, row: 0, label: "Filter", to: syn, env: :filter, max_time: 4000
+  keys col: 0..1, row: 1, device: syn.transport
+end
+layout.show
+layout[:amp].sync   # パッチを読み込んだ後に表示を合わせる
+```
+
+サンプル: [examples/envelope.rb](examples/envelope.rb)
 
 ## Elecrow CrowPanel Advanced 7inch 対応（2026-08-28）
 

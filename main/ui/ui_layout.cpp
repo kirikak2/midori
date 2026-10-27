@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
@@ -222,6 +223,39 @@ int ui_layout_add_knob(int x, int y, int w, int h, const char* label,
     return id;
 }
 
+float ui_env_quantize(const envelope_config_t* e, int stage, float value)
+{
+    if (stage == UI_ENV_SUSTAIN) {
+        if (value < 0.0f) value = 0.0f;
+        if (value > 1.0f) value = 1.0f;
+        return roundf(value * 100.0f) / 100.0f;
+    }
+    if (value < 0.0f) value = 0.0f;
+    if (value > e->max_time) value = e->max_time;
+    return roundf(value);
+}
+
+int ui_layout_add_envelope(int x, int y, int w, int h, const char* label,
+                           uint16_t color, float attack, float decay,
+                           float sustain, float release, float max_time,
+                           bool notify)
+{
+    int id;
+    ui_widget_t* wd = add_widget(UI_WIDGET_ENVELOPE, x, y, w, h, &id);
+    if (!wd) return -1;
+    envelope_config_t& e = wd->env;
+    snprintf(e.label, sizeof(e.label), "%s", label ? label : "");
+    e.color = color;
+    e.notify = notify;
+    e.max_time = (max_time >= 1.0f) ? max_time : 1.0f;
+    const float v[4] = { attack, decay, sustain, release };
+    for (int i = 0; i < 4; i++) {
+        e.adsr[i] = ui_env_quantize(&e, i, v[i]);
+        e.initial[i] = e.adsr[i];
+    }
+    return id;
+}
+
 int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
 {
     if (kind != UI_WIDGET_XYPAD && kind != UI_WIDGET_TOMBOLA && kind != UI_WIDGET_KEYS
@@ -316,6 +350,9 @@ void ui_layout_set_label(int slot, int id, const char* label)
     } else if (wd && wd->kind == UI_WIDGET_KNOB) {
         snprintf(wd->knob.label, sizeof(wd->knob.label), "%s", label ? label : "");
         def->dirty |= (1u << id);
+    } else if (wd && wd->kind == UI_WIDGET_ENVELOPE) {
+        snprintf(wd->env.label, sizeof(wd->env.label), "%s", label ? label : "");
+        def->dirty |= (1u << id);
     }
     unlock();
 }
@@ -331,6 +368,9 @@ void ui_layout_set_color(int slot, int id, uint16_t color)
         def->dirty |= (1u << id);
     } else if (wd && wd->kind == UI_WIDGET_KNOB) {
         wd->knob.color = color;
+        def->dirty |= (1u << id);
+    } else if (wd && wd->kind == UI_WIDGET_ENVELOPE) {
+        wd->env.color = color;
         def->dirty |= (1u << id);
     }
     unlock();
@@ -372,6 +412,54 @@ bool ui_layout_knob_reset(int slot, int id)
     ui_widget_t* wd = widget_at(slot, id, UI_WIDGET_KNOB, nullptr);
     float initial = wd ? wd->knob.initial : 0.0f;
     bool changed = wd ? ui_layout_knob_set_value(slot, id, initial) : false;
+    unlock();
+    return changed;
+}
+
+bool ui_layout_envelope_get(int slot, int id, float out[4])
+{
+    if (!s_lock) return false;
+    lock();
+    ui_widget_t* wd = widget_at(slot, id, UI_WIDGET_ENVELOPE, nullptr);
+    if (wd) memcpy(out, wd->env.adsr, sizeof(wd->env.adsr));
+    unlock();
+    return wd != nullptr;
+}
+
+bool ui_layout_envelope_set(int slot, int id, float attack, float decay,
+                            float sustain, float release)
+{
+    if (!s_lock) return false;
+    lock();
+    LayoutDef* def;
+    ui_widget_t* wd = widget_at(slot, id, UI_WIDGET_ENVELOPE, &def);
+    bool changed = false;
+    if (wd) {
+        const float v[4] = { attack, decay, sustain, release };
+        for (int i = 0; i < 4; i++) {
+            if (v[i] < 0.0f) continue;
+            float q = ui_env_quantize(&wd->env, i, v[i]);
+            if (q != wd->env.adsr[i]) {
+                wd->env.adsr[i] = q;
+                changed = true;
+            }
+        }
+        if (changed) def->dirty |= (1u << id);
+    }
+    unlock();
+    return changed;
+}
+
+bool ui_layout_envelope_reset(int slot, int id)
+{
+    if (!s_lock) return false;
+    lock();
+    ui_widget_t* wd = widget_at(slot, id, UI_WIDGET_ENVELOPE, nullptr);
+    bool changed = false;
+    if (wd) {
+        const float* v = wd->env.initial;
+        changed = ui_layout_envelope_set(slot, id, v[0], v[1], v[2], v[3]);
+    }
     unlock();
     return changed;
 }

@@ -53,6 +53,11 @@ private:
     // Unquantized knob value being turned (see ScreenKnobs::m_accum)
     float m_accum[MAX_TOUCH_POINTS];
     bool m_moved[MAX_TOUCH_POINTS];
+    // Envelope handle being dragged (0..3), and where it sat relative to the
+    // finger when grabbed, so it does not jump to the fingertip
+    int8_t m_envHandle[MAX_TOUCH_POINTS];
+    float m_grabDx[MAX_TOUCH_POINTS];
+    float m_grabDy[MAX_TOUCH_POINTS];
 
     void attachViews(LayoutDef* def);
     void detachViews();
@@ -60,6 +65,7 @@ private:
 
     int hitTest(LayoutDef* def, int x, int y);
     bool isHeld(int id, int exceptTouch);
+    uint8_t envGrabbed(int id, int exceptTouch);
     void paintWidget(LayoutDef* def, int id);
 
     void padPress(LayoutDef* def, int id, bool pressed);

@@ -791,14 +791,33 @@ typedef enum {
     UI_WIDGET_KEYS,       // Likewise the Keys'
     UI_WIDGET_TEMPO,      // Likewise the Tempo screen's
     UI_WIDGET_SEQUENCER,  // Likewise the Sequencer's
+    UI_WIDGET_ENVELOPE,   // ADSR editor (docs/ENVELOPE.md)
 } ui_widget_kind_t;
+
+// An ADSR envelope edited by dragging its breakpoints (docs/ENVELOPE.md).
+// Times in ms, sustain 0..1. Like a knob, nothing here sends anything: Ruby
+// reads the values back when it is told they moved.
+#define UI_ENV_ATTACK   0
+#define UI_ENV_DECAY    1
+#define UI_ENV_SUSTAIN  2
+#define UI_ENV_RELEASE  3
+
+typedef struct {
+    char     label[16];
+    uint16_t color;
+    bool     notify;        // Ruby wants change events (a block or to:)
+    float    adsr[4];       // UI_ENV_* order
+    float    initial[4];    // Where ui_layout_envelope_reset() puts it back
+    float    max_time;      // ms of an A / D / R segment at full length
+} envelope_config_t;
 
 typedef struct {
     uint8_t kind;          // ui_widget_kind_t
     int16_t x, y, w, h;    // Screen pixels, resolved by Ruby
     union {
-        pad_config_t  pad;
-        knob_config_t knob;
+        pad_config_t      pad;
+        knob_config_t     knob;
+        envelope_config_t env;
     };
 } ui_widget_t;
 
@@ -812,6 +831,10 @@ int  ui_layout_add_knob(int x, int y, int w, int h, const char* label,
                         uint16_t color, float min, float max, float step,
                         float value, uint8_t origin, float sensitivity,
                         bool notify);
+int  ui_layout_add_envelope(int x, int y, int w, int h, const char* label,
+                            uint16_t color, float attack, float decay,
+                            float sustain, float release, float max_time,
+                            bool notify);
 int  ui_layout_add_view(uint8_t kind, int x, int y, int w, int h);
 bool ui_layout_commit(void);
 void ui_layout_delete(int slot);
@@ -824,9 +847,21 @@ void  ui_layout_set_color(int slot, int id, uint16_t color);
 float ui_layout_knob_value(int slot, int id);
 bool  ui_layout_knob_set_value(int slot, int id, float value);
 bool  ui_layout_knob_reset(int slot, int id);
+// Envelope values in UI_ENV_* order; false if there is no such envelope.
+// _set leaves a negative argument's value as it is and returns whether
+// anything moved (clamped and rounded as a drag would).
+bool  ui_layout_envelope_get(int slot, int id, float out[4]);
+bool  ui_layout_envelope_set(int slot, int id, float attack, float decay,
+                             float sustain, float release);
+bool  ui_layout_envelope_reset(int slot, int id);
+// Clamp and round one value the way every setter does
+float ui_env_quantize(const envelope_config_t* e, int stage, float value);
 
 // Queues a layout knob change, coalesced per knob like ui_knob_event_post
 void ui_widget_knob_event_post(int layout, uint8_t id, float value, bool final);
+// Queues "this envelope moved", coalesced per envelope. Carries no values:
+// Ruby reads all four when it gets the event.
+void ui_widget_env_event_post(int layout, uint8_t id, bool final);
 
 bool ui_layout_exists(int slot);
 int  ui_layout_last_shown(void);                 // -1 before any was shown

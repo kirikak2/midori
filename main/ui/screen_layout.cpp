@@ -46,6 +46,9 @@ ScreenLayout::ScreenLayout()
         m_lastY[i] = 0;
         m_accum[i] = 0.0f;
         m_moved[i] = false;
+        m_envHandle[i] = -1;
+        m_grabDx[i] = 0.0f;
+        m_grabDy[i] = 0.0f;
     }
 }
 
@@ -136,6 +139,18 @@ bool ScreenLayout::isHeld(int id, int exceptTouch)
     return false;
 }
 
+// Envelope handles the other fingers hold on widget id, as a bit mask
+uint8_t ScreenLayout::envGrabbed(int id, int exceptTouch)
+{
+    uint8_t mask = 0;
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+        if (i != exceptTouch && m_touchOwner[i] == id && m_envHandle[i] >= 0) {
+            mask |= (uint8_t)(1u << m_envHandle[i]);
+        }
+    }
+    return mask;
+}
+
 void ScreenLayout::paintWidget(LayoutDef* def, int id)
 {
     if (!def || id < 0 || id >= def->count) return;
@@ -158,6 +173,15 @@ void ScreenLayout::paintWidget(LayoutDef* def, int id)
         if (!ui_strip::paint(wd.x, wd.y, wd.w, wd.h, UI_COLOR_BLACK, render)) {
             render(&ui_gfx(), 0, 0);
         }
+    } else if (wd.kind == UI_WIDGET_ENVELOPE) {
+        EnvGeom geom = ui_env_geom_for(wd.x, wd.y, wd.w, wd.h);
+        uint8_t grabbed = envGrabbed(id, -1);
+        auto render = [&](LovyanGFX* g, int ox, int oy) {
+            ui_env_paint(g, ox, oy, geom, &wd.env, grabbed);
+        };
+        if (!ui_strip::paint(wd.x, wd.y, wd.w, wd.h, UI_COLOR_BLACK, render)) {
+            render(&ui_gfx(), 0, 0);
+        }
     }
 }
 
@@ -172,7 +196,10 @@ void ScreenLayout::enter()
 {
     m_isActive = true;
     ui_layout::set_last_shown(m_slot);
-    for (int i = 0; i < MAX_TOUCH_POINTS; i++) m_touchOwner[i] = -1;
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+        m_touchOwner[i] = -1;
+        m_envHandle[i] = -1;
+    }
 
     ui_layout::lock();
     LayoutDef* def = ui_layout::get(m_slot);
@@ -194,7 +221,7 @@ void ScreenLayout::leave()
 }
 
 // Lets go of everything the fingers hold. With notify, pads report their
-// release and knobs their final value, as if the fingers had lifted; def is
+// release and knobs / envelopes their final value, as if the fingers had lifted; def is
 // nullptr when the layout they were on is gone, and nothing is reported.
 void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
 {
@@ -202,6 +229,7 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
         int id = m_touchOwner[t];
         if (id < 0) continue;
         m_touchOwner[t] = -1;
+        m_envHandle[t] = -1;
 
         if (isView(m_ownerKind[t])) {
             // The view's model would otherwise keep a note held
@@ -225,6 +253,8 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
             padPress(def, id, false);
         } else if (wd.kind == UI_WIDGET_KNOB && m_moved[t] && wd.knob.notify) {
             ui_widget_knob_event_post(m_slot, (uint8_t)id, wd.knob.value, true);
+        } else if (wd.kind == UI_WIDGET_ENVELOPE && m_moved[t] && wd.env.notify) {
+            ui_widget_env_event_post(m_slot, (uint8_t)id, true);
         }
         m_moved[t] = false;
     }
@@ -342,8 +372,25 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
             return;
         }
 
+        int handle = -1;
+        if (kind == UI_WIDGET_ENVELOPE) {
+            // The nearest handle no other finger holds; it keeps its offset
+            // from the finger instead of jumping under it
+            EnvGeom geom = ui_env_geom_for(wd.x, wd.y, wd.w, wd.h);
+            handle = ui_env_nearest_handle(geom, &wd.env, x, y, envGrabbed(id, touchId));
+            if (handle < 0) {
+                ui_layout::unlock();
+                return;
+            }
+            float xs[5], ys[5];
+            ui_env_points(geom, &wd.env, xs, ys);
+            m_grabDx[touchId] = xs[handle + 1] - (float)x;
+            m_grabDy[touchId] = ys[handle + 1] - (float)y;
+        }
+
         m_touchOwner[touchId] = id;
         m_ownerKind[touchId] = kind;
+        m_envHandle[touchId] = (int8_t)handle;
         m_lastX[touchId] = x;
         m_lastY[touchId] = y;
         m_moved[touchId] = false;
@@ -353,6 +400,8 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         } else if (kind == UI_WIDGET_KNOB) {
             m_accum[touchId] = wd.knob.value;
             paintWidget(def, id);   // Grab ring
+        } else if (kind == UI_WIDGET_ENVELOPE) {
+            paintWidget(def, id);   // Grabbed handle
         }
         ui_layout::unlock();
 
@@ -403,9 +452,16 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
             if (m_moved[touchId] && wd.knob.notify) {
                 ui_widget_knob_event_post(m_slot, (uint8_t)id, wd.knob.value, true);
             }
+        } else if (kind == UI_WIDGET_ENVELOPE) {
+            m_envHandle[touchId] = -1;
+            paintWidget(def, id);   // Handle back to its normal size
+            if (m_moved[touchId] && wd.env.notify) {
+                ui_widget_env_event_post(m_slot, (uint8_t)id, true);
+            }
         }
     }
     m_moved[touchId] = false;
+    m_envHandle[touchId] = -1;
     ui_layout::unlock();
 }
 
@@ -444,6 +500,25 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         m_lastX[touchId] = x;
         m_lastY[touchId] = y;
         getScreenSequencer().onTouchMove(touchId, x, y);
+        return;
+    }
+    if (kind == UI_WIDGET_ENVELOPE) {
+        m_lastX[touchId] = x;
+        m_lastY[touchId] = y;
+        int h = m_envHandle[touchId];
+        ui_layout::lock();
+        LayoutDef* def = ui_layout::get(m_slot);
+        if (h >= 0 && def && id < def->count && def->widgets[id].kind == UI_WIDGET_ENVELOPE) {
+            ui_widget_t& wd = def->widgets[id];
+            EnvGeom geom = ui_env_geom_for(wd.x, wd.y, wd.w, wd.h);
+            if (ui_env_drag(geom, &wd.env, h, (float)x + m_grabDx[touchId],
+                            (float)y + m_grabDy[touchId])) {
+                m_moved[touchId] = true;
+                paintWidget(def, id);
+                if (wd.env.notify) ui_widget_env_event_post(m_slot, (uint8_t)id, false);
+            }
+        }
+        ui_layout::unlock();
         return;
     }
     if (kind != UI_WIDGET_KNOB) return;

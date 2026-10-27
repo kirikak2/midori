@@ -43,7 +43,7 @@ typedef struct {
     float xypad_y;
     uint16_t widget_layout; /* For layout widget events: layout id */
     uint8_t widget_id;     /* ...widget index within the layout */
-    uint8_t widget_kind;   /* ...0 pad / 1 knob */
+    uint8_t widget_kind;   /* ...0 pad / 1 knob / 7 envelope */
     uint8_t widget_phase;  /* ...0 press / 1 release / 2 change */
     bool widget_state;     /* ...pad state */
     bool widget_final;     /* ...knob: last change of a drag */
@@ -145,6 +145,10 @@ int   picoruby_ui_layout_add_knob(int x, int y, int w, int h, const char *label,
                                   int color, float min, float max, float step,
                                   float value, int origin, float sensitivity,
                                   bool notify);
+int   picoruby_ui_layout_add_envelope(int x, int y, int w, int h, const char *label,
+                                      int color, float attack, float decay,
+                                      float sustain, float release, float max_time,
+                                      bool notify);
 int   picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h);
 bool  picoruby_ui_layout_commit(void);
 void  picoruby_ui_layout_delete(int slot);
@@ -154,6 +158,12 @@ void  picoruby_ui_layout_set_color(int slot, int id, int color);
 float picoruby_ui_layout_knob_value(int slot, int id);
 bool  picoruby_ui_layout_knob_set_value(int slot, int id, float value);
 bool  picoruby_ui_layout_knob_reset(int slot, int id);
+/* Envelopes (docs/ENVELOPE.md): attack / decay / sustain / release. _set
+ * leaves a negative value alone and returns whether anything moved. */
+bool  picoruby_ui_layout_envelope_get(int slot, int id, float out[4]);
+bool  picoruby_ui_layout_envelope_set(int slot, int id, float attack, float decay,
+                                      float sustain, float release);
+bool  picoruby_ui_layout_envelope_reset(int slot, int id);
 
 /* A script ended (called from picoruby_esp32_midi_cleanup). Any task. */
 void picoruby_ui_cleanup(void);

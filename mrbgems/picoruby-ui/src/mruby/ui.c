@@ -189,7 +189,14 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             }
             HSET(layout, mrb_fixnum_value(event.widget_layout));
             HSET(id, mrb_fixnum_value(event.widget_id));
-            HSET(kind, mrb_symbol_value(event.widget_kind == 0 ? MRB_SYM(pad) : MRB_SYM(knob)));
+            mrb_sym kind;
+            switch (event.widget_kind) {
+                case 0:  kind = MRB_SYM(pad);      break;
+                case 1:  kind = MRB_SYM(knob);     break;
+                case 7:  kind = MRB_SYM(envelope); break;
+                default: kind = MRB_SYM(unknown);  break;
+            }
+            HSET(kind, mrb_symbol_value(kind));
             HSET(phase, mrb_symbol_value(phase));
             HSET(state, mrb_bool_value(event.widget_state));
             HSET(value, mrb_float_value(mrb, event.widget_value));
@@ -850,6 +857,21 @@ mrb_ui_layout_add_knob(mrb_state *mrb, mrb_value self)
         val_to_i(a[10]), val_to_f(a[11]), mrb_true_p(a[12])));
 }
 
+/* UI._layout_add_envelope(x, y, w, h, label, color, attack, decay, sustain,
+ *                         release, max_time, notify) -> id or -1 */
+static mrb_value
+mrb_ui_layout_add_envelope(mrb_state *mrb, mrb_value self)
+{
+    mrb_value a[12];
+    mrb_get_args(mrb, "oooooooooooo", &a[0], &a[1], &a[2], &a[3], &a[4], &a[5],
+                 &a[6], &a[7], &a[8], &a[9], &a[10], &a[11]);
+    return mrb_fixnum_value(picoruby_ui_layout_add_envelope(
+        val_to_i(a[0]), val_to_i(a[1]), val_to_i(a[2]), val_to_i(a[3]),
+        str_arg(mrb, a[4]), val_to_i(a[5]),
+        val_to_f(a[6]), val_to_f(a[7]), val_to_f(a[8]), val_to_f(a[9]),
+        val_to_f(a[10]), mrb_true_p(a[11])));
+}
+
 /* UI._layout_add_view(kind, x, y, w, h) -> id or -1 */
 static mrb_value
 mrb_ui_layout_add_view(mrb_state *mrb, mrb_value self)
@@ -928,6 +950,42 @@ mrb_ui_lw_knob_reset(mrb_state *mrb, mrb_value self)
     mrb_value slot, id;
     mrb_get_args(mrb, "oo", &slot, &id);
     return mrb_bool_value(picoruby_ui_layout_knob_reset(val_to_i(slot), val_to_i(id)));
+}
+
+/* UI._lw_env_values(slot, id) -> [attack, decay, sustain, release] or nil */
+static mrb_value
+mrb_ui_lw_env_values(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id;
+    mrb_get_args(mrb, "oo", &slot, &id);
+    float v[4];
+    if (!picoruby_ui_layout_envelope_get(val_to_i(slot), val_to_i(id), v)) {
+        return mrb_nil_value();
+    }
+    mrb_value a[4];
+    for (int i = 0; i < 4; i++) a[i] = mrb_float_value(mrb, v[i]);
+    return mrb_ary_new_from_values(mrb, 4, a);
+}
+
+/* UI._lw_env_set(slot, id, attack, decay, sustain, release) -> whether any
+ * moved. nil leaves that value alone. */
+static mrb_value
+mrb_ui_lw_env_set(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id, a[4];
+    mrb_get_args(mrb, "oooooo", &slot, &id, &a[0], &a[1], &a[2], &a[3]);
+    float v[4];
+    for (int i = 0; i < 4; i++) v[i] = mrb_nil_p(a[i]) ? -1.0f : val_to_f(a[i]);
+    return mrb_bool_value(picoruby_ui_layout_envelope_set(val_to_i(slot), val_to_i(id),
+                                                          v[0], v[1], v[2], v[3]));
+}
+
+static mrb_value
+mrb_ui_lw_env_reset(mrb_state *mrb, mrb_value self)
+{
+    mrb_value slot, id;
+    mrb_get_args(mrb, "oo", &slot, &id);
+    return mrb_bool_value(picoruby_ui_layout_envelope_reset(val_to_i(slot), val_to_i(id)));
 }
 
 /* ------------------------------------------------------------------------
@@ -1787,6 +1845,7 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_layout_begin,     mrb_ui_layout_begin,     MRB_ARGS_REQ(2));
     DEF(_layout_add_pad,   mrb_ui_layout_add_pad,   MRB_ARGS_REQ(7));
     DEF(_layout_add_knob,  mrb_ui_layout_add_knob,  MRB_ARGS_REQ(13));
+    DEF(_layout_add_envelope, mrb_ui_layout_add_envelope, MRB_ARGS_REQ(12));
     DEF(_layout_add_view,  mrb_ui_layout_add_view,  MRB_ARGS_REQ(5));
     DEF(_layout_commit,    mrb_ui_layout_commit,    MRB_ARGS_NONE());
     DEF(_layout_delete,    mrb_ui_layout_delete,    MRB_ARGS_REQ(1));
@@ -1796,6 +1855,9 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_lw_knob_value,    mrb_ui_lw_knob_value,    MRB_ARGS_REQ(2));
     DEF(_lw_knob_set_value, mrb_ui_lw_knob_set_value, MRB_ARGS_REQ(3));
     DEF(_lw_knob_reset,    mrb_ui_lw_knob_reset,    MRB_ARGS_REQ(2));
+    DEF(_lw_env_values,    mrb_ui_lw_env_values,    MRB_ARGS_REQ(2));
+    DEF(_lw_env_set,       mrb_ui_lw_env_set,       MRB_ARGS_REQ(6));
+    DEF(_lw_env_reset,     mrb_ui_lw_env_reset,     MRB_ARGS_REQ(2));
 }
 
 void

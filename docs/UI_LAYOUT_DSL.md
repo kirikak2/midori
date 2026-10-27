@@ -555,3 +555,7 @@ seq.pattern(1, "x...x...x...x...")
   （`ui_knob_geom_for()`）
 - **Pads / Knobs 画面**: 描画を `ui_widgets.cpp` の共通関数に移した（8 章の段階 2）。
   寸法はそれぞれ従来のボード別定数のまま渡しているので見た目は変わらない想定（実機未確認）
+- **envelope 部品**（2026-10-27、[ENVELOPE.md](ENVELOPE.md)）: ADSR エディタ。pad / knob と同じく
+  レイアウトの中に設定（`envelope_config_t`）を持つ部品なので、1 レイアウトに何個でも置ける。
+  `UI_WIDGET_ENVELOPE`（= 7）、ハンドルは `UI::Envelope`。イベントは `:widget`（`kind: :envelope`）で
+  値は載せず、Ruby が `UI._lw_env_values` で読む

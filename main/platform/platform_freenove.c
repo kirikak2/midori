@@ -400,6 +400,17 @@ int ui_layout_add_knob(int x, int y, int w, int h, const char *label,
     return -1;
 }
 
+int ui_layout_add_envelope(int x, int y, int w, int h, const char *label,
+                           uint16_t color, float attack, float decay,
+                           float sustain, float release, float max_time,
+                           bool notify)
+{
+    (void)x; (void)y; (void)w; (void)h; (void)label; (void)color;
+    (void)attack; (void)decay; (void)sustain; (void)release; (void)max_time;
+    (void)notify;
+    return -1;
+}
+
 int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
 {
     (void)kind; (void)x; (void)y; (void)w; (void)h;
@@ -445,6 +456,25 @@ bool ui_layout_knob_set_value(int slot, int id, float value)
 }
 
 bool ui_layout_knob_reset(int slot, int id)
+{
+    (void)slot; (void)id;
+    return false;
+}
+
+bool ui_layout_envelope_get(int slot, int id, float out[4])
+{
+    (void)slot; (void)id; (void)out;
+    return false;
+}
+
+bool ui_layout_envelope_set(int slot, int id, float attack, float decay,
+                            float sustain, float release)
+{
+    (void)slot; (void)id; (void)attack; (void)decay; (void)sustain; (void)release;
+    return false;
+}
+
+bool ui_layout_envelope_reset(int slot, int id)
 {
     (void)slot; (void)id;
     return false;

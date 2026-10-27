@@ -244,20 +244,43 @@ module UI
   KNOB_ORIGIN_CENTER = 1
   $calls = []
   $knob_values = {}
+  $env_values = {}
   $logs = []
 
   def self.log(text); $logs << text; end
   def self.color_to_rgb565(c); c == :red ? 0xF800 : 0x8410; end
   def self.type_to_constant(t); { trigger: 0, momentary: 1, toggle: 2 }[t] || 0; end
   def self._display; [320, 240, 0, 20, 320, 180, false, 6]; end
-  def self._layout_begin(slot, title); $calls << [:begin, slot, title]; @next_id = 0; true; end
+  def self._layout_begin(slot, title)
+    $calls << [:begin, slot, title]
+    @slot_building = slot
+    @next_id = 0
+    true
+  end
   def self._layout_add_pad(*a); $calls << [:pad] + a; @next_id += 1; @next_id - 1; end
   def self._layout_add_knob(*a); $calls << [:knob] + a; @next_id += 1; @next_id - 1; end
   def self._layout_add_view(*a); $calls << [:view] + a; @next_id += 1; @next_id - 1; end
+  def self._layout_add_envelope(*a)
+    $calls << [:envelope] + a
+    $env_values[[@slot_building, @next_id]] = a[6, 4].map { |v| v.to_f }
+    @next_id += 1
+    @next_id - 1
+  end
   def self._layout_commit; $calls << [:commit]; true; end
   class Tempo; end
   def self._layout_delete(slot); $calls << [:delete, slot]; end
   def self._lw_knob_value(slot, id); $knob_values[[slot, id]] || 0.0; end
+  # Floats, as the C side keeps them
+  def self._lw_env_values(slot, id)
+    v = $env_values[[slot, id]]
+    v && v.map { |x| (x * 1.0000001) }
+  end
+  def self._lw_env_set(slot, id, *given)
+    v = $env_values[[slot, id]]
+    before = v.dup
+    given.each_with_index { |g, i| v[i] = g.to_f unless g.nil? }
+    v != before
+  end
   def self._lw_knob_set_value(slot, id, v)
     changed = $knob_values[[slot, id]] != v
     $knob_values[[slot, id]] = v
@@ -352,6 +375,96 @@ end
 check "sequencer goes over as a view of kind 6", [:view, 6, 0, 20, 320, 180], $calls[1]
 check "a given sequencer is used as is", true, seqd.widgets[0].equal?(given_seq)
 seqd.delete
+
+# --- Envelopes ----------------------------------------------------------------
+
+check "times round to whole ms within max_time",
+      [0.0, 13.0, 2000.0], [-5, 12.6, 9000].map { |v| UI::Envelope.quantize(0, v, 2000.0) }
+check "sustain rounds to 0.01 within 0..1",
+      [0.0, 0.7, 1.0], [-1, 0.6999, 3].map { |v| UI::Envelope.quantize(2, v, 2000.0) }
+
+# A stand-in for AMY::Synth's envelope API
+class FakeSynth
+  attr_reader :sent
+  def initialize; @sent = []; end
+  def amp_attack; 5; end
+  def amp_decay; 250; end
+  def amp_sustain; 0.5; end
+  def amp_release; 800; end
+  def amp_envelope(attack: nil, decay: nil, sustain: nil, release: nil)
+    @sent << [:amp, attack, decay, sustain, release]
+  end
+end
+
+# And an FM operator's (no env: prefix)
+class FakeOp
+  attr_reader :sent
+  def initialize; @sent = []; end
+  def attack; 1; end
+  def decay; 2; end
+  def sustain; 0.25; end
+  def release; 4; end
+  def envelope(attack: nil, decay: nil, sustain: nil, release: nil)
+    @sent << [attack, decay, sustain, release]
+  end
+end
+
+check "values given win over the target's",
+      [100.0, 250.0, 0.5, 800.0],
+      UI::Envelope.initial_values([100, nil, nil, nil], FakeSynth.new, :amp, 2000.0)
+check "no target: the defaults", UI::Envelope::DEFAULT,
+      UI::Envelope.initial_values([nil, nil, nil, nil], nil, nil, 2000.0)
+check "no env: reads attack / decay / ...", [1.0, 2.0, 0.25, 4.0],
+      UI::Envelope.initial_values([nil, nil, nil, nil], FakeOp.new, nil, 2000.0)
+
+specs, warnings = UI::Layout.resolve(CORES3, cols: 2) do
+  envelope col: 0, label: "Amp"
+  envelope col: 1, max_time: 500, release: 900
+end
+check "envelopes resolve like any widget", [[0, 20, 160, 180], [160, 20, 160, 180]], rects(specs)
+check "release clamps to max_time", 500.0, specs[1][:params][:values][3]
+check "envelope of that size does not warn", [], warnings
+check_raises("max_time must be positive", "max_time") do
+  UI::Layout.resolve(CORES3) { envelope max_time: 0 }
+end
+
+$calls.clear
+syn = FakeSynth.new
+op = FakeOp.new
+seen = []
+shaped = UI.layout("Shape", cols: 3, gap: 0) do
+  envelope col: 0, label: "Amp", id: :amp, to: syn, env: :amp
+  envelope col: 1, label: "Op1", to: op, color: :red
+  envelope col: 2, label: "Free", attack: 20 do |h| seen << h end
+end
+check "envelope goes over with its values and notify",
+      [:envelope, 0, 20, 107, 180, "Amp", 0x8410, 5.0, 250.0, 0.5, 800.0, 2000.0, true],
+      $calls[1]
+check "...colour converted", 0xF800, $calls[2][6]
+amp = shaped[:amp]
+check "the handle is a UI::Envelope", UI::Envelope, amp.class
+check "values come back rounded", { attack: 5.0, decay: 250.0, sustain: 0.5, release: 800.0 },
+      amp.values
+
+UI.dispatch_widget_event({ type: :widget, layout: shaped.slot, id: 0, kind: :envelope,
+                           phase: :change, final: false })
+check "a drag sends to the target's amp envelope", [[:amp, 5.0, 250.0, 0.5, 800.0]], syn.sent
+
+UI.dispatch_widget_event({ type: :widget, layout: shaped.slot, id: 2, kind: :envelope,
+                           phase: :change, final: true })
+check "the block gets a Hash", [{ attack: 20.0, decay: 300.0, sustain: 0.7, release: 300.0 }], seen
+
+syn.sent.clear
+check "setting a value sends it", true, (amp.decay = 400; syn.sent.size == 1)
+check "...with the new decay", 400.0, syn.sent[0][2]
+check "an unchanged value does not", false, amp.set(decay: 400)
+check "notify: false only updates", [true, 1], [amp.set(sustain: 0.2, notify: false), syn.sent.size]
+check "reset goes back to the definition", [true, 250.0, 0.5], [amp.reset, amp.decay, amp.sustain]
+
+op.sent.clear
+shaped.send_all
+check "send_all sends every envelope", [[1.0, 2.0, 0.25, 4.0]], op.sent
+shaped.delete
 
 puts "#{$passed} passed, #{$failed} failed"
 # A bare mruby has no exit; the failure count above is the result there

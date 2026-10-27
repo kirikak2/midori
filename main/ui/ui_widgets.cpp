@@ -214,3 +214,275 @@ float ui_knob_drag_angle(const KnobGeom& geom, int x, int y, int dx, int dy)
     if (r2 < minR2) r2 = minR2;
     return (px * (float)dy - py * (float)dx) / r2;
 }
+
+// --- Envelopes --------------------------------------------------------------
+
+// The sustain segment's share of a full A / D / R segment
+static constexpr float ENV_HOLD_UNITS = 0.5f;
+static constexpr float ENV_PLOT_UNITS = 3.0f + ENV_HOLD_UNITS;
+static constexpr int ENV_MARGIN = 4;
+
+EnvGeom ui_env_geom_for(int x, int y, int w, int h)
+{
+    EnvGeom e;
+    e.x = x;
+    e.y = y;
+    e.w = w;
+    e.h = h;
+    e.textSize = (h >= 240 && w >= 320) ? 2 : 1;
+
+    int side = (w < h) ? w : h;
+    e.handleR = side / 24;
+    if (e.handleR < 4) e.handleR = 4;
+    if (e.handleR > 12) e.handleR = 12;
+
+    int textH = UI_GLYPH_H * e.textSize;
+    e.labelY = ENV_MARGIN;
+    int top = e.labelY + textH + 2;
+
+    // The values row only when the plot keeps a usable height without it
+    e.valuesY = h - ENV_MARGIN - textH;
+    int bottom = e.valuesY - 3;
+    if (bottom - top - 2 * e.handleR < 32) {
+        e.valuesY = -1;
+        bottom = h - ENV_MARGIN;
+    }
+
+    e.px = x + ENV_MARGIN + e.handleR;
+    e.pw = w - 2 * (ENV_MARGIN + e.handleR);
+    e.py = y + top + e.handleR;
+    e.ph = (bottom - top) - 2 * e.handleR;
+    if (e.pw < 1) e.pw = 1;
+    if (e.ph < 1) e.ph = 1;
+    e.unit = (float)e.pw / ENV_PLOT_UNITS;
+    e.hold = e.unit * ENV_HOLD_UNITS;
+    return e;
+}
+
+float ui_env_time_to_norm(float ms, float maxTime)
+{
+    if (ms <= 0.0f || maxTime <= 0.0f) return 0.0f;
+    float n = logf(1.0f + ms) / logf(1.0f + maxTime);
+    return (n > 1.0f) ? 1.0f : n;
+}
+
+float ui_env_norm_to_time(float n, float maxTime)
+{
+    if (n <= 0.0f) return 0.0f;
+    if (n >= 1.0f) return maxTime;
+    return expf(n * logf(1.0f + maxTime)) - 1.0f;
+}
+
+void ui_env_points(const EnvGeom& geom, const envelope_config_t* e,
+                   float xs[5], float ys[5])
+{
+    float base = (float)(geom.py + geom.ph);
+    float sus = base - e->adsr[UI_ENV_SUSTAIN] * (float)geom.ph;
+
+    xs[0] = (float)geom.px;
+    ys[0] = base;
+    xs[1] = xs[0] + geom.unit * ui_env_time_to_norm(e->adsr[UI_ENV_ATTACK], e->max_time);
+    ys[1] = (float)geom.py;
+    xs[2] = xs[1] + geom.unit * ui_env_time_to_norm(e->adsr[UI_ENV_DECAY], e->max_time);
+    ys[2] = sus;
+    xs[3] = xs[2] + geom.hold;
+    ys[3] = sus;
+    xs[4] = xs[3] + geom.unit * ui_env_time_to_norm(e->adsr[UI_ENV_RELEASE], e->max_time);
+    ys[4] = base;
+}
+
+int ui_env_nearest_handle(const EnvGeom& geom, const envelope_config_t* e,
+                          int x, int y, uint8_t excludeMask)
+{
+    float xs[5], ys[5];
+    ui_env_points(geom, e, xs, ys);
+    int best = -1;
+    float bestD = 0.0f;
+    for (int h = 0; h < 4; h++) {
+        if (excludeMask & (1u << h)) continue;
+        float dx = xs[h + 1] - (float)x;
+        float dy = ys[h + 1] - (float)y;
+        float d = dx * dx + dy * dy;
+        // Ties go to the later handle: with no attack, no decay and full
+        // sustain, A and D coincide, and only D can pull them apart
+        // (lowering the sustain). A is reachable again once they part.
+        if (best < 0 || d <= bestD) {
+            best = h;
+            bestD = d;
+        }
+    }
+    return best;
+}
+
+static float segment_time(const EnvGeom& geom, const envelope_config_t* e,
+                          float from, float to)
+{
+    return ui_env_norm_to_time((to - from) / geom.unit, e->max_time);
+}
+
+bool ui_env_drag(const EnvGeom& geom, envelope_config_t* e, int h, float hx, float hy)
+{
+    float xs[5], ys[5];
+    ui_env_points(geom, e, xs, ys);
+
+    float next[4];
+    memcpy(next, e->adsr, sizeof(next));
+    float level = (float)(geom.py + geom.ph) - hy;
+    level /= (float)geom.ph;
+
+    switch (h) {
+        case 0:
+            next[UI_ENV_ATTACK] = segment_time(geom, e, xs[0], hx);
+            break;
+        case 1:
+            next[UI_ENV_DECAY] = segment_time(geom, e, xs[1], hx);
+            next[UI_ENV_SUSTAIN] = level;
+            break;
+        case 2:
+            next[UI_ENV_SUSTAIN] = level;
+            break;
+        case 3:
+            next[UI_ENV_RELEASE] = segment_time(geom, e, xs[3], hx);
+            break;
+        default:
+            return false;
+    }
+
+    bool changed = false;
+    for (int i = 0; i < 4; i++) {
+        float q = ui_env_quantize(e, i, next[i]);
+        if (q != e->adsr[i]) {
+            e->adsr[i] = q;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+// A quarter of the colour's brightness, for the area under the curve
+static uint16_t env_fill_color(uint16_t c)
+{
+    uint16_t r = ((c >> 11) & 0x1F) / 4;
+    uint16_t g = ((c >> 5) & 0x3F) / 4;
+    uint16_t b = (c & 0x1F) / 4;
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+// A line r pixels either side of (x0, y0)-(x1, y1), with round ends. Not
+// drawWideLine: LovyanGFX's wedge lines replace the clip rect with their own
+// box (clamped to the whole sprite only), clear it when done, and blend the
+// edge pixels with no clipping at all. On ui_strip's band canvas, whose rows
+// outside the band are not memory of its own, that writes over the heap.
+// Triangles and circles keep to the clip rect.
+static void thick_line(LovyanGFX* g, int x0, int y0, int x1, int y1, int r, uint16_t color)
+{
+    if (r <= 0) {
+        g->drawLine(x0, y0, x1, y1, color);
+        return;
+    }
+    float dx = (float)(x1 - x0);
+    float dy = (float)(y1 - y0);
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len >= 0.5f) {
+        int nx = (int)lroundf(-dy / len * (float)r);
+        int ny = (int)lroundf(dx / len * (float)r);
+        g->fillTriangle(x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, color);
+        g->fillTriangle(x0 + nx, y0 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny, color);
+    }
+    g->fillCircle(x0, y0, r, color);
+    g->fillCircle(x1, y1, r, color);
+}
+
+static void format_env_value(char* buf, int len, int stage, float v)
+{
+    static const char names[4] = { 'A', 'D', 'S', 'R' };
+    if (stage == UI_ENV_SUSTAIN) {
+        snprintf(buf, len, "%c %d%%", names[stage], (int)lroundf(v * 100.0f));
+    } else if (v < 1000.0f) {
+        snprintf(buf, len, "%c %dms", names[stage], (int)lroundf(v));
+    } else {
+        snprintf(buf, len, "%c %.1fs", names[stage], v / 1000.0f);
+    }
+}
+
+void ui_env_paint(LovyanGFX* g, int ox, int oy, const EnvGeom& geom,
+                  const envelope_config_t* e, uint8_t grabbedMask)
+{
+    int x = geom.x - ox;
+    int y = geom.y - oy;
+    int ts = geom.textSize;
+
+    g->fillRect(x, y, geom.w, geom.h, UI_COLOR_BLACK);
+    g->drawRoundRect(x, y, geom.w, geom.h, 6, UI_COLOR_DARKGRAY);
+
+    // Level 1.0 and 0 guides
+    int px = geom.px - ox;
+    int top = geom.py - oy;
+    int base = geom.py + geom.ph - oy;
+    g->drawFastHLine(px, top, geom.pw, UI_COLOR_DARKGRAY);
+    g->drawFastHLine(px, base, geom.pw, UI_COLOR_DARKGRAY);
+
+    float fx[5], fy[5];
+    ui_env_points(geom, e, fx, fy);
+    int xs[5], ys[5];
+    for (int i = 0; i < 5; i++) {
+        xs[i] = (int)lroundf(fx[i]) - ox;
+        ys[i] = (int)lroundf(fy[i]) - oy;
+    }
+
+    // Area under the curve, a quad per segment split in two triangles
+    uint16_t fill = env_fill_color(e->color);
+    for (int i = 0; i < 4; i++) {
+        if (xs[i + 1] <= xs[i]) continue;
+        g->fillTriangle(xs[i], ys[i], xs[i + 1], ys[i + 1], xs[i + 1], base, fill);
+        g->fillTriangle(xs[i], ys[i], xs[i], base, xs[i + 1], base, fill);
+    }
+    for (int i = 0; i < 4; i++) {
+        thick_line(g, xs[i], ys[i], xs[i + 1], ys[i + 1], ts, e->color);
+    }
+
+    // Handles, grabbed ones larger with a ring
+    for (int h = 0; h < 4; h++) {
+        int hx = xs[h + 1];
+        int hy = ys[h + 1];
+        if (grabbedMask & (1u << h)) {
+            int r = geom.handleR * 3 / 2;
+            g->fillCircle(hx, hy, r, e->color);
+            g->drawCircle(hx, hy, r + 2, UI_COLOR_WHITE);
+        } else {
+            g->fillCircle(hx, hy, geom.handleR, e->color);
+            g->drawCircle(hx, hy, geom.handleR, UI_COLOR_BLACK);
+        }
+    }
+
+    g->setTextSize(ts);
+
+    // Label, clipped to the cell
+    char text[24];
+    snprintf(text, sizeof(text), "%s", e->label);
+    int maxChars = (geom.w - 2 * ENV_MARGIN) / (UI_GLYPH_W * ts);
+    if (maxChars >= 0 && (int)strlen(text) > maxChars) text[maxChars] = '\0';
+    g->setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    g->setCursor(x + ENV_MARGIN + 2, y + geom.labelY);
+    g->print(text);
+
+    if (geom.valuesY < 0) return;
+
+    // Values row, the stages a grabbed handle moves in white
+    static const uint8_t stageHandles[4] = {
+        1u << 0,                 // A
+        1u << 1,                 // D
+        (1u << 1) | (1u << 2),   // S
+        1u << 3,                 // R
+    };
+    int colW = (geom.w - 2 * ENV_MARGIN) / 4;
+    int colChars = colW / (UI_GLYPH_W * ts);
+    for (int i = 0; i < 4; i++) {
+        format_env_value(text, sizeof(text), i, e->adsr[i]);
+        if (colChars >= 0 && (int)strlen(text) > colChars) text[colChars] = '\0';
+        bool hot = (grabbedMask & stageHandles[i]) != 0;
+        g->setTextColor(hot ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_BLACK);
+        g->setCursor(x + ENV_MARGIN + 2 + colW * i, y + geom.valuesY);
+        g->print(text);
+    }
+}

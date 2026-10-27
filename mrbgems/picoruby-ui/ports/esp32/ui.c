@@ -403,6 +403,15 @@ int picoruby_ui_layout_add_knob(int x, int y, int w, int h, const char *label,
                               value, (uint8_t)origin, sensitivity, notify);
 }
 
+int picoruby_ui_layout_add_envelope(int x, int y, int w, int h, const char *label,
+                                    int color, float attack, float decay,
+                                    float sustain, float release, float max_time,
+                                    bool notify)
+{
+    return ui_layout_add_envelope(x, y, w, h, label, (uint16_t)color, attack, decay,
+                                  sustain, release, max_time, notify);
+}
+
 int picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h)
 {
     return ui_layout_add_view((uint8_t)kind, x, y, w, h);
@@ -446,6 +455,22 @@ bool picoruby_ui_layout_knob_set_value(int slot, int id, float value)
 bool picoruby_ui_layout_knob_reset(int slot, int id)
 {
     return ui_layout_knob_reset(slot, id);
+}
+
+bool picoruby_ui_layout_envelope_get(int slot, int id, float out[4])
+{
+    return ui_layout_envelope_get(slot, id, out);
+}
+
+bool picoruby_ui_layout_envelope_set(int slot, int id, float attack, float decay,
+                                     float sustain, float release)
+{
+    return ui_layout_envelope_set(slot, id, attack, decay, sustain, release);
+}
+
+bool picoruby_ui_layout_envelope_reset(int slot, int id)
+{
+    return ui_layout_envelope_reset(slot, id);
 }
 
 /* Tombola sequencer */

@@ -61,6 +61,43 @@ void ui_knob_paint(LovyanGFX* g, int ox, int oy, const KnobGeom& geom,
 // the knob end to end.
 float ui_knob_drag_angle(const KnobGeom& geom, int x, int y, int dx, int dy);
 
+// --- Envelopes (docs/ENVELOPE.md) -----------------------------------------
+
+// Where an envelope's parts go inside its cell
+struct EnvGeom {
+    int x, y, w, h;      // The cell
+    int px, py, pw, ph;  // Plot: py is level 1.0, py + ph level 0
+    float unit;          // Pixels of an A / D / R segment at max_time
+    float hold;          // Pixels of the sustain segment
+    int handleR;         // Handle radius (a grabbed one is drawn larger)
+    int textSize;
+    int labelY;          // Label top, from the cell's top edge
+    int valuesY;         // Values row top, from the cell's top edge; -1 for none
+};
+
+EnvGeom ui_env_geom_for(int x, int y, int w, int h);
+
+// Fraction of a segment a time takes: ln(1 + t) / ln(1 + max_time), and back
+float ui_env_time_to_norm(float ms, float maxTime);
+float ui_env_norm_to_time(float n, float maxTime);
+
+// The five corners of the curve in screen pixels: start, attack peak, end of
+// decay, end of sustain, end of release. Handle h (0..3) is point h + 1.
+void ui_env_points(const EnvGeom& geom, const envelope_config_t* e,
+                   float xs[5], float ys[5]);
+
+// The handle nearest (x, y), skipping those set in excludeMask
+int ui_env_nearest_handle(const EnvGeom& geom, const envelope_config_t* e,
+                          int x, int y, uint8_t excludeMask);
+
+// Moves handle h so it sits at (hx, hy), as far as its stages allow. Values
+// come out quantized; returns whether any changed.
+bool ui_env_drag(const EnvGeom& geom, envelope_config_t* e, int h, float hx, float hy);
+
+// The whole envelope. grabbedMask has bit h set for each handle a finger holds.
+void ui_env_paint(LovyanGFX* g, int ox, int oy, const EnvGeom& geom,
+                  const envelope_config_t* e, uint8_t grabbedMask);
+
 #endif // __cplusplus
 
 #endif // UI_WIDGETS_H
