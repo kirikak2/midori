@@ -991,6 +991,22 @@ layout[:amp].sync   # パッチを読み込んだ後に表示を合わせる
 
 サンプル: [examples/envelope.rb](examples/envelope.rb)
 
+## AMY パネル（UI::AMYPanel / 2026-10-27）
+
+詳細は [docs/AMY_PANEL.md](docs/AMY_PANEL.md)。Tab5 のビルドとホストテストのみで**実機未確認**。
+
+- AMY のパートを画面で組むレイアウト（Home のタイル `AMY`）。タブ = `AMY.parts`、`+` で
+  `AMY.add_fm` / `add_synth`（空いている一番小さいチャンネル）、タブごとにプリセット・チャンネル・
+  エンベロープ・ノブ 8 個・1 オクターブの `UI::Keys`（タブのチャンネルで AMY へ）。タブは最大 8 枚
+- **C++ は無改造**。[mrblib/ui_amy_panel.rb](mrbgems/picoruby-ui/mrblib/ui_amy_panel.rb) がレイアウト DSL で組み、
+  構造の変更（タブ・パート・FM のオペレータ）は同じタイトルで再定義、値の変更（プリセット・チャンネル）は
+  部品のハンドルで書き換える
+- 再定義は部品の id を振り直すので、**パッドのブロックの中では再定義しない**（`request` で積み、
+  `UI.process` の最後の `UI::AMYPanel._poll` で実行。`main_task_base.rb` の `UI.process` の上書き）
+- UI モードは `setup_amy_panel` が作る（AMY は最初のパートを足すときに `MIDIDevices.amy` で起動）。
+  パネル表示中は UI モードのループを 10 ms にする。UI モードで組んだパートはスクリプトを実行すると消える（保存は未対応）
+- ホストテスト: `ruby test/amy_panel_test.rb`（picoruby-ui ディレクトリで）
+
 ## Elecrow CrowPanel Advanced 7inch 対応（2026-08-28）
 
 詳細は [docs/CROWPANEL.md](docs/CROWPANEL.md) を参照。

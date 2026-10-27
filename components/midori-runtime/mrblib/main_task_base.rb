@@ -196,7 +196,10 @@ module UI
     def process
       MIDI.run_filters
       UI::MIDIDevices._poll
-      _process_ui_only
+      result = _process_ui_only
+      # After the events: the AMY panel redefines its layout here
+      UI::AMYPanel._poll
+      result
     end
   end
 end
@@ -239,6 +242,17 @@ def setup_sequencer
   UI::Sequencer._setup
 rescue => e
   puts "Sequencer setup failed: #{e.message}"
+end
+
+# The AMY panel (docs/AMY_PANEL.md): a Home tile for building AMY parts by
+# touch. UI mode only, after setup_midi_devices; AMY itself starts when the
+# first part is added, through MIDIDevices.amy so the MIDI Devices screen
+# lists it.
+def setup_amy_panel
+  return unless BoardConfig::HAS_AMY
+  UI::AMYPanel.new(engine: Proc.new { MIDIDevices.amy })
+rescue => e
+  puts "AMY panel setup failed: #{e.message}"
 end
 
 # Named MIDI filters kept on the SD card (docs/MIDI_FILTER_REGISTRY.md):
@@ -598,6 +612,7 @@ else
   load_filters
   setup_midi_devices
   setup_sequencer
+  setup_amy_panel
 
   GC.start
 
@@ -672,7 +687,8 @@ else
     # changed (UI.process runs MIDI.run_filters and UI::MIDIDevices._poll);
     # MIDI.sleep_ms wakes as soon as a filter has something to do
     UI.process
-    MIDI.sleep_ms(100)
+    # The AMY panel's knobs would lag by the 100 ms otherwise
+    MIDI.sleep_ms(UI::AMYPanel.showing? ? 10 : 100)
   end
 
   puts "Exiting UI loop"
