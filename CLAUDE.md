@@ -219,7 +219,12 @@ mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の
 - **mrb_state / mrb_value のレイアウトを変える define は libmruby と IDF 側で一致させる**
   （`CMakeLists.txt` の `ADDITIONAL_DEFINITIONS`）。ずれてもリンクは通り、メモリが静かに壊れる。
   `MRB_UTF8_STRING` は picoruby-mruby も追加するが、mruby コアの設定後に足すのでコアだけ
-  抜けてリンクエラーになる。上流 R2P2 と同様にビルド設定で明示している
+  抜けてリンクエラーになる。上流 R2P2 と同様にビルド設定で明示している。
+  **picoruby-mruby の `mrbgem.rake` が足す define も対象**。2026-10-26 の upstream で
+  `MRB_CONSTRAINED_BASELINE_PROFILE` → `MRB_BASELINE_PROFILE` + `MRB_METHOD_CACHE_SIZE=64`
+  （キャッシュが `mrb_state` に入る）に変わり、サブモジュール更新後に IDF 側だけ古いままだったため
+  `E_EXCEPTION` が 0 に読めて、スクリプト切り替え時に supervisor の `mrb_obj_is_kind_of` で落ちた（2026-10-30）。
+  サブモジュールを更新したら `build/esp32-picoruby/**/*.flags` の `-D` と見比べる
 - Supervisor（`picoruby_supervisor.c`）はスクリプトごとに `mrb_open_with_custom_alloc()`
   で新しい VM を開き、終われば実行タスク上で `mrb_close()` する（gem の final が走り、
   FAT のボリュームも GC で unmount される）。5 秒タイムアウトで強制終了したときは VM を

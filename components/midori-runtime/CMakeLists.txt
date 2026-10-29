@@ -27,7 +27,11 @@ set(ADDITIONAL_DEFINITIONS
   -DMRB_32BIT
   -DMRB_UTF8_STRING
   -DMRB_USE_TASK_SCHEDULER
-  -DMRB_CONSTRAINED_BASELINE_PROFILE=1
+  # picoruby-mruby's mrbgem.rake: the baseline profile with a 64-entry
+  # method cache (the cache sits in mrb_state, before eException_class)
+  -DMRB_BASELINE_PROFILE=1
+  -DMRB_METHOD_CACHE_SIZE=64
+  -DKHASH_INITIAL_SIZE=16
   -DPICORB_ALLOC_ESTALLOC
   -DPICORB_ALLOC_ALIGN=8
 )
