@@ -8,7 +8,7 @@
   [main/ui/ui_widgets.cpp](../main/ui/ui_widgets.cpp)（pad / knob の描画。Pads / Knobs 画面と共有）
 - テスト: [mrbgems/picoruby-ui/test/layout_test.rb](../mrbgems/picoruby-ui/test/layout_test.rb)
   （`ruby test/layout_test.rb`、または `cat mrblib/ui_layout.rb test/layout_test.rb | mruby`）
-- サンプル: [examples/layout.rb](../examples/layout.rb)
+- サンプル: [examples/layouts/](../examples/layouts/)（`/sd/layouts` に置くと起動時に読まれる: perform / keys / clock）
 - 対象: `UI.pad` / `UI.knob` / `UI::XYPad` / `UI::Tombola`、および今後追加する Sequencer など
   UI モジュールが提供する部品
 - 関連: [UI_NAVIGATION.md](UI_NAVIGATION.md)（ホームメニュー。レイアウトはそのタイルとして載る）/
@@ -519,6 +519,16 @@ seq.pattern(1, "x...x...x...x...")
 現時点で無し。
 
 ## 10. 実装メモ（設計からの差分・補足）
+
+- **`/sd/layouts`**（2026-10-30）: UI モードの起動時に `/sd/layouts/*.rb` / `*.mrb` を名前順に読む（同じ名前なら `.mrb` だけ）
+  （`main_task_base.rb` の `load_layouts`。`_` で始まるファイルとサブディレクトリは読まない）。
+  ファイルは `UI.layout(...)` を定義するだけでよく、Home のタイルになる。スクリプト / irb のモードでは読まない
+  （画面はスクリプトのもの）。Scripts 画面の SD 再読み込みでも読み直す（同じ title は置き換え）。
+  書き方: ループと `show` を書かない（ブロックは UI モードのループの `UI.process` で走り、レイアウト表示中は
+  10 ms 周期）。起動のたびに読まれるので、選択（`midi_out=`）・ルート・テンポなどを書き換えない
+  （つなぎ方は MIDI Devices 画面のパッチに任せる）。XYPad / Tombola / Keys はモデルが 1 つなので、
+  `/sd/layouts` 全体でそれぞれ 1 ファイルだけに置く。再読み込みで `UI.on` / `md.input.on` などのハンドラは
+  増えるので、何度呼ばれても同じ結果になるものにする
 
 - **検証のタイミング**: 4.7 の違反は「ブロックを抜けたとき」ではなく、その部品を置いた時点で
   `ArgumentError` になる。どちらにしても例外が出たレイアウトは C 側へ何も送らず、

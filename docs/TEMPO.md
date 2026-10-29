@@ -7,7 +7,7 @@
 - 画面: [main/ui/screen_main.cpp](../main/ui/screen_main.cpp)（クラス名・`UI_SCREEN_MAIN`・`:main` は互換のため旧名のまま）
 - クロック: picoruby-midi の `MIDI::Clock`。UI とのつなぎは [main/ui/ui_tempo.cpp](../main/ui/ui_tempo.cpp)
 - Ruby: [mrbgems/picoruby-ui/mrblib/ui_tempo.rb](../mrbgems/picoruby-ui/mrblib/ui_tempo.rb)
-- サンプル: [examples/tempo.rb](../examples/tempo.rb)
+- サンプル: [examples/layouts/clock.rb](../examples/layouts/clock.rb)（`/sd/layouts` 用）/ [examples/tempo_keys.rb](../examples/tempo_keys.rb)
 
 ## 画面
 

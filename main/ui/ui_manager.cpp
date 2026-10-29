@@ -14,6 +14,8 @@
 #include "screen_layout.h"
 #include "ui_layout.h"
 #include "ui_strip.h"
+#include <stdio.h>
+#include <string.h>
 #include <M5Unified.h>
 #include "esp_log.h"
 
@@ -43,6 +45,11 @@ UIManager::UIManager()
     , m_pendingArg(-1)
     , m_initialized(false)
     , m_needsRedraw(true)
+    , m_loading(true)
+    , m_loadingDone(0)
+    , m_loadingTotal(0)
+    , m_loadingSerial(1)
+    , m_loadingDrawn(0)
     , m_internalBpm(UI_BPM_DEFAULT)
     , m_externalBpm(0.0f)
     , m_selectedExternalBpmSource(MIDI_INTERFACE_USB)
@@ -63,6 +70,8 @@ UIManager::UIManager()
         m_externalBpmBySource[i] = 0.0f;
     }
     m_clockWatch = 0;
+    // Locked from power-up: main_task.rb ends it once /sd is loaded
+    snprintf(m_loadingLabel, sizeof(m_loadingLabel), "Starting");
 }
 
 UIManager::~UIManager()
@@ -193,11 +202,18 @@ void UIManager::update()
     ui_mididev_tick();
     ui_tempo_tick();
 
+    // The loading box changed (or came and went): repaint it with the rest
+    if (m_loadingSerial != m_loadingDrawn) {
+        m_loadingDrawn = m_loadingSerial;
+        m_needsRedraw = true;
+    }
+
     // Update current screen. Not when a full repaint is pending (a screen
     // was just switched to, say): update() draws its incremental changes
     // straight to the panel, over whatever is still showing, and the repaint
-    // below covers all of it anyway.
-    if (m_screens[m_currentIndex] && !m_needsRedraw) {
+    // below covers all of it anyway. Nor while loading: it would draw over
+    // the loading box.
+    if (m_screens[m_currentIndex] && !m_needsRedraw && !m_loading) {
         m_screens[m_currentIndex]->update();
     }
 
@@ -212,6 +228,7 @@ void UIManager::update()
             ui_clear_content_area();
             if (screen) screen->draw();
             drawNavBar();
+            if (m_loading) drawLoading();
         };
         if (!ui_strip::compose(0, UI_SCREEN_HEIGHT, paintAll)) {
             M5.Lcd.startWrite();
@@ -271,7 +288,10 @@ void UIManager::handleTouch()
             m_touchStates[touchId].y = y;
 
             // Check which area was touched
-            if (y < UI_STATUS_BAR_HEIGHT) {
+            if (m_loading) {
+                // Locked: the touch is tracked (so it stays ignored until it
+                // lifts, even if loading ends first) but goes nowhere
+            } else if (y < UI_STATUS_BAR_HEIGHT) {
                 // Status bar - ignore
             } else if (y >= UI_SCREEN_HEIGHT - UI_NAV_BAR_HEIGHT) {
                 // Navigation bar - only handle on first touch point (touchId 0)
@@ -337,6 +357,74 @@ void UIManager::drawNavBar()
         centerLabel = m_screens[m_currentIndex] ? m_screens[m_currentIndex]->getTitle() : "";
     }
     ui_draw_nav_bar(centerLabel, m_currentIndex != UI_SCREEN_HOME, canGoBack());
+}
+
+// --- Loading lock -------------------------------------------------------------
+
+void UIManager::setLoading(const char* label, int done, int total)
+{
+    portENTER_CRITICAL(&m_requestMux);
+    m_loading = label != nullptr;
+    if (label) {
+        strncpy(m_loadingLabel, label, sizeof(m_loadingLabel) - 1);
+        m_loadingLabel[sizeof(m_loadingLabel) - 1] = '\0';
+    }
+    m_loadingDone = done;
+    m_loadingTotal = total;
+    m_loadingSerial = m_loadingSerial + 1;
+    portEXIT_CRITICAL(&m_requestMux);
+}
+
+// A box over the middle of the content: "Loading", what is being loaded and
+// a bar (when the total is known). Called from the full repaint.
+void UIManager::drawLoading()
+{
+    char label[sizeof(m_loadingLabel)];
+    int done, total;
+    portENTER_CRITICAL(&m_requestMux);
+    memcpy(label, m_loadingLabel, sizeof(label));
+    done = m_loadingDone;
+    total = m_loadingTotal;
+    portEXIT_CRITICAL(&m_requestMux);
+
+#if defined(UI_LAYOUT_LARGE)
+    const int text = 2, pad = 24, barH = 20;
+#else
+    const int text = 1, pad = 10, barH = 10;
+#endif
+    const int lineH = 8 * text;
+    int w = UI_SCREEN_WIDTH * 2 / 3;
+    int h = pad * 4 + lineH * 2 + barH;
+    int x = (UI_SCREEN_WIDTH - w) / 2;
+    int y = UI_CONTENT_Y + (UI_CONTENT_HEIGHT - h) / 2;
+
+    auto& g = ui_gfx();
+    g.fillRect(x, y, w, h, UI_COLOR_BLACK);
+    g.drawRect(x, y, w, h, UI_COLOR_GRAY);
+
+    g.setTextSize(text);
+    g.setTextColor(UI_COLOR_WHITE, UI_COLOR_BLACK);
+    g.setCursor(x + pad, y + pad);
+    if (total > 0) {
+        g.printf("Loading... %d / %d", done, total);
+    } else {
+        g.print("Loading...");
+    }
+    // The label, cut to the box
+    int maxChars = (w - pad * 2) / (6 * text);
+    if (maxChars < 0) maxChars = 0;
+    if ((int)strlen(label) > maxChars) label[maxChars] = '\0';
+    g.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+    g.setCursor(x + pad, y + pad * 2 + lineH);
+    g.print(label);
+
+    int bx = x + pad, by = y + pad * 3 + lineH * 2, bw = w - pad * 2;
+    g.drawRect(bx, by, bw, barH, UI_COLOR_DARKGRAY);
+    if (total > 0) {
+        if (done > total) done = total;
+        int fw = (bw - 4) * done / total;
+        if (fw > 0) g.fillRect(bx + 2, by + 2, fw, barH - 4, UI_COLOR_GREEN);
+    }
 }
 
 // --- Navigation --------------------------------------------------------------
@@ -590,6 +678,8 @@ void UIManager::scriptCleanup()
     ui_keys_cleanup();
     ui_seq_cleanup();
     ui_mididev_cleanup();
+    // A VM that died loading /sd must not leave the screen locked
+    if (m_loading) setLoading(nullptr, 0, 0);
     m_needsRedraw = true;
 }
 
@@ -877,6 +967,11 @@ uint32_t ui_menu_get_hidden(void)
 void ui_script_cleanup(void)
 {
     UIManager::getInstance().scriptCleanup();
+}
+
+void ui_set_loading(const char* label, int done, int total)
+{
+    UIManager::getInstance().setLoading(label, done, total);
 }
 
 ui_screen_index_t ui_get_current_screen(void)

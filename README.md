@@ -429,8 +429,9 @@ end
 The grid math lives in Ruby and has host tests
 (`mrbgems/picoruby-ui/test/layout_test.rb`). Layouts are new and have not yet
 been tried on hardware. See [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) for
-the full design and [examples/layout.rb](examples/layout.rb) for a complete
-script.
+the full design and [examples/layouts/](examples/layouts/) for complete
+layouts: copy them to `/sd/layouts/` and they are loaded at start-up, each a
+Home tile.
 
 ### Examples
 
@@ -445,10 +446,8 @@ when none is picked, so the same script works with whatever is plugged in.
 | [knobs.rb](examples/knobs.rb) | CC knob banks |
 | [xypad.rb](examples/xypad.rb) | Multi-finger XY pad |
 | [tombola.rb](examples/tombola.rb) | Bouncing-ball sequencer |
-| [layout.rb](examples/layout.rb) | XY pad, knobs and pads on one screen; switching screens from MIDI |
 | [tombola_layout.rb](examples/tombola_layout.rb) | The Tombola with its knobs and pads on one screen |
 | [keys.rb](examples/keys.rb) | On-screen keyboard; a USB keyboard lights its keys, a scale shown in colour |
-| [keys_layout.rb](examples/keys_layout.rb) | The keyboard with knobs and pads on one screen |
 | [keys_amy.rb](examples/keys_amy.rb) | Play the built-in synth from the keyboard, with layout knobs and the Knobs screen |
 | [sequencer.rb](examples/sequencer.rb) | A drum, bass and keys song in two patterns and a chain, played on the Sequencer screen |
 | [amy_fm.rb](examples/amy_fm.rb) / [amy_synth.rb](examples/amy_synth.rb) | Play the built-in synth from pads, XY pad, knobs and a USB keyboard |
@@ -456,8 +455,9 @@ when none is picked, so the same script works with whatever is plugged in.
 | [midi_monitor.rb](examples/midi_monitor.rb) | Log every incoming MIDI message |
 | [midi_devices.rb](examples/midi_devices.rb) | Play through the IN / OUT picked on the MIDI Devices screen |
 | [midi_filter.rb](examples/midi_filter.rb) | Route a keyboard to a synth, rewriting its notes in Ruby |
-| [tempo.rb](examples/tempo.rb) / [tempo_keys.rb](examples/tempo_keys.rb) | Send the tempo as MIDI clock, with a BPM knob |
+| [tempo_keys.rb](examples/tempo_keys.rb) | Send the tempo as MIDI clock, with a BPM knob and the keyboard |
 | [seaboard_blocks.rb](examples/seaboard_blocks.rb) / [midi_to_lumi.rb](examples/midi_to_lumi.rb) | Device-specific controllers |
+| [layouts/](examples/layouts/) | For `/sd/layouts/` (loaded at start-up): `perform.rb` XY pad, knobs and pads, switched from MIDI; `keys.rb` the keyboard with knobs and pads; `clock.rb` the tempo with a BPM knob |
 | [dfrobot_encoder_cc.rb](examples/dfrobot_encoder_cc.rb) / [dfrobot_encoder_dual_cc.rb](examples/dfrobot_encoder_dual_cc.rb) | Hardware rotary encoders as CC knobs |
 
 ## Architecture

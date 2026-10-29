@@ -168,6 +168,10 @@ bool  picoruby_ui_layout_envelope_reset(int slot, int id);
 /* A script ended (called from picoruby_esp32_midi_cleanup). Any task. */
 void picoruby_ui_cleanup(void);
 
+/* Loading lock (main_task.rb loading /sd): a progress box over the screen,
+ * touches ignored. On from power-up; label NULL ends it. */
+void picoruby_ui_set_loading(const char *label, int done, int total);
+
 /* Tombola sequencer.
  * Parameters are string-keyed so this bridge stays fixed in size as the
  * sequencer grows knobs; see ui_common.h for the accepted names. */

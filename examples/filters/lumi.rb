@@ -11,7 +11,9 @@
 # MIDI.sleep_ms(13) のループは every(13) に置き換えた。filter はほかのパッチと
 # VM を共有するので、ブロックの中で sleep してはいけない。
 
-load "/sd/filters/lib/lumi_sysex.rb"
+# コンパイル済み（lib/lumi_sysex.mrb）があればそちらを読む
+lumi_lib = "/sd/filters/lib/lumi_sysex"
+load(File.exist?("#{lumi_lib}.mrb") ? "#{lumi_lib}.mrb" : "#{lumi_lib}.rb")
 
 class LumiLights < MIDI::Filter
   label "LUMI"

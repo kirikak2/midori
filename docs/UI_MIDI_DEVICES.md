@@ -81,6 +81,20 @@ md.show                          # = UI.show(:midi_devices) / UI.midi_devices
 ビット（例: 画面の鍵盤）には `UI::MIDIDevices::BitTransport`（ビットだけを持つ最小のトランスポート）
 の `MIDI::Device` を返す。
 
+### /sd/devices（2026-10-30）
+
+`/sd/devices/*.rb` / `*.mrb` は**どのモードでも起動時に**名前順に読まれる（同じ名前なら `.mrb` だけ）（`main_task_base.rb` の `load_devices`。
+`_` で始まるファイルとサブディレクトリは読まない）。内蔵デバイスの `register_builtin` の後、保存済みパッチを張り直す
+`boot` の前なので、ここで `register_builtin` したデバイスは**キーで保存済みパッチとつながる**
+（`register` で足したものはスクリプト限りの扱いで、パッチは保存されない）。
+
+```ruby
+# /sd/devices/din2.rb: 2 本目の DIN MIDI
+require 'uart_midi'
+din2 = UART_MIDI.new(13, 14)
+UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :yellow) { din2 }
+```
+
 ## 画面
 
 クロスバー。行が IN（送信元になれるデバイス）、列が OUT（全デバイス）。最後の列が **Prog(input)**（プログラムの IN を選ぶ）、最後の行が **Prog(output)**（OUT を選ぶ）。

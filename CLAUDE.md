@@ -830,7 +830,7 @@ keys.set_color([48, 52, 55], :blue)            # スケール / 和音の表示
 keys.show
 ```
 
-サンプル: [examples/keys.rb](examples/keys.rb) / [examples/keys_layout.rb](examples/keys_layout.rb) /
+サンプル: [examples/keys.rb](examples/keys.rb) / [examples/layouts/keys.rb](examples/layouts/keys.rb) /
 [examples/keys_amy.rb](examples/keys_amy.rb)（AMY を鍵盤 + レイアウト + Knobs で）
 
 ## Sequencer（UI::Sequencer / 2026-10-25）
@@ -967,7 +967,7 @@ end.show
 - 新しい部品（Sequencer など）は `ui_widget_kind_t` に足し、`ScreenLayout` に描画とタッチを、
   `ui_layout.rb` の `Builder` にメソッドを足す
 
-サンプル: [examples/layout.rb](examples/layout.rb)
+サンプル: [examples/layouts/](examples/layouts/)（`/sd/layouts/` にコピーすると起動時に読まれる。perform / keys / clock）
 
 ## Envelope（UI::Envelope / ADSR エディタ / 2026-10-27）
 
@@ -1009,7 +1009,7 @@ layout[:amp].sync   # パッチを読み込んだ後に表示を合わせる
 - 再定義は部品の id を振り直すので、**パッドのブロックの中では再定義しない**（`request` で積み、
   `UI.process` の最後の `UI::AMYPanel._poll` で実行。`main_task_base.rb` の `UI.process` の上書き）
 - UI モードは `setup_amy_panel` が作る（AMY は最初のパートを足すときに `MIDIDevices.amy` で起動）。
-  パネル表示中は UI モードのループを 10 ms にする。UI モードで組んだパートはスクリプトを実行すると消える（保存は未対応）
+  レイアウト（パネルを含む）の表示中は UI モードのループを 10 ms にする。UI モードで組んだパートはスクリプトを実行すると消える（保存は未対応）
 - ホストテスト: `ruby test/amy_panel_test.rb`（picoruby-ui ディレクトリで）
 
 ## Elecrow CrowPanel Advanced 7inch 対応（2026-08-28）
@@ -1197,7 +1197,7 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   C の filter 表は 1 件（チェーン全体の types の和集合）。チェーンは出口で鳴らしたノートを覚え、外すときに止める
 - 実装は picoruby-midi `mrblib/midi_filter_class.rb`（**mruby 専用**。mrbgem.rake が mruby/c のビルドから外す）。
   ホストテスト: `ruby host_test/filter_class_test.rb`（gem ディレクトリで。mruby は cat で連結、ファイル先頭参照）
-- `/sd/filters/*.rb` を**どのモードでも起動時に** `load_filters`（`main_task_base.rb`）が名前順に読む
+- `/sd/filters/*.rb`（と `*.mrb`）を**どのモードでも起動時に** `load_filters`（`main_task_base.rb`）が名前順に読む
   （`_` で始まるファイルとサブディレクトリは読まない）。`setup_midi_devices` の前なので保存済みチェーンが見つかる
 - MIDI Devices 画面の長押しメニューに **Ch / Filters タブ**。Filters で選んだ順にチェーン、選んだものを長押しで
   パラメータ画面。セルには `f2`（チェーンの長さ）。モデルは [main/ui/ui_filters.cpp](main/ui/ui_filters.cpp)
@@ -1210,6 +1210,23 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   （表示中なら MIDI Devices 画面へ戻ってから）。UI モードのループは `UI.process` + `MIDI.sleep_ms(100)` に変えた
   （以前の素の `sleep_ms` では filter もパネルも動かない）
 - サンプル: [examples/filters/](examples/filters/)（chord / arp / channel（チャンネル変換、`:chmap`）/ lumi。`/sd/filters/` にコピー）
+
+## 起動時の /sd 読み込みとロード画面（2026-10-30）
+
+- `main_task_base.rb` の `SDLoader` が `/sd/filters` → `/sd/devices` → `/sd/layouts` の `*.rb` / `*.mrb` を名前順に `load` する
+  （`foo.rb` と `foo.mrb` が両方あれば `.mrb` だけ。`.mrb` は `load` が RITE ヘッダで見分ける。
+  作るのはファームウェアと同じ mrbc: `components/midori-runtime/picoruby/build/mrbc/default/bin/mrbc -o foo.mrb foo.rb`）
+  （`_` で始まるファイルとサブディレクトリは読まない。壊れたファイルは報告して飛ばす）。
+  filters / devices は**どのモードでも**、layouts は **UI モードだけ**。devices は `setup_midi_devices` の中、
+  内蔵デバイスの登録と `md.boot`（保存済みパッチの復元）の間で読むので、`register_builtin` したものは保存済みパッチとつながる。
+  SD 再読み込み（Scripts 画面）では filters と layouts だけ読み直す（devices はトランスポートを作るので次の起動で）
+- layouts のサンプルは [examples/layouts/](examples/layouts/)。ループ・`show`・選択やルートの書き換えを書かない
+  （書き方は docs/UI_LAYOUT_DSL.md §10）。レイアウトの表示中は UI モードのループが 10 ms 周期
+- 読み込みの間は**画面をロック**する: `UI._loading(label, done, total)`（label nil で解除）→
+  `UIManager::setLoading()`。ロック中はコンテンツ中央にロード中の枠（件数・ファイル名・プログレスバー）を
+  全画面合成で描き、タッチはどこにも渡さない（ロック中に置いた指は離すまで無視）。`screen->update()` も呼ばない
+- **電源投入時からロック状態**（`m_loading = true` で始まる）。各モードの先頭で `SDLoader.start`、読み込み後に
+  `SDLoader.finish`。VM が途中で終わっても `scriptCleanup()` が解除する
 
 ## 既知の課題
 

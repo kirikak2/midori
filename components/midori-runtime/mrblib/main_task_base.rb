@@ -229,6 +229,8 @@ def setup_midi_devices
     md.register_builtin(:amy, "AMY", 0, color: :magenta) { MIDIDevices.amy }
   end
   # (The on-screen keys list themselves when their model is made.)
+  # /sd/devices: after the built-ins, before the saved patches are routed
+  load_devices
   md.boot
 rescue => e
   puts "MIDI devices setup failed: #{e.message}"
@@ -255,37 +257,109 @@ rescue => e
   puts "AMY panel setup failed: #{e.message}"
 end
 
-# Named MIDI filters kept on the SD card (docs/MIDI_FILTER_REGISTRY.md):
-# every /sd/filters/*.rb, by name, each expected to MIDI.register_filter
-# what it defines. Subdirectories and files starting with "_" are left for
-# the filters to load themselves. Every mode does this before
-# setup_midi_devices, so the saved chains find their filters; a broken file
-# is reported and skipped.
+# Ruby kept on the SD card, loaded at every start:
+#
+#   /sd/filters  named MIDI filters (docs/MIDI_FILTER_REGISTRY.md), each
+#                expected to MIDI.register_filter what it defines
+#   /sd/devices  MIDI devices for the MIDI Devices screen
+#                (UI::MIDIDevices.register / register_builtin)
+#   /sd/layouts  layouts (UI.layout), each a Home tile. UI mode only:
+#                a script's screen is its own
+#
+# Each directory's *.rb and *.mrb (bytecode from this firmware's mrbc; load
+# tells them apart by the RITE header) are read by name. Where foo.rb and
+# foo.mrb are both there only foo.mrb is, as require would pick it.
+# Subdirectories and files starting with "_" are left for the files to load
+# themselves. A broken file is reported and
+# skipped. The filters come first so the saved chains find theirs, the
+# devices between the built-ins and the saved patches (setup_midi_devices)
+# so the patches find them, the layouts last so they find both.
+#
+# Meanwhile the screen shows a loading box and takes no touches
+# (UI._loading): on from power-up, and from the start of every other mode,
+# until SDLoader.finish.
 FILTER_DIR = "/sd/filters"
+DEVICE_DIR = "/sd/devices"
+LAYOUT_DIR = "/sd/layouts"
+
+module SDLoader
+  @files = {}
+  @done = 0
+  @total = 0
+
+  # Lock the screen (before the SD card is up: nothing to count yet)
+  def self.start(label = "Starting")
+    @files = {}
+    @done = 0
+    @total = 0
+    UI._loading(label, 0, 0)
+  end
+
+  # List what the directories hold, so the loading bar knows the total
+  def self.scan(dirs)
+    dirs.each do |dir|
+      @files[dir] = ruby_files(dir)
+      @total += @files[dir].size
+    end
+    UI._loading("SD card", @done, @total)
+  end
+
+  # Load what scan found in dir
+  def self.load_dir(dir, tag)
+    (@files[dir] || []).each do |path|
+      UI._loading(path, @done, @total)
+      begin
+        Kernel.load(path)
+        puts "[#{tag}] #{path}"
+      rescue => e
+        puts "[#{tag}] #{path}: #{e.message} (#{e.class})"
+      end
+      @done += 1
+    end
+  end
+
+  # Unlock the screen
+  def self.finish
+    UI._loading(nil, 0, 0)
+  end
+
+  # *.rb and *.mrb in dir, by name, as paths; foo.mrb hides foo.rb
+  # ([] without the SD card or the directory)
+  def self.ruby_files(dir)
+    return [] unless $sd_available
+    exts = {}   # base name => ".rb" / ".mrb"
+    begin
+      Dir.open(dir) do |d|
+        while entry = d.read
+          next if entry == "." || entry == ".." || entry.start_with?("_")
+          # FAT may hand back an 8.3 name in capitals (PERFORM.MRB)
+          ext = entry.downcase
+          if ext.end_with?(".mrb")
+            exts[entry[0, entry.size - 4]] = entry[entry.size - 4, 4]
+          elsif ext.end_with?(".rb")
+            base = entry[0, entry.size - 3]
+            exts[base] = entry[entry.size - 3, 3] unless exts[base]
+          end
+        end
+      end
+    rescue => e
+      return []   # No such directory
+    end
+    exts.keys.sort.map { |base| "#{dir}/#{base}#{exts[base]}" }
+  end
+end
 
 def load_filters
-  return unless $sd_available
-  names = []
-  begin
-    Dir.open(FILTER_DIR) do |dir|
-      while entry = dir.read
-        next if entry == "." || entry == ".."
-        next if entry.start_with?("_") || !entry.end_with?(".rb")
-        names << entry
-      end
-    end
-  rescue => e
-    return   # No /sd/filters
-  end
-  names.sort.each do |name|
-    path = "#{FILTER_DIR}/#{name}"
-    begin
-      Kernel.load(path)
-    rescue => e
-      puts "[Filter] #{path}: #{e.message}"
-    end
-  end
+  SDLoader.load_dir(FILTER_DIR, "Filter")
   puts "Filters: #{MIDI.filters.keys.join(', ')}" if MIDI.filters.size > 0
+end
+
+def load_devices
+  SDLoader.load_dir(DEVICE_DIR, "Device")
+end
+
+def load_layouts
+  SDLoader.load_dir(LAYOUT_DIR, "Layout")
 end
 
 # Scan SD card for Ruby scripts and notify C side
@@ -492,6 +566,10 @@ end
 # - neither: UI Mode - enter the script selection loop
 # ============================================================================
 
+# From power-up the screen is locked (UI._loading) until the boot sequence has
+# loaded /sd; every later mode locks it again while it does the same.
+SDLoader.start
+
 sm = ScriptManager.new
 script_to_run = sm.get_autorun_script
 
@@ -513,9 +591,11 @@ if sm.irb_requested?
     $sd_available = try_init_sd_card
   end
 
+  SDLoader.scan([FILTER_DIR, DEVICE_DIR])
   load_filters
   setup_midi_devices
   setup_sequencer
+  SDLoader.finish
   run_irb_session
   puts "irb finished, exiting to supervisor"
 
@@ -543,9 +623,11 @@ elsif script_to_run
   # The built-in MIDI devices start here (setup_midi_devices); AMY and the
   # rest of MIDIDevices stay lazy
 
+  SDLoader.scan([FILTER_DIR, DEVICE_DIR])
   load_filters
   setup_midi_devices
   setup_sequencer
+  SDLoader.finish
   run_script(script_to_run)
   puts "Script completed, exiting to supervisor"
   # main_task.rb ends here, supervisor will detect and restart in UI mode
@@ -608,13 +690,16 @@ else
 
   # The built-in MIDI devices start here (setup_midi_devices), so the MIDI
   # Devices screen can patch between them; AMY stays lazy. The filters
-  # come first so the saved chains find theirs.
+  # come first so the saved chains find theirs, the layouts last.
+  SDLoader.scan([FILTER_DIR, DEVICE_DIR, LAYOUT_DIR])
   load_filters
   setup_midi_devices
   setup_sequencer
   setup_amy_panel
+  load_layouts
 
   GC.start
+  SDLoader.finish
 
   puts "Initialization complete."
   puts "UI Mode: Waiting for script selection"
@@ -674,7 +759,13 @@ else
       $sd_available = try_init_sd_card
       if $sd_available
         notify_scripts_to_c
+        # Filters and layouts again (a redefinition replaces the old one);
+        # the devices only at the next start, their transports being made
+        SDLoader.start("SD card")
+        SDLoader.scan([FILTER_DIR, LAYOUT_DIR])
         load_filters
+        load_layouts
+        SDLoader.finish
         UI::Sequencer._send_list rescue nil
         puts "SD card re-initialized successfully"
       else
@@ -687,8 +778,9 @@ else
     # changed (UI.process runs MIDI.run_filters and UI::MIDIDevices._poll);
     # MIDI.sleep_ms wakes as soon as a filter has something to do
     UI.process
-    # The AMY panel's knobs would lag by the 100 ms otherwise
-    MIDI.sleep_ms(UI::AMYPanel.showing? ? 10 : 100)
+    # A layout's pads and knobs (the AMY panel, /sd/layouts) run their
+    # blocks here: they would lag by the 100 ms otherwise
+    MIDI.sleep_ms(UI._requested_screen[0] == UI::SCREEN_LAYOUT ? 10 : 100)
   end
 
   puts "Exiting UI loop"

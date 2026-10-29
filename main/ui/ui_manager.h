@@ -114,6 +114,13 @@ public:
     // Script ended: put the menu back to its defaults. Any task.
     void scriptCleanup();
 
+    // Loading lock: while main_task.rb loads /sd (filters, devices, layouts)
+    // a progress box covers the content and touches are ignored, so nothing
+    // can be pressed before what it would reach exists. On from power-up
+    // until Ruby first ends it; label nullptr ends it. Any task.
+    void setLoading(const char* label, int done, int total);
+    bool isLoading() const { return m_loading; }
+
     // BPM management
     void setBpm(float bpm);
     float getBpm() const;
@@ -148,6 +155,7 @@ private:
     void handleTouch();
     void drawStatusBar();
     void drawNavBar();
+    void drawLoading();
     void initScreens();
     void applyPendingRequest();
     bool resolveStep(int dir, ui_screen_index_t& index, int& arg) const;
@@ -169,6 +177,15 @@ private:
     volatile int m_pendingArg;
     bool m_initialized;
     bool m_needsRedraw;
+
+    // Loading lock (setLoading), guarded by m_requestMux. The serial counts
+    // changes; the UI task repaints when it differs from what it drew.
+    volatile bool m_loading;
+    char m_loadingLabel[48];
+    int m_loadingDone;
+    int m_loadingTotal;
+    volatile uint32_t m_loadingSerial;
+    uint32_t m_loadingDrawn;
 
     // BPM state
     float m_internalBpm;
@@ -228,6 +245,8 @@ void ui_menu_set_hidden(uint32_t hidden);
 uint32_t ui_menu_get_hidden(void);
 // A script ended: menu back to defaults, its layouts dropped. Any task.
 void ui_script_cleanup(void);
+// Loading lock (UIManager::setLoading): label NULL ends it. Any task.
+void ui_set_loading(const char* label, int done, int total);
 
 // Pad callback
 void ui_set_pad_event_callback(pad_event_cb_t cb);

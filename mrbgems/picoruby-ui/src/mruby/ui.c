@@ -369,6 +369,17 @@ mrb_ui_menu_hidden(mrb_state *mrb, mrb_value self)
     return mrb_fixnum_value((mrb_int)picoruby_ui_menu_get_hidden());
 }
 
+/* UI._loading(label, done, total): the loading lock; label nil ends it */
+static mrb_value
+mrb_ui_loading(mrb_state *mrb, mrb_value self)
+{
+    mrb_value label, done, total;
+    mrb_get_args(mrb, "ooo", &label, &done, &total);
+    picoruby_ui_set_loading(mrb_nil_p(label) ? NULL : str_arg(mrb, label),
+                            val_to_i(done), val_to_i(total));
+    return mrb_nil_value();
+}
+
 /* ------------------------------------------------------------------------
  * Pads
  * ------------------------------------------------------------------------ */
@@ -1716,6 +1727,7 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_requested_screen, mrb_ui_requested_screen, MRB_ARGS_NONE());
     DEF(_menu_set_hidden,  mrb_ui_menu_set_hidden,  MRB_ARGS_REQ(1));
     DEF(_menu_hidden,      mrb_ui_menu_hidden,      MRB_ARGS_NONE());
+    DEF(_loading,          mrb_ui_loading,          MRB_ARGS_REQ(3));
 
     /* Pads */
     DEF(_pad_set,          mrb_ui_pad_set,          MRB_ARGS_REQ(4));

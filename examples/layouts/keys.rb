@@ -1,6 +1,6 @@
-# keys_layout.rb
+# keys.rb -- 鍵盤とノブ・パッドを 1 画面に（docs/UI_LAYOUT_DSL.md / docs/KEYS.md）
 #
-# レイアウト DSL（docs/UI_LAYOUT_DSL.md）で鍵盤とノブ・パッドを 1 画面に並べる。
+# /sd/layouts/ に置くと UI モードの起動時に読み込まれ、Home に Play のタイルが出る。
 #
 #   ┌──────┬──────┬──────┬──────┐
 #   │Cutoff│ Reso │ Oct- │ Oct+ │
@@ -10,21 +10,17 @@
 #   │                           │
 #   └───────────────────────────┘
 #
-# 鍵盤とノブは MIDI Devices 画面で選んだ OUT を鳴らす。選んだ IN
-# （PC の DAW など）から来たノートで鍵盤が光る。
+# 鍵盤とノブは MIDI Devices 画面で選んだ OUT を鳴らす（未選択なら鳴らない）。
+# 外部の鍵盤や PC の DAW から来たノートで鍵を光らせるには、MIDI Devices 画面で
+# その機器の行から Keys の列へパッチする（画面のパッチは保存される）。
+#
+# 起動時に読むファイルなので、ループも show も書かない。
+# 画面の鍵盤はモデルが 1 つなので、/sd/layouts で keys を置くのはこのファイルだけにする。
 
 require 'midi'
 require 'ui'
 
 md = UI::MIDIDevices
-
-# 未選択ならここで決める（画面で選び直せる）
-md.midi_in  ||= MIDIDevices.usb_midi_device
-md.midi_out ||= MIDIDevices.usb_midi_device || MIDIDevices.amy || MIDIDevices.sam2695
-unless md.midi_out
-  puts "No MIDI output available"
-  return
-end
 
 # 先に作って keys: で渡す（パッドのブロックから参照するため）
 kb = UI::Keys.new(octaves: 3, low: 48, device: md.midi_out)
@@ -40,26 +36,9 @@ UI.layout("Play", cols: 4, rows: [1, 2]) do
   pad col: 3, row: 0, label: "Oct+", color: :blue do kb.octave_up end
   # keys: を省くと UI::Keys.new(**キーワード) で作られる（layout[:id] で取れる）
   keys col: 0..3, row: 1, keys: kb
-end.show
-
-# IN から来たノートで鍵盤を光らせる。IN を選び直したら張り直す
-lit_by = nil
-follow_in = Proc.new do
-  MIDI.unroute(lit_by, kb) if lit_by
-  lit_by = md.midi_in
-  MIDI.route(lit_by, kb) if lit_by
 end
-follow_in.call
 
+# 鍵盤の送信先は C が覚えているので、OUT を選び直したら渡し直す
 md.on_change do |e|
-  case e[:kind]
-  when :select_in  then follow_in.call
-  when :select_out then kb.device = md.midi_out
-  end
-end
-
-sm = ScriptManager.new
-until sm.stop_requested?
-  UI.process
-  MIDI.sleep_ms(10)
+  kb.device = md.midi_out if e[:kind] == :select_out
 end

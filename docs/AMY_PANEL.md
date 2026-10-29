@@ -195,7 +195,7 @@ FM はエンベロープ 1 + `Op n` パッド 1 で同じ 31。
 
 - `setup_amy_panel`（`main_task_base.rb`、`BoardConfig::HAS_AMY` のときだけ）が
   `UI::AMYPanel.new(engine: Proc.new { MIDIDevices.amy })` を作る。`setup_midi_devices` の後
-- UI モードのループは `MIDI.sleep_ms(100)` で回っているので、パネルを表示している間は 10 ms にする
+- UI モードのループは `MIDI.sleep_ms(100)` で回っているので、レイアウト（このパネルを含む）を表示している間は 10 ms にする
   （ノブを回したときに 100 ms 遅れて聞こえないように）
 - **UI モードで組んだパートはスクリプトを実行すると消える**（スクリプトの終了時に
   `picoruby_esp32_midi_cleanup()` が `AMY_GEM_reset()` を呼び、VM も作り直すため）。保存は未対応（§4）

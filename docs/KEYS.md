@@ -12,7 +12,7 @@
 - モデル / トランスポート: [main/ui/ui_keys.cpp](../main/ui/ui_keys.cpp)（`ui_keys_*`）
 - Ruby API: `UI::Keys`（[mrbgems/picoruby-ui/mrblib/ui.rb](../mrbgems/picoruby-ui/mrblib/ui.rb)）
 - レイアウト: `keys`（[mrblib/ui_layout.rb](../mrbgems/picoruby-ui/mrblib/ui_layout.rb)）
-- サンプル: [examples/keys.rb](../examples/keys.rb) / [examples/keys_layout.rb](../examples/keys_layout.rb) /
+- サンプル: [examples/keys.rb](../examples/keys.rb) / [examples/layouts/keys.rb](../examples/layouts/keys.rb)（`/sd/layouts` 用） /
   [examples/keys_amy.rb](../examples/keys_amy.rb)（鍵盤 + レイアウト + Knobs で AMY を弾く）
 
 ## 実装状況（2026-10-18）

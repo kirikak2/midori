@@ -216,6 +216,11 @@ void ui_script_cleanup(void)
 {
 }
 
+void ui_set_loading(const char *label, int done, int total)
+{
+    (void)label; (void)done; (void)total;
+}
+
 // Tombola stubs - the sequencer lives in ui/screen_tombola.cpp, which is only
 // built for the M5Stack boards. Scripts that touch UI::Tombola on Freenove get
 // a silent no-op rather than a link error.
