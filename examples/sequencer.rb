@@ -69,6 +69,60 @@ UI.pad(5, label: "Chord", color: :orange) do
 end
 UI.pad(6, label: "Mute Hat", color: :gray, type: :toggle) { |on| seq.line(2).mute = on }
 
+# --- on_pattern: パターンが切り替わるたびに Bass と Keys のフレーズをランダムに作り直す ---
+# 書き換えるのは鳴り終わったほうのパターン（e[:from]）。鳴っているパターンのノートを差し替えると
+# 発音中のノートを消してしまうことがあるので、次にそのパターンが回ってきたときに新しいフレーズで鳴らす。
+# Random パッドを ON にしている間だけ書き換える（OFF ならそのときのフレーズのまま）。
+BASS_NOTES  = [36, 36, 39, 41, 43, 46, 48]   # C マイナー・ペンタ（ルートを多めに）
+KEYS_CHORDS = [[60, 63, 67], [58, 62, 65], [56, 60, 63], [55, 58, 62], [53, 56, 60], [55, 58, 63]]
+KEYS_RHYTHMS = [   # [ステップ, 長さ]（1 小節 = 16 ステップ）
+  [[0, 6], [8, 6]],
+  [[0, 3], [4, 3], [8, 6]],
+  [[0, 6], [6, 2], [8, 6]],
+  [[0, 14]],
+  [[2, 2], [6, 2], [10, 2], [14, 2]]
+]
+
+def pick(list)
+  list[rand(list.size)]
+end
+
+# 8 分音符の位置ごとに 2/3 の確率で置く。小節の頭（0 と 16）は必ずルート
+def randomize_bass(line)
+  steps = line.steps
+  line.clear
+  free = 0
+  (steps / 2).times do |i|
+    s = i * 2
+    next if s < free
+    head = s % 16 == 0
+    next unless head || rand(3) > 0
+    len = pick([1, 2, 2, 3])
+    len = steps - s if s + len > steps
+    line.set(s, notes: [head ? 36 : pick(BASS_NOTES)], length: len)
+    free = s + len
+  end
+end
+
+def randomize_keys(line)
+  line.clear
+  pick(KEYS_RHYTHMS).each do |s, len|
+    line.set(s, notes: pick(KEYS_CHORDS), length: len) if s < line.steps
+  end
+end
+
+$randomize = false
+UI.pad(7, label: "Random", color: :yellow, type: :toggle) { |on| $randomize = on }
+
+seq.on_pattern do |e|
+  from = e[:from]
+  next if !$randomize || from.nil? || from < 0 || from == e[:pattern]
+  pat = seq.pattern(from)
+  randomize_bass(pat.line(3))
+  randomize_keys(pat.line(4))
+  UI.log("pattern #{from}: new Bass / Keys")
+end
+
 seq.show
 
 sm = ScriptManager.new
