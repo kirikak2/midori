@@ -1,6 +1,6 @@
 # perform.rb -- XYPad・ノブ・パッドの演奏面（docs/UI_LAYOUT_DSL.md）
 #
-# /sd/layouts/ に置くと UI モードの起動時に読み込まれ、Home に Perform / Mix の
+# /sd/plugins/ に置くと起動時に読み込まれ（プラグイン）、UI モードでは Home に Perform / Mix の
 # タイルが出る。レイアウト DSL で演奏面を 2 枚作り、パッド / MIDI 入力で切り替える。
 #
 #   Perform                         Mix
@@ -25,10 +25,13 @@
 #
 # 起動時に読むファイルなので、ループも show も書かない（ブロックは UI モードの
 # ループの UI.process で走る）。ノブの値も、回すまでは送らない。
-# XYPad はモデルが 1 つなので、/sd/layouts で xypad を置くのはこのファイルだけにする。
+# XYPad はモデルが 1 つなので、/sd/plugins で xypad を置くのはこのファイルだけにする。
 
 require 'midi'
 require 'ui'
+
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad / Keys のモデルも 1 つ）
+return unless $midori_mode == :ui
 
 md = UI::MIDIDevices
 ch = 0
@@ -90,9 +93,7 @@ end
 perform.widgets.each { |w| xy = w if w.is_a?(UI::XYPad) }
 
 # ---- MIDI 入力から画面を切り替える ----------------------------------------
-# md.input は選んだ IN に追従する（画面で IN を選び直してもハンドラはそのまま）。
-# SD カードの再読み込みでこのファイルをもう一度読むとハンドラが増えるので、
-# 何度呼ばれても同じ結果になるもの（UI.show）だけにしている
+# md.input は選んだ IN に追従する（画面で IN を選び直してもハンドラはそのまま）
 pages = [perform, mix]
 md.input.on(:program_change) do |m|
   page = pages[m.program]

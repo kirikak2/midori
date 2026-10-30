@@ -1,6 +1,6 @@
 # keys.rb -- 鍵盤とノブ・パッドを 1 画面に（docs/UI_LAYOUT_DSL.md / docs/KEYS.md）
 #
-# /sd/layouts/ に置くと UI モードの起動時に読み込まれ、Home に Play のタイルが出る。
+# /sd/plugins/ に置くと起動時に読み込まれ（プラグイン）、UI モードでは Home に Play のタイルが出る。
 #
 #   ┌──────┬──────┬──────┬──────┐
 #   │Cutoff│ Reso │ Oct- │ Oct+ │
@@ -15,10 +15,13 @@
 # その機器の行から Keys の列へパッチする（画面のパッチは保存される）。
 #
 # 起動時に読むファイルなので、ループも show も書かない。
-# 画面の鍵盤はモデルが 1 つなので、/sd/layouts で keys を置くのはこのファイルだけにする。
+# 画面の鍵盤はモデルが 1 つなので、/sd/plugins で keys を置くのはこのファイルだけにする。
 
 require 'midi'
 require 'ui'
+
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad / Keys のモデルも 1 つ）
+return unless $midori_mode == :ui
 
 md = UI::MIDIDevices
 

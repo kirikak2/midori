@@ -52,7 +52,7 @@ module UI
 
     class << self
       # Hook into picoruby-midi and define what is registered already
-      # (/sd/filters is read before the devices are set up)
+      # (the /sd/plugins are read before boot installs this)
       def install
         return if $ui_filters_installed
         $ui_filters_installed = true

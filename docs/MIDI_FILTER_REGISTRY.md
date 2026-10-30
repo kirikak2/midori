@@ -1,4 +1,4 @@
-# 名前付き MIDI filter（MIDI::Filter / register_filter / /sd/filters）
+# 名前付き MIDI filter（MIDI::Filter / register_filter / /sd/plugins）
 
 > **状態: 実装済み（2026-10-24）**。Ruby はホストのテスト（picoruby-midi `host_test/filter_class_test.rb`、
 > picoruby-ui `test/midi_filters_test.rb` / `test/layout_test.rb`）、C は Tab5 のビルドのみ。**実機では未確認**。
@@ -15,14 +15,14 @@ filter を付け外しでき、パラメータも画面で変えられるよう�
 - 実装: picoruby-midi [midi_filter_class.rb](../mrbgems/picoruby-midi/mrblib/midi_filter_class.rb) /
   picoruby-ui [ui_midi_filters.rb](../mrbgems/picoruby-ui/mrblib/ui_midi_filters.rb) /
   [main/ui/ui_filters.cpp](../main/ui/ui_filters.cpp) / [main/ui/screen_midi_devices.cpp](../main/ui/screen_midi_devices.cpp)
-- サンプル: [examples/filters/](../examples/filters/) の `chord.rb` / `arp.rb` / `channel.rb` / `lumi.rb`（+ `lib/lumi_sysex.rb`。
-  `/sd/filters/` にコピーして使う）
+- サンプル: [examples/plugins/](../examples/plugins/) の `chord.rb` / `arp.rb` / `channel.rb` / `lumi.rb`（+ `lib/lumi_sysex.rb`。
+  `/sd/plugins/` にコピーして使う）
 
 ## 1. 要件
 
 1. filter は **`MIDI::Filter` かその派生クラスのインスタンス**
 2. `register_filter` / `unregister_filter` で自由に登録・解除できる。登録時に**名前**を付けて識別する
-3. `/sd/filters/` 以下に filter を置いておくと、**MIDoRI が起動時に読み込む**
+3. `/sd/plugins/` 以下に filter を置いておくと、**MIDoRI が起動時に読み込む**
 4. MIDI Devices 画面のパッチの長押しで、適用する filter を選択・解除できる。
    **複数選ぶと選んだ順にチェーン**になる
 5. filter が `MIDI::Filter` の仕組みで**パラメータを宣言**すると、filter を選んだときの設定項目になる。
@@ -35,13 +35,13 @@ filter を付け外しでき、パラメータも画面で変えられるよう�
 |------|----|------|
 | 登録するもの | **インスタンス**（プロトタイプ）。パッチに付けるときは `instantiate` で**パッチごとに新しいインスタンス**を作る | アルペジエータのように状態を持つ filter を 2 本のパッチで共有すると混ざる。パラメータもパッチごとに違う。登録するインスタンスのパラメータが既定値になるので、`Arp.new(rate: 16)` を `:arp16` として登録すれば「プリセット違い」も作れる |
 | 名前 | Symbol（`[a-z0-9_]`、15 文字まで）。画面に出す名前は別に `label` | NVS のキーになるので安定した短い識別子にする |
-| 同じ名前で再登録 | 置き換える。付いているパッチは新しいプロトタイプで作り直し、パラメータ値は名前と範囲が合うものだけ引き継ぐ | `/sd/filters` を直して再読み込みしたときに付け直さずに済む |
+| 同じ名前で再登録 | 置き換える。付いているパッチは新しいプロトタイプで作り直し、パラメータ値は名前と範囲が合うものだけ引き継ぐ | `/sd/plugins` を直して再読み込みしたときに付け直さずに済む |
 | チェーン | パッチ 1 本につき 1 本の `MIDI::FilterChain`。C の filter 表では 1 件 | C の表（16 件）を filter の数だけ消費しない |
 | パッチの選択の持ち主 | **C のモデル**（`ui_midi_devices.cpp`）。Ruby はそれを読んでチェーンを組む | 画面は UI タスクで動き、filter の実体は VM の中にある。AMY の standby と同じ「C が印を付け、Ruby が `_poll` で拾う」形にする |
 | 保存 | 両端が内蔵デバイスのパッチのチェーン（filter 名と各パラメータ値）を NVS に保存 | パッチの保存規則（UI_MIDI_DEVICES.md）に合わせる |
-| 読み込み | **UI / スクリプト / irb のどのモードでも**起動時に `/sd/filters/*.rb` を読む | VM はモードごとに作り直される。保存済みチェーンはスクリプト実行中も効いてほしい |
+| 読み込み | **UI / スクリプト / irb のどのモードでも**起動時に `/sd/plugins/*.rb` を読む（2026-10-30 まで `/sd/filters`） | VM はモードごとに作り直される。保存済みチェーンはスクリプト実行中も効いてほしい |
 | UI | filter のレイアウトは**ルーティングで使われているアクティブな filter のインスタンスだけ**が作り、使われなくなったら**作成済みでも削除する**（4.2） | 登録しただけの filter や外れた filter のタイルで Home が埋まらないように |
-| `/sd/filters` の形式 | `.rb` と `.mrb` を `load` する（2026-10-24 は `.rb` だけ、2026-10-30 に `.mrb` も）。同じ名前があれば `.mrb` だけ | `.mrb` はコンパイルを省けるので起動が速い |
+| `/sd/plugins` の形式 | `.rb` と `.mrb` を `load` する（2026-10-24 は `.rb` だけ、2026-10-30 に `.mrb` も）。同じ名前があれば `.mrb` だけ | `.mrb` はコンパイルを省けるので起動が速い |
 | 1 つのインスタンスを 2 本のパッチで共有 | **非対応**（2026-10-24 決定）。同じ filter を 2 本に付けると別々のインスタンスになる。1 つの状態で 2 台を鳴らしたいときは、宛先を増やす filter（`call` / `emit` の中で別の `MIDI::Device` にも送る）を書く | `emit` の先が 1 つに決まる方が単純 |
 | SysEx | **filter の対象外**（2026-10-24 決定）。常に C から直接転送する（MIDI_FILTER.md と同じ）。filter が SysEx を送るのは `output.send_sysex` で直接 | 入力タスクで SysEx を組み立ててからキューに積む仕組みが要るため |
 | レイアウトの数 | **上限を外す**（メモリが許す限り。4.3） | filter のパネルとスクリプトのレイアウトが枠を取り合わないように |
@@ -120,10 +120,10 @@ MIDI.registered_filter(name)         # => プロトタイプ or nil
 - `label:` は画面に出す名前（省略時はクラスの `label`）。同じクラスをプリセット違いで複数登録するときは
   付けないと Filters タブに同じ名前が並ぶ（2026-10-24 に追加）
 - `unregister_filter` は、その filter をチェーンから外し（3.3 のノート止めあり）、画面の一覧から消す。
-  **NVS の保存内容は消さない**（`/sd/filters` のファイルを消しただけで設定まで失わないように）。
+  **NVS の保存内容は消さない**（`/sd/plugins` のファイルを消しただけで設定まで失わないように）。
   画面では、保存済みだが登録の無い filter は灰色で出し、チェーンでは素通しとして扱う
 - 登録は VM 限り。スクリプトが `register_filter` した filter は、スクリプトの終了とともに消える
-  （次のモードは `/sd/filters` から読み直す）
+  （次のモードは `/sd/plugins` から読み直す）
 - 登録できるのは 16 個まで（C の一覧の大きさ）。超えたら false
 
 ### 3.2 パラメータ
@@ -285,10 +285,14 @@ Home は今の**縦のドラッグで 1 行ずつスクロール**する仕組�
 - レイアウトの増減でタイルが変わったら、Home を表示中なら描き直す（今の `poll()` で拾う）。
   スクロール位置がタイルの行数を超えたら最後の行に合わせる
 
-## 5. /sd/filters からの読み込み
+## 5. /sd/plugins からの読み込み
+
+2026-10-30 に `/sd/filters`（と同時期に足した `/sd/devices` / `/sd/layouts`）を廃止し、**プラグイン**の
+ディレクトリ `/sd/plugins` 1 つにまとめた。filter に限らず、デバイスの登録やレイアウトも同じ場所に置く
+（1 ファイルに混ぜてもよい）。モードで分けたいプラグインは `$midori_mode`（`:ui` / `:script` / `:irb`）を見る。
 
 ```
-/sd/filters/
+/sd/plugins/
   chord.rb        # MIDI.register_filter(:chord, Chord.new) まで書く
   arp.rb
   lumi.rb
@@ -296,19 +300,22 @@ Home は今の**縦のドラッグで 1 行ずつスクロール**する仕組�
   _wip.rb             # "_" で始まるものは読まない
 ```
 
-- `/sd/filters/*.rb` と `*.mrb` を**名前順**に `load` する（サブディレクトリと `_` で始まるファイルは読まない）。
+- `/sd/plugins/*.rb` と `*.mrb` を**名前順**に `load` する（サブディレクトリと `_` で始まるファイルは読まない）。
   `foo.rb` と `foo.mrb` が両方あれば `foo.mrb` だけ（`require` と同じ優先順）
 - 各ファイルは自分で `MIDI.register_filter` を呼ぶ（ファイル名から自動では登録しない。1 ファイルで
   プリセット違いを複数登録できるように）
-- ファイルごとに `rescue` し、`[Filter] /sd/filters/arp.rb: <message>` を出して次へ進む
-- 読み込む場所: `main_task_base.rb` の各モード（UI / Script / irb）で、SD のマウント後・
-  `setup_midi_devices` の前（`md.boot` が保存済みチェーンを張るときに filter が揃っているように）。
-  関数 `load_filters` として 3 か所から呼ぶ
-- UI モードの SD 再読み込み要求（`sd_refresh_requested?`）のときも読み直す（同名は置き換え）
+- ファイルごとに `rescue` し、`[Plugin] /sd/plugins/arp.rb: <message>` を出して次へ進む
+- 読み込む場所: `main_task_base.rb` の各モード（UI / Script / irb）の `setup_midi_devices` の中で、
+  内蔵デバイスの登録の後・`md.boot` の前（`load_plugins`）。保存済みチェーンを張るときに filter が、
+  保存済みパッチを張るときにプラグインのデバイスが揃っているように
+- UI モードの SD 再読み込み要求（`sd_refresh_requested?`）では読み直さない（デバイスを作るプラグインを
+  2 回読むとトランスポートができ直すため）。UI モードはスクリプトのたびに起動し直すので、そこで読み直される
 - 読み込みは VM の起動ごとに走る（`.rb` はスクリプトの切り替えのたびにコンパイルし直す）。
   起動を速くしたいときは `.mrb` にする（2026-10-30）: `components/midori-runtime/picoruby/build/mrbc/default/bin/mrbc -o foo.mrb foo.rb`。
   `load`（picoruby-require → `Sandbox#load_file`）が RITE ヘッダで見分ける。**ファームウェアと同じ mruby の
   mrbc で作る**（RITE のバージョンが違うと `invalid RITE version` で読み込みに失敗する）
+- まとめて置くなら `ruby tools/bundle_plugins.rb` で 1 つの `bundle.mrb` にできる（ファイルごとに lambda で包み、
+  `return`・ローカル変数・例外をファイル単位に保つ）。`/sd/plugins/` には bundle.mrb だけを置く
 - **トップレベルで重い処理をしない**。ファイルはクラスを定義して登録するだけにし、デバイスへの
   送信などは `setup` に書く（`output` が決まるのは付いたときなので）
 - filter の無限ループは UI モードを止める（UI モードの VM は Supervisor の強制停止の対象ではない）。
@@ -398,9 +405,9 @@ usb_host>amy=chord(chord:1,octave:-1),arp(rate:16,mode:0);uart>amy=lumi
 | picoruby-ui `ports/esp32/ui.c` | `UI._mididev_filter_*`（一覧・チェーン・パラメータ値の読み書き） |
 | `main/ui/ui_midi_devices.cpp` | 一覧・チェーン・NVS `chains` |
 | `main/ui/screen_midi_devices.cpp` | Filters タブ、パラメータ設定、セルの `f2` |
-| `main_task_base.rb` | `load_filters`、UI モードのループ（4.1） |
+| `main_task_base.rb` | `load_plugins`（2026-10-30 まで `load_filters`）、UI モードのループ（4.1） |
 | `main/ui/ui_layout.cpp` / `ui_manager.cpp` / `screen_home.cpp`、picoruby-ui `mrblib/ui_layout.rb` | レイアウトの可変長の表と ID（4.3）、メニューの項目数の上限を外す（4.4） |
-| `examples/filters/` | サンプル（8 章） |
+| `examples/plugins/` | サンプル（8 章） |
 
 - **mruby 専用**: `MIDI::Filter` はキーワード引数の `**` とクラスの宣言（クラスメソッド）を使う。
   picoruby-midi は mruby/c のバインディングも保守しているが、このファイルは mruby/c のビルドから外す
@@ -505,7 +512,7 @@ MIDI Devices で J-6 > AMY に `chord`, `arp` の順に付けると、1 音押�
 | `md.on_change` で OUT が替わったら設定し直す | 不要。OUT を変える = 別のパッチなので、新しいインスタンスの `setup` が走る |
 
 ```ruby
-load "/sd/filters/lib/lumi_sysex.rb"   # LumiBitArray / Lumi（今のスクリプトから移す）
+load "/sd/plugins/lib/lumi_sysex.rb"   # LumiBitArray / Lumi（今のスクリプトから移す）
 
 class LumiLights < MIDI::Filter
   label "LUMI"
@@ -557,7 +564,7 @@ end
 MIDI.register_filter(:lumi, LumiLights.new)
 ```
 
-`examples/midi_to_lumi.rb` はスクリプトとしても残す（filter 版は `examples/filters/lumi.rb`）。
+`examples/midi_to_lumi.rb` はスクリプトとしても残す（filter 版は `examples/plugins/lumi.rb`）。
 
 ### 8.4 チャンネル変換（channel.rb、2026-10-25 追加）
 
@@ -588,7 +595,7 @@ MIDI.register_filter(:lumi, LumiLights.new)
 
 0. レイアウトの数の上限を外す（4.3、Home のメニュー項目数も）。filter と独立に入れられる
 1. `MIDI::Filter` / `MIDI::FilterChain` / `register_filter` / `route.chain`（picoruby-midi、ホストテストまで）
-2. `load_filters` と UI モードのループの変更。この時点で `/sd/filters` + スクリプトの `route.chain` で使える
+2. `load_filters` と UI モードのループの変更。この時点で `/sd/plugins` + スクリプトの `route.chain` で使える
 3. C の一覧・チェーンと Filters タブ、NVS `chains`（ここで画面だけで付け外しできる）
 4. パラメータ設定画面
 5. `layout` / `param_knob` / `param_pad`、アクティブな間だけレイアウトを持つ寿命の管理（4.2）
@@ -609,7 +616,7 @@ MIDI.register_filter(:lumi, LumiLights.new)
 - **チェーンの差し替え**: 名前が同じ filter はインスタンス（と状態）を引き継ぎ、新しい値は `set_param` で入る。
   外れた filter があれば、チェーンが鳴らした音を全部止めてから外す
 - **`unregister_filter` / 再登録**: チェーンの名前は残し、インスタンスだけ外す（素通し）。同じ名前を登録すると
-  その場で作り直す（値は引き継ぐ）。`/sd/filters` の読み直しもこれで済む
+  その場で作り直す（値は引き継ぐ）。`/sd/plugins` の読み直しもこれで済む
 - **Ruby と C のやりとりはテキスト**（`name(param:value,...),name2`。NVS と同じ書式）。値は C と同じ整数
   （enum は添字、bool は 0 / 1、channel は -1..15）。Ruby → C は `UI._filter_chain_set`、C → Ruby は
   `UI._filter_chains`（リビジョン付き）を `UI::MIDIDevices._poll` が読む。Ruby が適用したあと、範囲に丸めた値で

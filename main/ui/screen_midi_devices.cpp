@@ -924,7 +924,7 @@ void ScreenMidiDevices::loadItems()
         snprintf(it.label, sizeof(it.label), "%s", sc.def.label);
         it.registered = true;
     }
-    // Names in the chain that nothing registers (a file taken off /sd/filters)
+    // Names in the chain that nothing registers (a file taken off /sd/plugins)
     for (int i = 0; i < sc.chain.len && n < FILTER_ITEMS; i++) {
         if (ui_filter_find(sc.chain.stages[i].name) >= 0) continue;
         FilterItem& it = sc.items[n++];
@@ -1023,7 +1023,7 @@ void ScreenMidiDevices::drawFilterButtons(int px, int py)
         slot_rect(px, py, 0, &bx, &by);
         gfx.setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
         gfx.setCursor(bx, by + (PICK_BTN_H - CHAR_H) / 2);
-        gfx.print("No filters (put them in /sd/filters)");
+        gfx.print("No filters (put them in /sd/plugins)");
     }
 }
 

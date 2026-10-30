@@ -1,4 +1,4 @@
-# lumi_sysex.rb -- LUMI Keys の SysEx ヘルパー（filters/lumi.rb が load する）
+# lumi_sysex.rb -- LUMI Keys の SysEx ヘルパー（plugins/lumi.rb が load する）
 #
 # examples/midi_to_lumi.rb と同じもの。プロトコルは benob/LUMI-lights の解析による:
 #   https://github.com/benob/LUMI-lights

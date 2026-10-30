@@ -1,6 +1,6 @@
 # chord.rb -- コードハーモナイザ（docs/MIDI_FILTER_REGISTRY.md）
 #
-# /sd/filters/ に置くと起動時に読み込まれる。MIDI Devices 画面でパッチを長押し →
+# /sd/plugins/ に置くと起動時に読み込まれる（プラグイン）。MIDI Devices 画面でパッチを長押し →
 # Filters タブで「Chord」を選ぶと、弾いた音に和音が付く。パラメータ（コードの種類・
 # オクターブ）は選んだ Chord をもう一度長押しで変えられるほか、Home に出る
 # パネルでも変えられる（コードごとのパッドで選び、選んでいるコードだけ色が付く）。

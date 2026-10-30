@@ -131,3 +131,19 @@ end
 ## ライセンス
 
 このツールは、Midoriプロジェクトの一部として提供されています。
+
+## プラグインを 1 つの .mrb にまとめる: `bundle_plugins.rb`
+
+MIDoRI のプラグイン（起動時に `/sd/plugins/` から読まれる `*.rb` / `*.mrb`）を 1 つの `.mrb` にする。
+
+```bash
+ruby tools/bundle_plugins.rb                                # examples/plugins -> examples/bundle.mrb
+ruby tools/bundle_plugins.rb path/to/plugins out/bundle.mrb
+```
+
+- `lib/*.rb` を先に、続けてトップレベルの `*.rb` を名前順につなぐ（`_` で始まるものは除く）
+- ファイルごとに `lambda do ... end.call` で包み、`rescue` する。トップレベルの `return`
+  （`return unless $midori_mode == :ui`）・ローカル変数・例外はファイル単位のまま
+- コンパイルはファームウェアと同じ mrbc（`components/midori-runtime/picoruby/build/mrbc/default/bin/mrbc`。
+  一度ファームウェアをビルドしておく）
+- `/sd/plugins/` には出力の `bundle.mrb` だけを置く（元のファイルも置くと二重に読まれる）

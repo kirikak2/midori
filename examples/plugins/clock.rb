@@ -1,6 +1,6 @@
 # clock.rb -- テンポと MIDI クロック（docs/TEMPO.md）
 #
-# /sd/layouts/ に置くと UI モードの起動時に読み込まれ、Home に Clock のタイルが出る。
+# /sd/plugins/ に置くと起動時に読み込まれ（プラグイン）、UI モードでは Home に Clock のタイルが出る。
 #
 #   - Tempo 画面をレイアウトのセルに置く（BPM をタップで TAP tempo）
 #   - BPM ノブ。TAP や Sync でテンポが変わるとノブも追従する
@@ -14,6 +14,9 @@
 
 require 'midi'
 require 'ui'
+
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad / Keys のモデルも 1 つ）
+return unless $midori_mode == :ui
 
 clock = UI.layout("Clock", cols: 4, rows: 3) do
   tempo col: 0..2, row: 0..1

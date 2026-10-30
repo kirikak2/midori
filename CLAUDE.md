@@ -830,7 +830,7 @@ keys.set_color([48, 52, 55], :blue)            # スケール / 和音の表示
 keys.show
 ```
 
-サンプル: [examples/keys.rb](examples/keys.rb) / [examples/layouts/keys.rb](examples/layouts/keys.rb) /
+サンプル: [examples/keys.rb](examples/keys.rb) / [examples/plugins/keys.rb](examples/plugins/keys.rb) /
 [examples/keys_amy.rb](examples/keys_amy.rb)（AMY を鍵盤 + レイアウト + Knobs で）
 
 ## Sequencer（UI::Sequencer / 2026-10-25）
@@ -967,7 +967,7 @@ end.show
 - 新しい部品（Sequencer など）は `ui_widget_kind_t` に足し、`ScreenLayout` に描画とタッチを、
   `ui_layout.rb` の `Builder` にメソッドを足す
 
-サンプル: [examples/layouts/](examples/layouts/)（`/sd/layouts/` にコピーすると起動時に読まれる。perform / keys / clock）
+サンプル: [examples/plugins/](examples/plugins/) の perform / keys / clock（`/sd/plugins/` にコピーすると起動時に読まれる）
 
 ## Envelope（UI::Envelope / ADSR エディタ / 2026-10-27）
 
@@ -1183,7 +1183,7 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   外部クロックの BPM もそのときしか測れない。Tempo 画面は表示中か Sync 中に使える送信元を watch し
   （`UIManager::updateClockWatch`、送信元ボタンは USB-H / USB-D / DIN / BLE）、`sync_from:` も指定元を watch する
 
-### 名前付き filter（MIDI::Filter / register_filter / /sd/filters / 2026-10-24）
+### 名前付き filter（MIDI::Filter / register_filter / 2026-10-24）
 
 詳細は [docs/MIDI_FILTER_REGISTRY.md](docs/MIDI_FILTER_REGISTRY.md)。ホストのテストのみで**実機未確認**。
 
@@ -1197,8 +1197,8 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   C の filter 表は 1 件（チェーン全体の types の和集合）。チェーンは出口で鳴らしたノートを覚え、外すときに止める
 - 実装は picoruby-midi `mrblib/midi_filter_class.rb`（**mruby 専用**。mrbgem.rake が mruby/c のビルドから外す）。
   ホストテスト: `ruby host_test/filter_class_test.rb`（gem ディレクトリで。mruby は cat で連結、ファイル先頭参照）
-- `/sd/filters/*.rb`（と `*.mrb`）を**どのモードでも起動時に** `load_filters`（`main_task_base.rb`）が名前順に読む
-  （`_` で始まるファイルとサブディレクトリは読まない）。`setup_midi_devices` の前なので保存済みチェーンが見つかる
+- filter はプラグイン（`/sd/plugins`、後述）として置くと**どのモードでも起動時に**読まれる。
+  `md.boot` の前なので保存済みチェーンが見つかる
 - MIDI Devices 画面の長押しメニューに **Ch / Filters タブ**。Filters で選んだ順にチェーン、選んだものを長押しで
   パラメータ画面。セルには `f2`（チェーンの長さ）。モデルは [main/ui/ui_filters.cpp](main/ui/ui_filters.cpp)
   （登録済み filter の宣言とパッチごとのチェーン。Ruby とは `name(param:value,...)` のテキストでやりとり）、
@@ -1209,19 +1209,27 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
 - filter の `layout(ui)` は**チェーンで使われている間だけ**のレイアウト（Home のタイル）。外れたら消す
   （表示中なら MIDI Devices 画面へ戻ってから）。UI モードのループは `UI.process` + `MIDI.sleep_ms(100)` に変えた
   （以前の素の `sleep_ms` では filter もパネルも動かない）
-- サンプル: [examples/filters/](examples/filters/)（chord / arp / channel（チャンネル変換、`:chmap`）/ lumi。`/sd/filters/` にコピー）
+- サンプル: [examples/plugins/](examples/plugins/)（chord / arp / channel（チャンネル変換、`:chmap`）/ lumi。`/sd/plugins/` にコピー）
 
-## 起動時の /sd 読み込みとロード画面（2026-10-30）
+## プラグイン（/sd/plugins）とロード画面（2026-10-30）
 
-- `main_task_base.rb` の `SDLoader` が `/sd/filters` → `/sd/devices` → `/sd/layouts` の `*.rb` / `*.mrb` を名前順に `load` する
-  （`foo.rb` と `foo.mrb` が両方あれば `.mrb` だけ。`.mrb` は `load` が RITE ヘッダで見分ける。
-  作るのはファームウェアと同じ mrbc: `components/midori-runtime/picoruby/build/mrbc/default/bin/mrbc -o foo.mrb foo.rb`）
-  （`_` で始まるファイルとサブディレクトリは読まない。壊れたファイルは報告して飛ばす）。
-  filters / devices は**どのモードでも**、layouts は **UI モードだけ**。devices は `setup_midi_devices` の中、
-  内蔵デバイスの登録と `md.boot`（保存済みパッチの復元）の間で読むので、`register_builtin` したものは保存済みパッチとつながる。
-  SD 再読み込み（Scripts 画面）では filters と layouts だけ読み直す（devices はトランスポートを作るので次の起動で）
-- layouts のサンプルは [examples/layouts/](examples/layouts/)。ループ・`show`・選択やルートの書き換えを書かない
+- 起動時に `/sd/plugins` の `*.rb` / `*.mrb` を名前順に `load` する（`main_task_base.rb` の `SDLoader` / `load_plugins`）。
+  filter（`MIDI.register_filter`）・デバイス（`UI::MIDIDevices.register_builtin`）・レイアウト（`UI.layout`）など
+  何を定義してもよい。同じ日の途中までは `/sd/filters` / `/sd/devices` / `/sd/layouts` に分けていたが、この 1 つにまとめた
+- `foo.rb` と `foo.mrb` が両方あれば `.mrb` だけ。`.mrb` は `load` が RITE ヘッダで見分ける。
+  作るのはファームウェアと同じ mrbc: `components/midori-runtime/picoruby/build/mrbc/default/bin/mrbc -o foo.mrb foo.rb`。
+  `_` で始まるファイルとサブディレクトリは読まない（`lib/` はプラグインが自分で load する）。壊れたファイルは報告して飛ばす
+- **どのモードでも**、`setup_midi_devices` の中で内蔵デバイスの登録と `md.boot`（保存済みパッチ・チェーンの復元）の間に読む。
+  モードで分けるプラグインは `$midori_mode`（`:ui` / `:script` / `:irb`）を見る（レイアウトは `return unless $midori_mode == :ui`）。
+  SD 再読み込み（Scripts 画面）では読み直さない（デバイスを作るプラグインを 2 回読まないため。UI モードはスクリプトのたびに起動し直す）
+- サンプルは [examples/plugins/](examples/plugins/)（filter: chord / arp / channel / lumi、レイアウト: perform / keys / clock。
+  `.rb` のみで、まとめてコンパイルしたものが examples/bundle.mrb）。レイアウトはループ・`show`・選択やルートの書き換えを書かない
   （書き方は docs/UI_LAYOUT_DSL.md §10）。レイアウトの表示中は UI モードのループが 10 ms 周期
+- **1 つの .mrb にまとめる**: `ruby tools/bundle_plugins.rb [dir] [out]`（既定 examples/plugins → examples/bundle.mrb）。
+  `lib/*.rb` を先に、続けて `*.rb` を名前順につなぐ。ファイルごとに `lambda do ... end.call` で包むので、
+  トップレベルの `return` とローカル変数はファイルごと、例外もファイルごとに報告して続ける。
+  `/sd/plugins/` には bundle.mrb だけを置く（元のファイルもあると二重に読まれる）。lib を load するプラグインは
+  bundle 内では飛ばす（`lumi.rb` の `unless Object.const_defined?(:Lumi)`）
 - 読み込みの間は**画面をロック**する: `UI._loading(label, done, total)`（label nil で解除）→
   `UIManager::setLoading()`。ロック中はコンテンツ中央にロード中の枠（件数・ファイル名・プログレスバー）を
   全画面合成で描き、タッチはどこにも渡さない（ロック中に置いた指は離すまで無視）。`screen->update()` も呼ばない

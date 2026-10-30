@@ -429,9 +429,11 @@ end
 The grid math lives in Ruby and has host tests
 (`mrbgems/picoruby-ui/test/layout_test.rb`). Layouts are new and have not yet
 been tried on hardware. See [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) for
-the full design and [examples/layouts/](examples/layouts/) for complete
-layouts: copy them to `/sd/layouts/` and they are loaded at start-up, each a
-Home tile.
+the full design and [examples/plugins/](examples/plugins/) for complete
+layouts (`perform.rb`, `keys.rb`, `clock.rb`): copy them to `/sd/plugins/` and
+they are loaded at start-up, each a Home tile. `ruby tools/bundle_plugins.rb`
+compiles the whole directory into a single `examples/bundle.mrb` to copy there
+instead.
 
 ### Examples
 
@@ -457,7 +459,7 @@ when none is picked, so the same script works with whatever is plugged in.
 | [midi_filter.rb](examples/midi_filter.rb) | Route a keyboard to a synth, rewriting its notes in Ruby |
 | [tempo_keys.rb](examples/tempo_keys.rb) | Send the tempo as MIDI clock, with a BPM knob and the keyboard |
 | [seaboard_blocks.rb](examples/seaboard_blocks.rb) / [midi_to_lumi.rb](examples/midi_to_lumi.rb) | Device-specific controllers |
-| [layouts/](examples/layouts/) | For `/sd/layouts/` (loaded at start-up): `perform.rb` XY pad, knobs and pads, switched from MIDI; `keys.rb` the keyboard with knobs and pads; `clock.rb` the tempo with a BPM knob |
+| [plugins/](examples/plugins/) | Plugins for `/sd/plugins/` (loaded at start-up; all of them compiled into one [bundle.mrb](examples/bundle.mrb) by `tools/bundle_plugins.rb`): the named MIDI filters `chord.rb`, `arp.rb`, `channel.rb`, `lumi.rb`; the layouts `perform.rb` (XY pad, knobs and pads, switched from MIDI), `keys.rb` (the keyboard with knobs and pads), `clock.rb` (the tempo with a BPM knob) |
 | [dfrobot_encoder_cc.rb](examples/dfrobot_encoder_cc.rb) / [dfrobot_encoder_dual_cc.rb](examples/dfrobot_encoder_dual_cc.rb) | Hardware rotary encoders as CC knobs |
 
 ## Architecture

@@ -175,7 +175,7 @@ check "parse", [[:oct, { by: 1, mode: 0 }], [:plain, {}]], F.parse("oct(by:1,mod
 check "parse negative", [[:oct, { by: -2 }]], F.parse("oct(by:-2)")
 check "parse empty", [], F.parse("")
 
-# --- Defined before install (from /sd/filters), then installed by boot ------
+# --- Defined before install (from /sd/plugins), then installed by boot ------
 
 MIDI.register_filter(:oct, Octave.new(by: 2))
 M.register_builtin(:usb_host, "J-6", 0x01) { HOST }

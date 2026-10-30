@@ -229,8 +229,8 @@ def setup_midi_devices
     md.register_builtin(:amy, "AMY", 0, color: :magenta) { MIDIDevices.amy }
   end
   # (The on-screen keys list themselves when their model is made.)
-  # /sd/devices: after the built-ins, before the saved patches are routed
-  load_devices
+  # /sd/plugins: after the built-ins, before the saved patches are routed
+  load_plugins
   md.boot
 rescue => e
   puts "MIDI devices setup failed: #{e.message}"
@@ -257,30 +257,25 @@ rescue => e
   puts "AMY panel setup failed: #{e.message}"
 end
 
-# Ruby kept on the SD card, loaded at every start:
+# Plugins: Ruby kept in /sd/plugins, loaded at every start, in every mode.
+# A plugin may define anything -- named MIDI filters (MIDI.register_filter,
+# docs/MIDI_FILTER_REGISTRY.md), MIDI devices (UI::MIDIDevices.register /
+# register_builtin), layouts (UI.layout, each a Home tile) -- and checks
+# $midori_mode (:ui / :script / :irb) if it is for one mode only.
 #
-#   /sd/filters  named MIDI filters (docs/MIDI_FILTER_REGISTRY.md), each
-#                expected to MIDI.register_filter what it defines
-#   /sd/devices  MIDI devices for the MIDI Devices screen
-#                (UI::MIDIDevices.register / register_builtin)
-#   /sd/layouts  layouts (UI.layout), each a Home tile. UI mode only:
-#                a script's screen is its own
-#
-# Each directory's *.rb and *.mrb (bytecode from this firmware's mrbc; load
-# tells them apart by the RITE header) are read by name. Where foo.rb and
-# foo.mrb are both there only foo.mrb is, as require would pick it.
-# Subdirectories and files starting with "_" are left for the files to load
-# themselves. A broken file is reported and
-# skipped. The filters come first so the saved chains find theirs, the
-# devices between the built-ins and the saved patches (setup_midi_devices)
-# so the patches find them, the layouts last so they find both.
+# The *.rb and *.mrb (bytecode from this firmware's mrbc; load tells them
+# apart by the RITE header) are read by name. Where foo.rb and foo.mrb are
+# both there only foo.mrb is, as require would pick it. Subdirectories and
+# files starting with "_" are left for the plugins to load themselves. A
+# broken file is reported and skipped. They load inside setup_midi_devices,
+# between the built-ins and the saved patches (md.boot), so the saved
+# patches and filter chains find what the plugins define, and the plugins
+# find the built-ins.
 #
 # Meanwhile the screen shows a loading box and takes no touches
 # (UI._loading): on from power-up, and from the start of every other mode,
 # until SDLoader.finish.
-FILTER_DIR = "/sd/filters"
-DEVICE_DIR = "/sd/devices"
-LAYOUT_DIR = "/sd/layouts"
+PLUGIN_DIR = "/sd/plugins"
 
 module SDLoader
   @files = {}
@@ -349,17 +344,9 @@ module SDLoader
   end
 end
 
-def load_filters
-  SDLoader.load_dir(FILTER_DIR, "Filter")
+def load_plugins
+  SDLoader.load_dir(PLUGIN_DIR, "Plugin")
   puts "Filters: #{MIDI.filters.keys.join(', ')}" if MIDI.filters.size > 0
-end
-
-def load_devices
-  SDLoader.load_dir(DEVICE_DIR, "Device")
-end
-
-def load_layouts
-  SDLoader.load_dir(LAYOUT_DIR, "Layout")
 end
 
 # Scan SD card for Ruby scripts and notify C side
@@ -583,6 +570,7 @@ if sm.irb_requested?
   require "shell"
 
   puts "irb Mode"
+  $midori_mode = :irb
 
   # Each script gets a fresh VM, so VFS starts empty: check and re-init if needed
   $sd_available = VFS.volume_index("/sd") ? true : false
@@ -591,9 +579,8 @@ if sm.irb_requested?
     $sd_available = try_init_sd_card
   end
 
-  SDLoader.scan([FILTER_DIR, DEVICE_DIR])
-  load_filters
-  setup_midi_devices
+  SDLoader.scan([PLUGIN_DIR])
+  setup_midi_devices   # loads the plugins
   setup_sequencer
   SDLoader.finish
   run_irb_session
@@ -610,6 +597,7 @@ elsif script_to_run
   # STDIN/STDOUT are already defined in kernel.rb, no need to redefine
 
   puts "Script Mode: #{script_to_run}"
+  $midori_mode = :script
 
   # Each script gets a fresh VM, so VFS starts empty: check and re-init if needed
   $sd_available = VFS.volume_index("/sd") ? true : false
@@ -623,9 +611,8 @@ elsif script_to_run
   # The built-in MIDI devices start here (setup_midi_devices); AMY and the
   # rest of MIDIDevices stay lazy
 
-  SDLoader.scan([FILTER_DIR, DEVICE_DIR])
-  load_filters
-  setup_midi_devices
+  SDLoader.scan([PLUGIN_DIR])
+  setup_midi_devices   # loads the plugins
   setup_sequencer
   SDLoader.finish
   run_script(script_to_run)
@@ -664,6 +651,7 @@ else
   end
 
   puts "Board: #{BoardConfig::BOARD_NAME}"
+  $midori_mode = :ui
 
   # Setup flash disk
   begin
@@ -689,14 +677,12 @@ else
   notify_scripts_to_c
 
   # The built-in MIDI devices start here (setup_midi_devices), so the MIDI
-  # Devices screen can patch between them; AMY stays lazy. The filters
-  # come first so the saved chains find theirs, the layouts last.
-  SDLoader.scan([FILTER_DIR, DEVICE_DIR, LAYOUT_DIR])
-  load_filters
+  # Devices screen can patch between them; AMY stays lazy. The plugins load
+  # in there too.
+  SDLoader.scan([PLUGIN_DIR])
   setup_midi_devices
   setup_sequencer
   setup_amy_panel
-  load_layouts
 
   GC.start
   SDLoader.finish
@@ -759,13 +745,9 @@ else
       $sd_available = try_init_sd_card
       if $sd_available
         notify_scripts_to_c
-        # Filters and layouts again (a redefinition replaces the old one);
-        # the devices only at the next start, their transports being made
-        SDLoader.start("SD card")
-        SDLoader.scan([FILTER_DIR, LAYOUT_DIR])
-        load_filters
-        load_layouts
-        SDLoader.finish
+        # The plugins are read again at the next start (UI mode starts
+        # again after every script): loading one twice could make its
+        # transports again
         UI::Sequencer._send_list rescue nil
         puts "SD card re-initialized successfully"
       else
@@ -778,7 +760,7 @@ else
     # changed (UI.process runs MIDI.run_filters and UI::MIDIDevices._poll);
     # MIDI.sleep_ms wakes as soon as a filter has something to do
     UI.process
-    # A layout's pads and knobs (the AMY panel, /sd/layouts) run their
+    # A layout's pads and knobs (the AMY panel, /sd/plugins) run their
     # blocks here: they would lag by the 100 ms otherwise
     MIDI.sleep_ms(UI._requested_screen[0] == UI::SCREEN_LAYOUT ? 10 : 100)
   end

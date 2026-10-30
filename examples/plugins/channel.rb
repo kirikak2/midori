@@ -1,6 +1,6 @@
 # channel.rb -- チャンネル変換（docs/MIDI_FILTER_REGISTRY.md）
 #
-# /sd/filters/ に置くと起動時に読み込まれる。MIDI Devices 画面でパッチを長押し →
+# /sd/plugins/ に置くと起動時に読み込まれる（プラグイン）。MIDI Devices 画面でパッチを長押し →
 # Filters タブで「Ch Map」を選ぶと、受けたチャンネルメッセージのチャンネルを
 # 書き換えて送る（例: ch5 → ch1）。
 #

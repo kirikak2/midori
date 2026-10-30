@@ -1,6 +1,6 @@
 # arp.rb -- アルペジエータ（docs/MIDI_FILTER_REGISTRY.md）
 #
-# /sd/filters/ に置くと起動時に読み込まれる。押さえている音を MIDI::Clock
+# /sd/plugins/ に置くと起動時に読み込まれる（プラグイン）。押さえている音を MIDI::Clock
 # （Tempo 画面のテンポ）に合わせて 1 音ずつ鳴らす。Chord の後ろにつなぐと、
 # 1 音押すだけで和音の分散和音になる（MIDI Devices の Filters タブで Chord → Arp の順に選ぶ）。
 #

@@ -1,7 +1,7 @@
 # lumi.rb -- LUMI Keys を光らせる filter（examples/midi_to_lumi.rb の filter 版。
 # docs/MIDI_FILTER_REGISTRY.md）
 #
-# /sd/filters/ に lib/lumi_sysex.rb と一緒に置く（lib/ は自動では読まれない）。
+# /sd/plugins/ に lib/lumi_sysex.rb と一緒に置く（lib/ は自動では読まれない）。
 # MIDI Devices 画面で「鍵盤 > LUMI Keys」のパッチに LUMI を付けると、付いたときに
 # LUMI をスケール色モードに設定し、鍵盤のノートでキーが光る（ノートはパッチが C から
 # 直接届けるので、この filter は何も Ruby に回さない: types []）。
@@ -11,9 +11,12 @@
 # MIDI.sleep_ms(13) のループは every(13) に置き換えた。filter はほかのパッチと
 # VM を共有するので、ブロックの中で sleep してはいけない。
 
-# コンパイル済み（lib/lumi_sysex.mrb）があればそちらを読む
-lumi_lib = "/sd/filters/lib/lumi_sysex"
-load(File.exist?("#{lumi_lib}.mrb") ? "#{lumi_lib}.mrb" : "#{lumi_lib}.rb")
+# コンパイル済み（lib/lumi_sysex.mrb）があればそちらを読む。
+# bundle.mrb（tools/bundle_plugins.rb）では lib が先に入っているので読まない
+unless Object.const_defined?(:Lumi)
+  lumi_lib = "/sd/plugins/lib/lumi_sysex"
+  load(File.exist?("#{lumi_lib}.mrb") ? "#{lumi_lib}.mrb" : "#{lumi_lib}.rb")
+end
 
 class LumiLights < MIDI::Filter
   label "LUMI"
