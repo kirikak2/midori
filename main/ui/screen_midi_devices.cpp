@@ -10,6 +10,13 @@
 // (docs/MIDI_FILTER_REGISTRY.md) and, holding one, its parameters. The Prog
 // column picks the program's IN, the Prog row its OUT. Hold a device's name
 // for its details.
+//
+// Up to UI_MIDIDEV_MAX devices each way do not fit at a usable size: cells
+// keep a minimum size, and the rows / columns beyond it scroll by whole cells
+// (drag anywhere on the grid) under the fixed headers and the Prog row /
+// column. The corner button above the row names picks the view: all devices,
+// only those patched (a row with a patch from it, a column with one to it) or
+// only those with none.
 
 #include "sdkconfig.h"
 #include "screen_midi_devices.h"
@@ -42,6 +49,8 @@ static constexpr int NAME_W = 240;
 static constexpr int HEADER_H = 40;
 static constexpr int CELL_W_MAX = 140;
 static constexpr int CELL_H_MAX = 64;
+static constexpr int CELL_W_MIN = 84;     // Six characters of a name
+static constexpr int CELL_H_MIN = 52;
 static constexpr int DOT_R = 7;
 static constexpr int PICK_BTN_W = 120;
 static constexpr int PICK_BTN_H = 56;
@@ -53,6 +62,8 @@ static constexpr int NAME_W = 76;
 static constexpr int HEADER_H = 16;
 static constexpr int CELL_W_MAX = 44;
 static constexpr int CELL_H_MAX = 24;
+static constexpr int CELL_W_MIN = 34;     // Five characters of a name
+static constexpr int CELL_H_MIN = 22;
 static constexpr int DOT_R = 3;
 static constexpr int PICK_BTN_W = 40;
 static constexpr int PICK_BTN_H = 30;
@@ -66,6 +77,9 @@ static constexpr uint32_t LONG_PRESS_MS = 500;
 static constexpr uint16_t CELL_BG_A = 0x1082;
 static constexpr uint16_t CELL_BG_B = 0x18E3;
 static constexpr uint16_t PROG_COLOR = UI_COLOR_CYAN;
+static constexpr int SCROLLBAR = MARGIN / 2;   // In the right / bottom margin
+
+static const char* const VIEW_NAMES[] = { "All", "Patched", "Unpatched" };
 
 // Channel picker: "All", "Clock", 1..16, "Off", "Done" on a 7 x 3 grid (one
 // slot spare). All and Off pick and close; Clock and the channels toggle, any
@@ -167,12 +181,19 @@ ScreenMidiDevices::ScreenMidiDevices()
     , m_lastCheckMs(0)
     , m_lastDiagMs(0)
     , m_signature(0)
-    , m_grid()
+    , m_grid(nullptr)
+    , m_view(VIEW_ALL)
+    , m_keepRows(0)
+    , m_keepCols(0)
+    , m_keepCount(0)
     , m_touchId(-1)
     , m_touchX(0)
     , m_touchY(0)
     , m_touchMs(0)
     , m_longFired(false)
+    , m_dragging(false)
+    , m_dragRowOff(0)
+    , m_dragColOff(0)
     , m_overlay(OVERLAY_NONE)
     , m_overlayFrom(-1)
     , m_overlayTo(-1)
@@ -188,10 +209,15 @@ ScreenMidiDevices::ScreenMidiDevices()
 
 void ScreenMidiDevices::enter()
 {
+    if (!m_grid) m_grid = (Grid*)calloc(1, sizeof(Grid));
     m_isActive = true;
     m_overlay = OVERLAY_NONE;
     m_touchId = -1;
+    m_dragging = false;
     m_repeatHit = -1;
+    // The view stays as it was left, without what was kept in it
+    m_keepRows = m_keepCols = 0;
+    if (!m_grid) return;
     rebuild();
     m_signature = signature();
 }
@@ -222,34 +248,113 @@ void ScreenMidiDevices::displayName(const ui_mididev_t& d, char* buf, int len) c
     snprintf(buf, len, "%s", d.name);
 }
 
+// How many cells of an axis fit in avail, the Prog one included: all of them
+// at up to maxSize, else as many as fit at minSize, stretched to fill avail
+static void fit_cells(int avail, int count, int minSize, int maxSize, int* size, int* shown)
+{
+    int slots = count + 1;
+    int s = avail / slots;
+    if (s < minSize) {
+        slots = avail / minSize;
+        if (slots < 2) slots = 2;   // One device and Prog, however small
+        s = avail / slots;
+    }
+    *size = s > maxSize ? maxSize : s;
+    *shown = slots - 1 < count ? slots - 1 : count;
+}
+
+static int clamp_offset(int off, int count, int shown)
+{
+    int max = count - shown;
+    if (off > max) off = max;
+    return off < 0 ? 0 : off;
+}
+
 void ScreenMidiDevices::rebuild()
 {
-    Grid& g = m_grid;
+    Grid& g = *m_grid;
     g.count = 0;
     int n = ui_mididev_count();
     for (int i = 0; i < n && g.count < MAX_DEVS; i++) {
         if (ui_mididev_get(i, &g.devs[g.count])) g.count++;
     }
-    uint8_t sources = MIDI_route_sources();
+    // Devices came or went: the indices kept no longer name them
+    if (g.count != m_keepCount) {
+        m_keepRows = m_keepCols = 0;
+        m_keepCount = g.count;
+    }
+
+    midi_tmask_t sources = MIDI_route_sources();
+    bool isIn[MAX_DEVS], isOut[MAX_DEVS], patchedFrom[MAX_DEVS], patchedTo[MAX_DEVS];
+    for (int i = 0; i < g.count; i++) {
+        isIn[i] = g.devs[i].bit && (g.devs[i].bit & sources);
+        // Every transport (and a standby one) takes MIDI, except those that
+        // only send (the tempo's clock)
+        isOut[i] = !(g.devs[i].flags & UI_MIDIDEV_NO_OUT);
+        patchedFrom[i] = patchedTo[i] = false;
+    }
+    // What every patch passes, once per change rather than per cell drawn
+    for (int a = 0; a < g.count; a++) {
+        for (int b = 0; b < g.count; b++) {
+            uint32_t sel = (a != b && isIn[a] && isOut[b]) ? ui_mididev_patch_selection(a, b) : 0;
+            g.sel[a][b] = sel;
+            if (sel) patchedFrom[a] = patchedTo[b] = true;
+        }
+    }
+
     g.rowCount = 0;
     g.colCount = 0;
     for (int i = 0; i < g.count; i++) {
-        if (g.devs[i].bit && (g.devs[i].bit & sources)) g.rows[g.rowCount++] = i;
-        // Every transport (and a standby one) takes MIDI, except those that
-        // only send (the tempo's clock)
-        if (!(g.devs[i].flags & UI_MIDIDEV_NO_OUT)) g.cols[g.colCount++] = i;
+        bool keepRow = (m_keepRows >> i) & 1;
+        bool keepCol = (m_keepCols >> i) & 1;
+        bool showRow = m_view == VIEW_ALL || keepRow ||
+                       (m_view == VIEW_PATCHED) == patchedFrom[i];
+        bool showCol = m_view == VIEW_ALL || keepCol ||
+                       (m_view == VIEW_PATCHED) == patchedTo[i];
+        if (isIn[i] && showRow) g.rows[g.rowCount++] = i;
+        if (isOut[i] && showCol) g.cols[g.colCount++] = i;
     }
 
     g.nameW = NAME_W;
     g.headerH = HEADER_H;
     int availW = UI_SCREEN_WIDTH - 2 * MARGIN - g.nameW;
     int availH = UI_CONTENT_HEIGHT - 2 * MARGIN - g.headerH;
-    g.cellW = availW / (g.colCount + 1);
-    g.cellH = availH / (g.rowCount + 1);
-    if (g.cellW > CELL_W_MAX) g.cellW = CELL_W_MAX;
-    if (g.cellH > CELL_H_MAX) g.cellH = CELL_H_MAX;
+    fit_cells(availW, g.colCount, CELL_W_MIN, CELL_W_MAX, &g.cellW, &g.shownCols);
+    fit_cells(availH, g.rowCount, CELL_H_MIN, CELL_H_MAX, &g.cellH, &g.shownRows);
+    g.rowOff = clamp_offset(g.rowOff, g.rowCount, g.shownRows);
+    g.colOff = clamp_offset(g.colOff, g.colCount, g.shownCols);
     g.x0 = MARGIN + g.nameW;
     g.y0 = UI_CONTENT_Y + MARGIN + g.headerH;
+}
+
+int ScreenMidiDevices::rowY(int row) const
+{
+    const Grid& g = *m_grid;
+    int pos = (row >= g.rowCount) ? g.shownRows : row - g.rowOff;
+    return g.y0 + pos * g.cellH;
+}
+
+int ScreenMidiDevices::colX(int col) const
+{
+    const Grid& g = *m_grid;
+    int pos = (col >= g.colCount) ? g.shownCols : col - g.colOff;
+    return g.x0 + pos * g.cellW;
+}
+
+void ScreenMidiDevices::keep(int from, int to)
+{
+    if (from >= 0 && from < 32) m_keepRows |= 1u << from;
+    if (to >= 0 && to < 32) m_keepCols |= 1u << to;
+}
+
+void ScreenMidiDevices::setView(View view)
+{
+    m_view = view;
+    m_keepRows = m_keepCols = 0;
+    m_grid->rowOff = m_grid->colOff = 0;
+    rebuild();
+    m_signature = signature();
+    m_needsRedraw = true;
 }
 
 uint32_t ScreenMidiDevices::signature() const
@@ -270,22 +375,24 @@ uint32_t ScreenMidiDevices::signature() const
     mix((uint32_t)ui_mididev_selected(true) + 1);
     mix(MIDI_route_sources());
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
-        uint8_t src = 0, dst = 0;
+        midi_tmask_t src = 0, dst = 0;
         uint32_t sel = 0;
         if (MIDI_route_get_selection(i, &src, &dst, &sel)) {
-            mix(src | (dst << 8));
+            mix(src | ((uint32_t)dst << 16));
             mix(sel);
         } else {
             mix(0);
         }
     }
-    for (int bit = 1; bit < 0x100; bit <<= 1) mix(MIDI_route_filtered((uint8_t)bit));
+    for (int i = 0; i < MIDI_TRANSPORT_REGISTRY_SIZE; i++) {
+        mix(MIDI_route_filtered((midi_tmask_t)(1u << i)));
+    }
     return h;
 }
 
 void ScreenMidiDevices::update()
 {
-    if (!m_isActive) return;
+    if (!m_isActive || !m_grid) return;
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
 
     // Long press: a finger held still
@@ -313,8 +420,8 @@ void ScreenMidiDevices::update()
 
 #if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
     // The USB device's diagnostics refresh once a second while shown
-    if (m_overlay == OVERLAY_DETAIL && m_overlayDev >= 0 && m_overlayDev < m_grid.count
-        && strcmp(m_grid.devs[m_overlayDev].key, "usb_dev") == 0
+    if (m_overlay == OVERLAY_DETAIL && m_overlayDev >= 0 && m_overlayDev < m_grid->count
+        && strcmp(m_grid->devs[m_overlayDev].key, "usb_dev") == 0
         && now - m_lastDiagMs >= 1000) {
         m_lastDiagMs = now;
         m_needsRedraw = true;
@@ -331,6 +438,7 @@ void ScreenMidiDevices::update()
 
 void ScreenMidiDevices::draw()
 {
+    if (!m_grid) return;
     drawGrid();
     if (m_overlay == OVERLAY_CHANNEL) drawChannelPicker();
     if (m_overlay == OVERLAY_DETAIL) drawDetail();
@@ -339,7 +447,7 @@ void ScreenMidiDevices::draw()
 
 void ScreenMidiDevices::drawGrid()
 {
-    const Grid& g = m_grid;
+    const Grid& g = *m_grid;
     auto& gfx = ui_gfx();
     gfx.fillRect(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT, UI_COLOR_BLACK);
     gfx.setTextSize(TEXT_SIZE);
@@ -351,18 +459,16 @@ void ScreenMidiDevices::drawGrid()
         return;
     }
 
+    drawViewButton();
+
     char name[40];
     int colChars = (g.cellW - 2) / CHAR_W;
+    int lastCol = g.colOff + g.shownCols;
+    int lastRow = g.rowOff + g.shownRows;
 
-    // Column headers (OUT)
-    for (int c = 0; c <= g.colCount; c++) {
-        int x = g.x0 + c * g.cellW;
-        if (c == g.colCount) {
-            // The program as a destination: picks its IN
-            gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
-            print_prog(x + 1, g.y0 - g.headerH, g.cellW - 2, g.headerH, "(input)", true);
-            continue;
-        }
+    // Column headers (OUT), then the program as a destination: picks its IN
+    for (int c = g.colOff; c < lastCol; c++) {
+        int x = colX(c);
         const ui_mididev_t& d = g.devs[g.cols[c]];
         displayName(d, name, sizeof(name));
         const char* label = name;
@@ -373,18 +479,14 @@ void ScreenMidiDevices::drawGrid()
         gfx.setCursor(x + (g.cellW - n * CHAR_W) / 2, g.y0 - g.headerH + (g.headerH - CHAR_H) / 2);
         print_fit(label, colChars);
     }
+    gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
+    print_prog(colX(g.colCount) + 1, g.y0 - g.headerH, g.cellW - 2, g.headerH, "(input)", true);
 
-    // Row headers (IN)
+    // Row headers (IN), then the program as a source: picks its OUT
     int nameChars = (g.nameW - 4 * DOT_R) / CHAR_W;
-    for (int r = 0; r <= g.rowCount; r++) {
-        int y = g.y0 + r * g.cellH;
+    for (int r = g.rowOff; r < lastRow; r++) {
+        int y = rowY(r);
         int ty = y + (g.cellH - CHAR_H) / 2;
-        if (r == g.rowCount) {
-            // The program as a source: picks its OUT
-            gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
-            print_prog(MARGIN + 3 * DOT_R, y, nameChars * CHAR_W, g.cellH, "(output)", false);
-            continue;
-        }
         const ui_mididev_t& d = g.devs[g.rows[r]];
         bool up = isUp(d);
         gfx.fillCircle(MARGIN + DOT_R, y + g.cellH / 2, DOT_R, up ? UI_COLOR_GREEN : UI_COLOR_DARKGRAY);
@@ -393,32 +495,105 @@ void ScreenMidiDevices::drawGrid()
         gfx.setCursor(MARGIN + 3 * DOT_R, ty);
         print_fit(name, nameChars);
     }
+    gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
+    print_prog(MARGIN + 3 * DOT_R, rowY(g.rowCount), nameChars * CHAR_W, g.cellH, "(output)", false);
 
     // Device status for the OUT-only ones (AMY): a dot under the header
-    for (int c = 0; c < g.colCount; c++) {
+    for (int c = g.colOff; c < lastCol; c++) {
         const ui_mididev_t& d = g.devs[g.cols[c]];
         uint16_t color = (d.flags & UI_MIDIDEV_STANDBY) ? UI_COLOR_YELLOW
                        : isUp(d) ? UI_COLOR_GREEN : UI_COLOR_DARKGRAY;
-        gfx.fillRect(g.x0 + c * g.cellW + 2, g.y0 - 3, g.cellW - 4, 2, color);
+        gfx.fillRect(colX(c) + 2, g.y0 - 3, g.cellW - 4, 2, color);
     }
 
-    for (int r = 0; r <= g.rowCount; r++) {
-        for (int c = 0; c <= g.colCount; c++) drawCell(r, c);
+    for (int r = g.rowOff; r < lastRow; r++) {
+        for (int c = g.colOff; c < lastCol; c++) drawCell(r, c);
+        drawCell(r, g.colCount);
     }
+    for (int c = g.colOff; c < lastCol; c++) drawCell(g.rowCount, c);
+    drawCell(g.rowCount, g.colCount);
 
     // Separators before the Prog row / column
-    int gridW = (g.colCount + 1) * g.cellW;
-    int gridH = (g.rowCount + 1) * g.cellH;
-    gfx.drawFastVLine(g.x0 + g.colCount * g.cellW, g.y0 - g.headerH, gridH + g.headerH, PROG_COLOR);
-    gfx.drawFastHLine(MARGIN, g.y0 + g.rowCount * g.cellH, g.nameW + gridW - MARGIN, PROG_COLOR);
+    int gridW = (g.shownCols + 1) * g.cellW;
+    int gridH = (g.shownRows + 1) * g.cellH;
+    gfx.drawFastVLine(colX(g.colCount), g.y0 - g.headerH, gridH + g.headerH, PROG_COLOR);
+    gfx.drawFastHLine(MARGIN, rowY(g.rowCount), g.nameW + gridW - MARGIN, PROG_COLOR);
+
+    // A view that leaves nothing to show says so, under the Prog row
+    if (m_view != VIEW_ALL && (g.rowCount == 0 || g.colCount == 0)) {
+        const char* text = (m_view == VIEW_PATCHED) ? "No patches" : "Nothing unpatched";
+        gfx.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+        gfx.setCursor(MARGIN, g.y0 + gridH + MARGIN);
+        print_fit(text, (UI_SCREEN_WIDTH - 2 * MARGIN) / CHAR_W);
+    }
+
+    drawScrollbars();
+}
+
+// The corner above the row names: the view, tapped to the next one
+static void view_button_rect(int nameW, int headerH, int* x, int* y, int* w, int* h)
+{
+    *x = MARGIN;
+    *y = UI_CONTENT_Y + MARGIN;
+    *w = nameW - MARGIN;
+    *h = headerH - 2;
+}
+
+void ScreenMidiDevices::drawViewButton()
+{
+    const Grid& g = *m_grid;
+    auto& gfx = ui_gfx();
+    int x, y, w, h;
+    view_button_rect(g.nameW, g.headerH, &x, &y, &w, &h);
+    bool filtered = m_view != VIEW_ALL;
+    uint16_t bg = filtered ? (uint16_t)UI_COLOR_CYAN : (uint16_t)UI_COLOR_BLACK;
+    uint16_t fg = filtered ? (uint16_t)UI_COLOR_BLACK : (uint16_t)UI_COLOR_WHITE;
+    gfx.fillRoundRect(x, y, w, h, 4, bg);
+    gfx.drawRoundRect(x, y, w, h, 4, filtered ? (uint16_t)UI_COLOR_CYAN : (uint16_t)UI_COLOR_GRAY);
+    char label[24];
+    int fit = (w - 4) / CHAR_W;
+    snprintf(label, sizeof(label), "Show: %s", VIEW_NAMES[m_view]);
+    if ((int)strlen(label) > fit) snprintf(label, sizeof(label), "%s", VIEW_NAMES[m_view]);
+    int n = (int)strlen(label);
+    if (n > fit) n = fit;
+    gfx.setTextColor(fg, bg);
+    gfx.setCursor(x + (w - n * CHAR_W) / 2, y + (h - CHAR_H) / 2);
+    print_fit(label, fit);
+}
+
+// A track and a thumb along the scrolled rows (right margin) / columns
+// (bottom margin), only for an axis that does not fit
+void ScreenMidiDevices::drawScrollbars()
+{
+    const Grid& g = *m_grid;
+    auto& gfx = ui_gfx();
+    if (SCROLLBAR < 1) return;
+    if (g.rowCount > g.shownRows) {
+        int x = UI_SCREEN_WIDTH - MARGIN + (MARGIN - SCROLLBAR) / 2;
+        int top = g.y0;
+        int len = g.shownRows * g.cellH;
+        int thumb = len * g.shownRows / g.rowCount;
+        int pos = top + len * g.rowOff / g.rowCount;
+        gfx.fillRect(x, top, SCROLLBAR, len, UI_COLOR_DARKGRAY);
+        gfx.fillRect(x, pos, SCROLLBAR, thumb, UI_COLOR_GRAY);
+    }
+    if (g.colCount > g.shownCols) {
+        int y = UI_CONTENT_Y + UI_CONTENT_HEIGHT - MARGIN + (MARGIN - SCROLLBAR) / 2;
+        int left = g.x0;
+        int len = g.shownCols * g.cellW;
+        int thumb = len * g.shownCols / g.colCount;
+        int pos = left + len * g.colOff / g.colCount;
+        gfx.fillRect(left, y, len, SCROLLBAR, UI_COLOR_DARKGRAY);
+        gfx.fillRect(pos, y, thumb, SCROLLBAR, UI_COLOR_GRAY);
+    }
 }
 
 void ScreenMidiDevices::drawCell(int row, int col)
 {
-    const Grid& g = m_grid;
+    const Grid& g = *m_grid;
     auto& gfx = ui_gfx();
-    int x = g.x0 + col * g.cellW;
-    int y = g.y0 + row * g.cellH;
+    int x = colX(col);
+    int y = rowY(row);
     int cx = x + g.cellW / 2;
     int cy = y + g.cellH / 2;
     int r = (g.cellW < g.cellH ? g.cellW : g.cellH) / 4;
@@ -445,7 +620,7 @@ void ScreenMidiDevices::drawCell(int row, int col)
         return;
     }
 
-    uint32_t sel = ui_mididev_patch_selection(from, to);
+    uint32_t sel = g.sel[from][to];
     if (sel == 0) {
         gfx.fillCircle(cx, cy, 1, UI_COLOR_DARKGRAY);
         return;
@@ -541,8 +716,8 @@ void ScreenMidiDevices::drawPickerHeader(int px, int py, int pw, bool tabs)
 {
     auto& gfx = ui_gfx();
     char from[24], to[24], title[64];
-    displayName(m_grid.devs[m_overlayFrom], from, sizeof(from));
-    displayName(m_grid.devs[m_overlayTo], to, sizeof(to));
+    displayName(m_grid->devs[m_overlayFrom], from, sizeof(from));
+    displayName(m_grid->devs[m_overlayTo], to, sizeof(to));
     if (m_overlay == OVERLAY_PARAMS && m_scratch) {
         snprintf(title, sizeof(title), "%s  %s > %s", m_scratch->def.label, from, to);
     } else {
@@ -631,16 +806,16 @@ bool ScreenMidiDevices::channelPickerHit(int x, int y, int* channel) const
 void ScreenMidiDevices::drawDetail()
 {
     auto& gfx = ui_gfx();
-    if (m_overlayDev < 0 || m_overlayDev >= m_grid.count) return;
-    const ui_mididev_t& d = m_grid.devs[m_overlayDev];
+    if (m_overlayDev < 0 || m_overlayDev >= m_grid->count) return;
+    const ui_mididev_t& d = m_grid->devs[m_overlayDev];
 
     char lines[12][64];
     int n = 0;
     char name[40];
     displayName(d, name, sizeof(name));
     snprintf(lines[n++], sizeof(lines[0]), "%s", name);
-    if (d.key[0]) snprintf(lines[n++], sizeof(lines[0]), "key %s  bit 0x%02X", d.key, d.bit);
-    else snprintf(lines[n++], sizeof(lines[0]), "bit 0x%02X (script)", d.bit);
+    if (d.key[0]) snprintf(lines[n++], sizeof(lines[0]), "key %s  bit 0x%04X", d.key, d.bit);
+    else snprintf(lines[n++], sizeof(lines[0]), "bit 0x%04X (script)", d.bit);
     snprintf(lines[n++], sizeof(lines[0]), "%s",
              (d.flags & UI_MIDIDEV_STANDBY) ? "Standby (starts when patched)"
              : isUp(d) ? "Connected" : "Not connected");
@@ -705,28 +880,40 @@ void ScreenMidiDevices::drawDetail()
 
 bool ScreenMidiDevices::hit(int x, int y, int* row, int* col) const
 {
-    const Grid& g = m_grid;
+    const Grid& g = *m_grid;
     if (g.count == 0) return false;
-    int gridW = (g.colCount + 1) * g.cellW;
-    int gridH = (g.rowCount + 1) * g.cellH;
+    int gridW = (g.shownCols + 1) * g.cellW;
+    int gridH = (g.shownRows + 1) * g.cellH;
     bool inCols = x >= g.x0 && x < g.x0 + gridW;
     bool inRows = y >= g.y0 && y < g.y0 + gridH;
+    // Screen position -> place in rows / cols: the Prog one after the shown ones
+    auto toRow = [&g](int pos) { return pos >= g.shownRows ? g.rowCount : g.rowOff + pos; };
+    auto toCol = [&g](int pos) { return pos >= g.shownCols ? g.colCount : g.colOff + pos; };
     if (inCols && inRows) {
-        *row = (y - g.y0) / g.cellH;
-        *col = (x - g.x0) / g.cellW;
+        *row = toRow((y - g.y0) / g.cellH);
+        *col = toCol((x - g.x0) / g.cellW);
         return true;
     }
     if (inRows && x >= MARGIN && x < g.x0) {         // Row header
-        *row = (y - g.y0) / g.cellH;
+        *row = toRow((y - g.y0) / g.cellH);
         *col = -1;
         return true;
     }
     if (inCols && y >= g.y0 - g.headerH && y < g.y0) {   // Column header
         *row = -1;
-        *col = (x - g.x0) / g.cellW;
+        *col = toCol((x - g.x0) / g.cellW);
         return true;
     }
     return false;
+}
+
+bool ScreenMidiDevices::cornerHit(int x, int y) const
+{
+    const Grid& g = *m_grid;
+    if (g.count == 0) return false;
+    int bx, by, bw, bh;
+    view_button_rect(g.nameW, g.headerH, &bx, &by, &bw, &bh);
+    return x >= bx && x < bx + bw && y >= by && y < by + bh;
 }
 
 void ScreenMidiDevices::tap(int x, int y)
@@ -764,6 +951,7 @@ void ScreenMidiDevices::tap(int x, int y)
             ui_mididev_set_patch(m_overlayFrom, m_overlayTo, base ^ bit);
             close = false;
         }
+        keep(m_overlayFrom, m_overlayTo);
         if (close) m_overlay = OVERLAY_NONE;
         rebuild();
         m_signature = signature();
@@ -776,7 +964,12 @@ void ScreenMidiDevices::tap(int x, int y)
         return;
     }
 
-    const Grid& g = m_grid;
+    if (cornerHit(x, y)) {
+        setView((View)((m_view + 1) % VIEW_COUNT));
+        return;
+    }
+
+    const Grid& g = *m_grid;
     int row, col;
     if (!hit(x, y, &row, &col) || row < 0 || col < 0) return;
     bool progRow = (row == g.rowCount);
@@ -794,6 +987,7 @@ void ScreenMidiDevices::tap(int x, int y)
         int to = g.cols[col];
         if (from == to) return;
         ui_mididev_toggle_patch(from, to);
+        keep(from, to);
     }
     rebuild();
     m_signature = signature();
@@ -827,7 +1021,7 @@ void ScreenMidiDevices::longPress(int x, int y)
         return;
     }
     if (m_overlay != OVERLAY_NONE) return;
-    const Grid& g = m_grid;
+    const Grid& g = *m_grid;
     int row, col;
     if (!hit(x, y, &row, &col)) return;
 
@@ -851,6 +1045,7 @@ void ScreenMidiDevices::longPress(int x, int y)
 
 void ScreenMidiDevices::onTouch(int touchId, int x, int y, bool pressed)
 {
+    if (!m_grid) return;
     if (pressed) {
         if (m_touchId >= 0) return;   // One finger at a time
         m_touchId = touchId;
@@ -858,21 +1053,38 @@ void ScreenMidiDevices::onTouch(int touchId, int x, int y, bool pressed)
         m_touchY = y;
         m_touchMs = (uint32_t)(esp_timer_get_time() / 1000);
         m_longFired = false;
+        m_dragging = false;
         return;
     }
     if (touchId != m_touchId) return;
     m_touchId = -1;
     m_repeatHit = -1;
+    m_dragging = false;
     if (!m_longFired) tap(m_touchX, m_touchY);
 }
 
 void ScreenMidiDevices::onTouchMove(int touchId, int x, int y)
 {
-    if (touchId != m_touchId || m_longFired) return;
+    if (!m_grid || touchId != m_touchId) return;
     int dx = x - m_touchX;
     int dy = y - m_touchY;
-    if (dx * dx + dy * dy > MOVE_SLOP * MOVE_SLOP) {
+    if (!m_dragging) {
+        if (m_longFired || dx * dx + dy * dy <= MOVE_SLOP * MOVE_SLOP) return;
         m_longFired = true;   // A drag: neither a tap nor a hold
+        // On the grid with nothing over it, a drag scrolls it
+        if (m_overlay != OVERLAY_NONE) return;
+        m_dragging = true;
+        m_dragRowOff = m_grid->rowOff;
+        m_dragColOff = m_grid->colOff;
+    }
+    // Whole cells, the content following the finger
+    Grid& g = *m_grid;
+    int rowOff = clamp_offset(m_dragRowOff - dy / g.cellH, g.rowCount, g.shownRows);
+    int colOff = clamp_offset(m_dragColOff - dx / g.cellW, g.colCount, g.shownCols);
+    if (rowOff != g.rowOff || colOff != g.colOff) {
+        g.rowOff = rowOff;
+        g.colOff = colOff;
+        m_needsRedraw = true;
     }
 }
 
@@ -887,8 +1099,8 @@ bool ScreenMidiDevices::scratch()
 bool ScreenMidiDevices::loadChain()
 {
     if (!scratch()) return false;
-    const ui_mididev_t& a = m_grid.devs[m_overlayFrom];
-    const ui_mididev_t& b = m_grid.devs[m_overlayTo];
+    const ui_mididev_t& a = m_grid->devs[m_overlayFrom];
+    const ui_mididev_t& b = m_grid->devs[m_overlayTo];
     if (a.bit && b.bit) ui_filter_chain_get(a.bit, b.bit, &m_scratch->chain);
     else ui_filter_saved_get(a.key, b.key, &m_scratch->chain);   // An end on standby
     return true;
@@ -898,11 +1110,12 @@ bool ScreenMidiDevices::loadChain()
 // both ends are built-ins
 void ScreenMidiDevices::saveChain()
 {
-    const ui_mididev_t& a = m_grid.devs[m_overlayFrom];
-    const ui_mididev_t& b = m_grid.devs[m_overlayTo];
+    const ui_mididev_t& a = m_grid->devs[m_overlayFrom];
+    const ui_mididev_t& b = m_grid->devs[m_overlayTo];
     const ui_filter_chain_t& c = m_scratch->chain;
     if (c.len > 0 && ui_mididev_patch_selection(m_overlayFrom, m_overlayTo) == 0) {
         ui_mididev_set_patch(m_overlayFrom, m_overlayTo, MIDI_ROUTE_SEL_ALL);
+        keep(m_overlayFrom, m_overlayTo);
     }
     if (a.bit && b.bit) {
         ui_filter_chain_set(a.bit, b.bit, &c, UI_FILTER_SAVE_NOW);
@@ -1269,8 +1482,8 @@ void ScreenMidiDevices::applyParamHit(int code)
     if (!loadChain() || m_paramStage < 0 || m_paramStage >= m_scratch->chain.len) return;
     ui_filter_stage_t& st = m_scratch->chain.stages[m_paramStage];
     const ui_filter_def_t& d = m_scratch->def;
-    const ui_mididev_t& a = m_grid.devs[m_overlayFrom];
-    const ui_mididev_t& b = m_grid.devs[m_overlayTo];
+    const ui_mididev_t& a = m_grid->devs[m_overlayFrom];
+    const ui_mididev_t& b = m_grid->devs[m_overlayTo];
 
     switch (code) {
     case PARAM_PREV:
@@ -1348,9 +1561,9 @@ void ScreenMidiDevices::getTileStatus(char* buf, int len)
 {
     int routes = 0;
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
-        uint8_t dst;
+        midi_tmask_t dst;
         if (MIDI_route_get(i, nullptr, &dst, nullptr)) {
-            for (; dst; dst &= (uint8_t)(dst - 1)) routes++;
+            for (; dst; dst &= (midi_tmask_t)(dst - 1)) routes++;
         }
     }
     if (routes > 0) snprintf(buf, len, "%d patch%s", routes, routes == 1 ? "" : "es");

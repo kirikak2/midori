@@ -741,20 +741,20 @@ void ui_seq_set_status(const char *message)
 // list stays empty, so UI::MIDIDevices has no devices, no selection and
 // nothing saved; MIDI.route itself works as everywhere.
 
-int ui_mididev_register(const char *key, const char *name, uint8_t bit,
+int ui_mididev_register(const char *key, const char *name, midi_tmask_t bit,
                         uint16_t color, bool builtin)
 {
     (void)key; (void)name; (void)bit; (void)color; (void)builtin;
     return -1;
 }
 
-bool ui_mididev_unregister(uint8_t bit)
+bool ui_mididev_unregister(midi_tmask_t bit)
 {
     (void)bit;
     return false;
 }
 
-bool ui_mididev_activate(const char *key, uint8_t bit)
+bool ui_mididev_activate(const char *key, midi_tmask_t bit)
 {
     (void)key; (void)bit;
     return false;
@@ -798,7 +798,7 @@ bool ui_mididev_take_wanted(char *key, int len)
     return false;
 }
 
-uint8_t ui_mididev_connected_mask(void)
+midi_tmask_t ui_mididev_connected_mask(void)
 {
     return 0;
 }
@@ -838,7 +838,7 @@ int ui_filter_live_count(void)
     return 0;
 }
 
-bool ui_filter_live_get(int index, uint8_t *src, uint8_t *dst, uint32_t *rev,
+bool ui_filter_live_get(int index, midi_tmask_t *src, midi_tmask_t *dst, uint32_t *rev,
                         ui_filter_chain_t *out)
 {
     (void)index; (void)src; (void)dst; (void)rev; (void)out;
@@ -859,7 +859,7 @@ bool ui_filter_chain_parse(const char *text, ui_filter_chain_t *out)
     return true;
 }
 
-uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t *chain,
+uint32_t ui_filter_chain_set(midi_tmask_t src, midi_tmask_t dst, const ui_filter_chain_t *chain,
                              ui_filter_save_t save)
 {
     (void)src; (void)dst; (void)chain; (void)save;
@@ -869,7 +869,7 @@ uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t *
 // Tempo stubs (docs/TEMPO.md) - no UI, so no tempo device: UI::Tempo has no
 // transport bit and MIDI.route refuses it like any unregistered transport.
 
-uint8_t ui_tempo_bit(void)
+midi_tmask_t ui_tempo_bit(void)
 {
     return 0;
 }

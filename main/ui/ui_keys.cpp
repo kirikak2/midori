@@ -33,7 +33,7 @@ struct KeysModel {
     volatile bool    slide;          // A dragged finger moves on to the next key
     volatile bool    labels;         // Note names on the C keys
     volatile bool    notify;         // Queue key events for Ruby (a block is attached)
-    volatile uint8_t outMask;        // Destinations of its own, besides the routes
+    volatile midi_tmask_t outMask;   // Destinations of its own, besides the routes
     volatile uint16_t white, black, press, light;
 
     uint16_t keyColor[128];
@@ -46,8 +46,8 @@ struct KeysModel {
 
     // --- Fingers (UI task) ---
     uint8_t holdCount[128];          // Fingers on each note
-    uint8_t heldMask[128];           // Where its note on went (device:), for the note off
-    uint8_t heldRoute[128];          // ... and which MIDI.route destinations
+    midi_tmask_t heldMask[128];      // Where its note on went (device:), for the note off
+    midi_tmask_t heldRoute[128];     // ... and which MIDI.route destinations
     uint8_t heldChannel[128];
     int16_t touchNote[MAX_TOUCH_POINTS];   // -1: over no key
     bool    touchActive[MAX_TOUCH_POINTS];
@@ -58,7 +58,7 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static volatile uint32_t s_dirty[4];
 static volatile bool s_dirtyAll = true;
 static volatile uint32_t s_gen = 1;
-static uint8_t s_bit = 0;            // Transport registry bit, 0 if none
+static midi_tmask_t s_bit = 0;       // Transport registry bit, 0 if none
 
 // --- Transport ---------------------------------------------------------------
 
@@ -212,9 +212,9 @@ static void key_on(KeysModel* m, int note, int velocity)
     uint8_t vel = velocity < 1 ? 1 : clamp7(velocity);
     // Route destinations go through MIDI_route_dispatch so their filters
     // (MIDI.filter) and listeners (MIDI.on) see the key; device: is direct.
-    uint8_t route = 0;
-    if (s_bit) route = MIDI_route_targets(s_bit, 0x9, status) & (uint8_t)~s_bit;  // Never back into itself
-    uint8_t mask = m->outMask & (uint8_t)~route & (uint8_t)~s_bit;
+    midi_tmask_t route = 0;
+    if (s_bit) route = MIDI_route_targets(s_bit, 0x9, status) & (midi_tmask_t)~s_bit;  // Never back into itself
+    midi_tmask_t mask = m->outMask & (midi_tmask_t)~route & (midi_tmask_t)~s_bit;
     m->heldMask[note] = mask;
     m->heldRoute[note] = route;
     m->heldChannel[note] = ch;
@@ -231,7 +231,7 @@ static void key_off(KeysModel* m, int note)
     if (--m->holdCount[note] > 0) return;
 
     uint8_t ch = m->heldChannel[note];
-    uint8_t mask = m->heldMask[note];
+    midi_tmask_t mask = m->heldMask[note];
     if (mask) MIDI_transport_send(mask, 0, 0x8, 0x80 | ch, (uint8_t)note, 0);
     if (s_bit) MIDI_route_dispatch(s_bit, m->heldRoute[note], 0x8, 0x80 | ch, (uint8_t)note, 0);
 
@@ -387,7 +387,7 @@ bool ui_keys_set_i(const char* name, int value)
     } else if (name_is(name, "notify")) {
         m->notify = value != 0;
     } else if (name_is(name, "out_mask")) {
-        m->outMask = (uint8_t)(value & 0xFF) & (uint8_t)~s_bit;
+        m->outMask = (midi_tmask_t)value & (midi_tmask_t)~s_bit;
     } else if (name_is(name, "white_color")) {
         m->white = (uint16_t)value;
         mark_all_dirty();

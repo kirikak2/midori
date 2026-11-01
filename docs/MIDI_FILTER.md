@@ -125,7 +125,8 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... } # input: / sync: の代わり（MI
 ```
 
 - `MIDI.filter(kb) { ... }`（宛先なし）と同じ。宛先は、ルート表の中だけで使う特別なビット
-  `MIDI_ROUTE_DST_RUBY`（0x100）で表し、トランスポート登録表の 8 枠を使わない
+  `MIDI_ROUTE_DST_RUBY`（登録表のすぐ上のビット = 0x10000。2026-11-01 まで 0x100）で表し、
+  トランスポート登録表の 16 枠を使わない
 - 従来の `MIDI::Input` は受信キューを 2 本しか持たなかった（USB Host / UART）。filter は
   `MIDI_route_packet()` から分岐するので、**USB Device（PC）と `UI::Keys` からも受け取れる**
 - 外部クロックの BPM は送信元のパーサが測る（USB Host / UART は従来のもの、USB Device には
@@ -175,29 +176,35 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... } # input: / sync: の代わり（MI
 
 ```c
 /* midi_route.h（OS 非依存） */
-#define MIDI_ROUTE_DST_RUBY  0x100
+/* midi_transport.h: トランスポートの集合（1 ビット = 1 トランスポート、16 個） */
+typedef uint16_t midi_tmask_t;
+#define MIDI_TMASK_ALL       0xFFFF
+
+/* midi_route.h（OS 非依存） */
+#define MIDI_ROUTE_DST_RUBY  (1u << MIDI_TRANSPORT_REGISTRY_SIZE)   /* 0x10000 */
+#define MIDI_ROUTE_DST_ALL   (MIDI_TMASK_ALL | MIDI_ROUTE_DST_RUBY)
 #define MIDI_FILTER_MAX      16
 #define MIDI_FILTER_OVERFLOW_BYPASS 0
 #define MIDI_FILTER_OVERFLOW_DROP   1
-typedef struct { uint16_t dst; uint8_t src, cin, b1, b2, b3; } midi_filter_event_t;
+typedef struct { uint32_t dst; midi_tmask_t src; uint8_t cin, b1, b2, b3; } midi_filter_event_t;
 void     MIDI_route_set_filter_sink(midi_filter_sink_t sink);
-int      MIDI_route_set_filter(uint8_t src_bit, uint16_t dst_mask, uint16_t types, int channel, uint8_t overflow);
-int      MIDI_route_clear_filter(uint8_t src_bit, uint16_t dst_mask);   /* 0xFFFF で全部 */
-uint16_t MIDI_route_filtered(uint8_t src_bit);                          /* 画面の f 表示 */
+int      MIDI_route_set_filter(midi_tmask_t src_bit, uint32_t dst_mask, uint16_t types, int channel, uint8_t overflow);
+int      MIDI_route_clear_filter(midi_tmask_t src_bit, uint32_t dst_mask);   /* MIDI_ROUTE_DST_ALL で全部 */
+uint32_t MIDI_route_filtered(midi_tmask_t src_bit);                          /* 画面の f 表示 */
 uint32_t MIDI_route_filter_overflows(void);
-void     MIDI_route_dispatch(uint8_t src_bit, uint8_t dst_mask, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
-bool     MIDI_route_get(int i, uint8_t *src_bit, uint8_t *dst_mask, int *channel);
-void     MIDI_route_set_watch(int owner, uint8_t src_mask);   /* MIDI_WATCH_APP / MIDI_WATCH_SCRIPT */
-uint8_t  MIDI_route_watched(void);
+void     MIDI_route_dispatch(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
+bool     MIDI_route_get(int i, midi_tmask_t *src_bit, midi_tmask_t *dst_mask, int *channel);
+void     MIDI_route_set_watch(int owner, midi_tmask_t src_mask);   /* MIDI_WATCH_APP / MIDI_WATCH_SCRIPT */
+midi_tmask_t MIDI_route_watched(void);
 
 /* midi.h（port） */
 int  MIDI_Filter_init(void);
-bool MIDI_Filter_pop(uint16_t *dst, uint8_t *src, uint8_t *cin, uint8_t *b1, uint8_t *b2, uint8_t *b3);
+bool MIDI_Filter_pop(uint32_t *dst, midi_tmask_t *src, uint8_t *cin, uint8_t *b1, uint8_t *b2, uint8_t *b3);
 bool MIDI_Filter_wait(uint32_t timeout_ms);
 void MIDI_Filter_flush(void);
-float MIDI_Input_get_external_bpm_from(uint8_t src_bit);
-void  MIDI_Input_reset_external_clock_from(uint8_t src_bit);
-int   MIDI_route_start_source(uint8_t src_bit);
+float MIDI_Input_get_external_bpm_from(midi_tmask_t src_bit);
+void  MIDI_Input_reset_external_clock_from(midi_tmask_t src_bit);
+int   MIDI_route_start_source(midi_tmask_t src_bit);
 ```
 
 ## Ruby をいつ実行するか（遅延）

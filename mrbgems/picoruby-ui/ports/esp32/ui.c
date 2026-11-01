@@ -861,17 +861,17 @@ void picoruby_ui_tempo_set_sync(bool on)
 int picoruby_ui_mididev_register(const char *key, const char *name, int bit,
                                  int color, bool builtin)
 {
-    return ui_mididev_register(key, name, (uint8_t)bit, (uint16_t)color, builtin);
+    return ui_mididev_register(key, name, (midi_tmask_t)bit, (uint16_t)color, builtin);
 }
 
 bool picoruby_ui_mididev_unregister(int bit)
 {
-    return ui_mididev_unregister((uint8_t)bit);
+    return ui_mididev_unregister((midi_tmask_t)bit);
 }
 
 bool picoruby_ui_mididev_activate(const char *key, int bit)
 {
-    return ui_mididev_activate(key, (uint8_t)bit);
+    return ui_mididev_activate(key, (midi_tmask_t)bit);
 }
 
 int picoruby_ui_mididev_count(void)
@@ -950,7 +950,7 @@ int picoruby_ui_filter_live_count(void)
 
 bool picoruby_ui_filter_live_get(int index, int *src, int *dst, int *rev, char *text, int len)
 {
-    uint8_t s, d;
+    midi_tmask_t s, d;
     uint32_t r;
     ui_filter_chain_t chain;
     if (!ui_filter_live_get(index, &s, &d, &r, &chain)) return false;
@@ -965,6 +965,6 @@ int picoruby_ui_filter_chain_set(int src, int dst, const char *text, int save)
 {
     ui_filter_chain_t chain;
     ui_filter_chain_parse(text, &chain);
-    return (int)ui_filter_chain_set((uint8_t)src, (uint8_t)dst, &chain,
+    return (int)ui_filter_chain_set((midi_tmask_t)src, (midi_tmask_t)dst, &chain,
                                     save ? UI_FILTER_SAVE_LATER : UI_FILTER_SAVE_NONE);
 }

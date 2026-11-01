@@ -16,7 +16,7 @@
 $ui_filters_installed = false
 $ui_filters_serial = -1
 $ui_filters_applying = false
-$ui_filter_revs = {}      # src * 0x1000 + dst => revision mirrored / applied
+$ui_filter_revs = {}      # MIDI._pair_key(src, dst) => revision mirrored / applied
 $ui_filter_panels = {}    # MIDI::Filter (object_id) => UI::Layout
 $ui_layout_filter = nil   # The filter whose panel is being defined
 
@@ -71,14 +71,14 @@ module UI
         seen = {}
         UI._filter_chains.each do |e|
           src, dst, rev, text = e
-          key = src * 0x1000 + dst
+          key = MIDI._pair_key(src, dst)
           seen[key] = true
           next if $ui_filter_revs[key] == rev
           _apply(src, dst, parse(text))
         end
         # Chains the screen took off (with their patch, or from the Filters tab)
         MIDI.chains.values.each do |c|
-          key = c.src * 0x1000 + c.dst
+          key = MIDI._pair_key(c.src, c.dst)
           next if seen[key] || !$ui_filter_revs.key?(key)
           _apply(c.src, c.dst, [])
         end
@@ -190,7 +190,7 @@ module UI
       # Tell the model about a chain of Ruby's (a script's, or a value a panel
       # turned when panel is true)
       def _mirror(chain, panel)
-        key = chain.src * 0x1000 + chain.dst
+        key = MIDI._pair_key(chain.src, chain.dst)
         live = MIDI.chains[[chain.src, chain.dst]]
         text = live ? format(live) : ""
         rev = UI._filter_chain_set(chain.src, chain.dst, text, panel)
@@ -201,7 +201,7 @@ module UI
 
       # Apply a chain the screen set (specs empty: take it off)
       def _apply(src, dst, specs)
-        key = src * 0x1000 + dst
+        key = MIDI._pair_key(src, dst)
         $ui_filters_applying = true
         begin
           MIDI.chain(src, dst, *(specs.empty? ? [[]] : specs))

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include "sdkconfig.h"
+#include "midi_transport.h"   // midi_tmask_t (picoruby-midi)
 
 #ifdef __cplusplus
 extern "C" {
@@ -452,8 +453,8 @@ typedef struct {
         } key;
         struct {
             uint8_t kind;    // For UI_EVENT_MIDI_DEVICES: ui_mididev_event_t
-            uint8_t from;    // Transport bit (the device for select / connect)
-            uint8_t to;      // Transport bit (patches)
+            midi_tmask_t from;   // Transport bit (the device for select / connect)
+            midi_tmask_t to;     // Transport bit (patches)
             int8_t  channel; // Patches: 0..15, -1 all, -2 clock, -3 several (see sel)
             uint32_t sel;    // Patches: MIDI_ROUTE_SEL_* (0 for the other kinds)
         } mididev;
@@ -878,7 +879,7 @@ void ui_layout_cleanup(void);
 // each a picoruby-midi transport bit. Patches are MIDI.route's route table;
 // this keeps the device list, the program's IN / OUT selection and the saved
 // patches (NVS). Implemented in ui_midi_devices.cpp.
-#define UI_MIDIDEV_MAX       8
+#define UI_MIDIDEV_MAX      16   // = MIDI_TRANSPORT_REGISTRY_SIZE
 #define UI_MIDIDEV_KEY_LEN  12
 #define UI_MIDIDEV_NAME_LEN 16
 
@@ -898,7 +899,7 @@ typedef enum {
 } ui_mididev_event_t;
 
 typedef struct {
-    uint8_t  bit;                       // Transport bit, 0 while standby
+    midi_tmask_t bit;                   // Transport bit, 0 while standby
     uint8_t  flags;                     // UI_MIDIDEV_*
     uint16_t color;                     // RGB565
     char     key[UI_MIDIDEV_KEY_LEN];   // Built-ins: what NVS knows it by
@@ -908,19 +909,19 @@ typedef struct {
 // Registering (PicoRuby task). A device is found again by its key (built-ins)
 // or its bit: registering it again renames it. bit 0 registers a built-in
 // standby. Returns the entry's index, or -1 when the list is full.
-int  ui_mididev_register(const char* key, const char* name, uint8_t bit,
+int  ui_mididev_register(const char* key, const char* name, midi_tmask_t bit,
                          uint16_t color, bool builtin);
-bool ui_mididev_unregister(uint8_t bit);
+bool ui_mididev_unregister(midi_tmask_t bit);
 // A standby device started and got its bit
-bool ui_mididev_activate(const char* key, uint8_t bit);
+bool ui_mididev_activate(const char* key, midi_tmask_t bit);
 // Mark a built-in as only sending (UI_MIDIDEV_NO_OUT)
 void ui_mididev_set_no_out(const char* key);
 
 // Reading (any task)
 int  ui_mididev_count(void);
 bool ui_mididev_get(int index, ui_mididev_t* out);
-int  ui_mididev_find_bit(uint8_t bit);           // index, or -1
-uint8_t ui_mididev_connected_mask(void);         // Transports that are up
+int  ui_mididev_find_bit(midi_tmask_t bit);      // index, or -1
+midi_tmask_t ui_mididev_connected_mask(void);    // Transports that are up
 uint32_t ui_mididev_serial(void);                // Bumped on every change
 
 // The program's IN / OUT (Prog column / row). index -1 for none. save: also
@@ -951,9 +952,9 @@ void ui_mididev_tick(void);      // UI task: connection changes -> events
 void ui_mididev_cleanup(void);   // A script ended (any task)
 
 // Saved here by bit too: is it a built-in, and under what key (NVS)
-bool ui_mididev_builtin_key(uint8_t bit, char* key, int len);
+bool ui_mididev_builtin_key(midi_tmask_t bit, char* key, int len);
 // The built-in by key: its bit (0 while standby / unknown)
-uint8_t ui_mididev_bit_of_key(const char* key);
+midi_tmask_t ui_mididev_bit_of_key(const char* key);
 
 // --- Named filters --------------------------------------------------------------
 // MIDI::Filter as the MIDI Devices screen sees it (docs/MIDI_FILTER_REGISTRY.md):
@@ -1031,26 +1032,26 @@ uint32_t ui_filter_serial(void);
 
 // Chains, by patch (transport bits). set replaces the chain (len 0 removes
 // it) and returns its new revision (0: the table is full).
-bool     ui_filter_chain_get(uint8_t src, uint8_t dst, ui_filter_chain_t* out);
-uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t* chain,
+bool     ui_filter_chain_get(midi_tmask_t src, midi_tmask_t dst, ui_filter_chain_t* out);
+uint32_t ui_filter_chain_set(midi_tmask_t src, midi_tmask_t dst, const ui_filter_chain_t* chain,
                              ui_filter_save_t save);
 // Change one value (the screen's parameter page)
-void     ui_filter_set_value(uint8_t src, uint8_t dst, int stage, const char* pname,
+void     ui_filter_set_value(midi_tmask_t src, midi_tmask_t dst, int stage, const char* pname,
                              int16_t value);
 // The patch went away (the screen took it off): its chain goes, and its saved
 // chain when save
-void     ui_filter_drop(uint8_t src, uint8_t dst, bool save);
+void     ui_filter_drop(midi_tmask_t src, midi_tmask_t dst, bool save);
 // Saved chains by built-in keys: for a patch with an end on standby (it is
 // put on the patch when that end starts)
 bool     ui_filter_saved_get(const char* from, const char* to, ui_filter_chain_t* out);
 void     ui_filter_saved_set(const char* from, const char* to, const ui_filter_chain_t* chain);
 void     ui_filter_saved_drop(const char* from, const char* to);
 // How many filters a patch's live / saved chain has (0: none)
-int      ui_filter_chain_len(uint8_t src, uint8_t dst);
+int      ui_filter_chain_len(midi_tmask_t src, midi_tmask_t dst);
 int      ui_filter_saved_len(const char* from, const char* to);
 // Live chains for Ruby to apply: count, then each by index
 int      ui_filter_live_count(void);
-bool     ui_filter_live_get(int index, uint8_t* src, uint8_t* dst, uint32_t* rev,
+bool     ui_filter_live_get(int index, midi_tmask_t* src, midi_tmask_t* dst, uint32_t* rev,
                             ui_filter_chain_t* out);
 // Text form (Ruby, NVS)
 int  ui_filter_chain_format(const ui_filter_chain_t* chain, char* buf, int len);
@@ -1073,7 +1074,7 @@ void ui_filter_cleanup(void);   // A script ended: its filters and chains are go
 void    ui_tempo_init(void);          // UIManager::init: lists the clock as a device
 void    ui_tempo_tick(void);          // UI task, every pass: BPM to / from the clock, Sync
 void    ui_tempo_bpm_changed(float bpm);      // UIManager::setBpm: the clock follows
-uint8_t ui_tempo_bit(void);           // The clock's transport bit, 0 if there is none
+midi_tmask_t ui_tempo_bit(void);      // The clock's transport bit, 0 if there is none
 void    ui_tempo_set_running(bool running);   // Sends Start (FA) / Stop (FC)
 bool    ui_tempo_running(void);
 void    ui_tempo_tap(void);           // One tap of TAP tempo

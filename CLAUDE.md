@@ -905,6 +905,9 @@ Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-
 - 画面で変えたパッチ（両端が内蔵）と選択は即 NVS に保存。スクリプトの `patch` / `midi_in=` は
   スクリプト限り（`UI::MIDIDevices.save` で保存）
 - Ruby のホストテスト: `ruby test/midi_devices_test.rb`（picoruby-ui ディレクトリで）
+- **最大 16 台**（2026-11-01、それまで 8）。収まらない行・列はドラッグでセル単位にスクロール（見出しと Prog 行 / 列は固定）。
+  左上の角のボタンで **All / Patched / Unpatched**（パッチのある / ない IN 行・OUT 列だけ）を切り替える。
+  画面で付け外しした行・列はフィルタを選び直すまで残す。Grid とデバイス表・保存済みパッチ（最大 32 件）はヒープ
 
 ## Home メニューと画面切り替え（2026-10-12）
 
@@ -1137,6 +1140,13 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
 USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコンストラクタで登録）、
 新しいトランスポート gem は `MIDI_transport_register()` で 0x08 以降のビットを得て、
 それを Ruby の `transport_id` として返す。picoruby-midi 側の改修は不要。
+
+- 登録表は **16 ビット**（2026-11-01、それまで 8）。マスクの型は `midi_tmask_t`（`midi_transport.h`、`uint16_t`）で、
+  全部は `MIDI_TMASK_ALL`（midi.h の `MIDI_TRANSPORT_ALL` = 0x03 はレガシーの別物）。**ビットやマスクを `uint8_t` で
+  受けない**（0x100 以降の機器が黙って落ちる）。`MIDI_ROUTE_DST_RUBY` は登録表のすぐ上の 0x10000 なので、
+  filter の宛先は `uint32_t`。ルート表は 32 件
+- Ruby で (送信元, 宛先) をキーにするときは `MIDI._pair_key(src, dst)`（送信元はビット位置で数える。
+  mruby/c の 32 ビット整数でも溢れない）。以前の `src * 0x1000 + dst` は宛先が 0x1000 以上で衝突する
 
 ### MIDI.route（MIDI Thru / 2026-10-04）
 

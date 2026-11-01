@@ -1127,7 +1127,7 @@ void ScreenSequencer::pressButton(int id)
             // other destinations start and stop along with it); with another
             // clock, Start / Stop to the sequencer alone, which then follows
             // that clock's F8s.
-            uint8_t clock = ui_seq::ensure_clock();
+            midi_tmask_t clock = ui_seq::ensure_clock();
             bool fromTempo = clock && clock == ui_tempo_bit();
             if (v.running) {
                 if (fromTempo) ui_tempo_set_running(false);

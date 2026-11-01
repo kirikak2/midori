@@ -139,7 +139,7 @@ picoruby_esp32_midi_cleanup(void)
   // never been part of the cleanup (the host PC on the other end is not
   // ours to silence). That is the USB host and UART built-ins plus any
   // transport gem that registered itself (e.g. the AMY synth).
-  const uint8_t mask = (uint8_t)~MIDI_TRANSPORT_USB_DEVICE;
+  const midi_tmask_t mask = (midi_tmask_t)~MIDI_TRANSPORT_USB_DEVICE;
 
   // Send cleanup messages to all MIDI channels (0-15)
   for (uint8_t ch = 0; ch < 16; ch++) {

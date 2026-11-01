@@ -37,7 +37,7 @@ static constexpr uint32_t SAVE_DELAY_MS = 3000;    // After a panel's last chang
 namespace {
 
 struct Live {
-    uint8_t src, dst;     // 0: unused
+    midi_tmask_t src, dst;   // 0: unused
     uint32_t rev;
     ui_filter_chain_t chain;
 };
@@ -283,7 +283,7 @@ static int find_def_locked(const char* name)
     return -1;
 }
 
-static int find_live_locked(uint8_t src, uint8_t dst)
+static int find_live_locked(midi_tmask_t src, midi_tmask_t dst)
 {
     for (int i = 0; i < UI_FILTER_CHAINS; i++) {
         if (s_t->live[i].src == src && s_t->live[i].dst == dst) return i;
@@ -317,16 +317,16 @@ static int free_saved_locked()
 }
 
 // Both ends' keys when both are built-ins
-static bool builtin_pair(uint8_t src, uint8_t dst, char* from, char* to)
+static bool builtin_pair(midi_tmask_t src, midi_tmask_t dst, char* from, char* to)
 {
     return ui_mididev_builtin_key(src, from, UI_MIDIDEV_KEY_LEN) &&
            ui_mididev_builtin_key(dst, to, UI_MIDIDEV_KEY_LEN);
 }
 
-static bool route_exists(uint8_t src, uint8_t dst)
+static bool route_exists(midi_tmask_t src, midi_tmask_t dst)
 {
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
-        uint8_t s, d;
+        midi_tmask_t s, d;
         if (MIDI_route_get(i, &s, &d, nullptr) && s == src && (d & dst)) return true;
     }
     return false;
@@ -455,7 +455,7 @@ uint32_t ui_filter_serial(void)
 
 // --- Chains -------------------------------------------------------------------------
 
-bool ui_filter_chain_get(uint8_t src, uint8_t dst, ui_filter_chain_t* out)
+bool ui_filter_chain_get(midi_tmask_t src, midi_tmask_t dst, ui_filter_chain_t* out)
 {
     if (out) memset(out, 0, sizeof(*out));
     if (!s_t) return false;
@@ -471,7 +471,7 @@ bool ui_filter_chain_get(uint8_t src, uint8_t dst, ui_filter_chain_t* out)
 }
 
 // Put chain on the live table (len 0: off). Lock held. Returns the revision.
-static uint32_t set_live_locked(uint8_t src, uint8_t dst, const ui_filter_chain_t& chain)
+static uint32_t set_live_locked(midi_tmask_t src, midi_tmask_t dst, const ui_filter_chain_t& chain)
 {
     int i = find_live_locked(src, dst);
     if (chain.len == 0) {
@@ -488,7 +488,7 @@ static uint32_t set_live_locked(uint8_t src, uint8_t dst, const ui_filter_chain_
     return l.rev;
 }
 
-uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t* chain,
+uint32_t ui_filter_chain_set(midi_tmask_t src, midi_tmask_t dst, const ui_filter_chain_t* chain,
                              ui_filter_save_t save)
 {
     if (!src || !dst || !chain || !tables()) return 0;
@@ -526,7 +526,7 @@ uint32_t ui_filter_chain_set(uint8_t src, uint8_t dst, const ui_filter_chain_t* 
 }
 
 // (The UI task calls these two: its stack is small, so they work in place.)
-void ui_filter_set_value(uint8_t src, uint8_t dst, int stage, const char* pname, int16_t value)
+void ui_filter_set_value(midi_tmask_t src, midi_tmask_t dst, int stage, const char* pname, int16_t value)
 {
     if (!s_t || !pname) return;
     char from[UI_MIDIDEV_KEY_LEN], to[UI_MIDIDEV_KEY_LEN];
@@ -559,7 +559,7 @@ void ui_filter_set_value(uint8_t src, uint8_t dst, int stage, const char* pname,
     if (changed) bump();
 }
 
-void ui_filter_drop(uint8_t src, uint8_t dst, bool save)
+void ui_filter_drop(midi_tmask_t src, midi_tmask_t dst, bool save)
 {
     if (!s_t) return;
     char from[UI_MIDIDEV_KEY_LEN], to[UI_MIDIDEV_KEY_LEN];
@@ -634,7 +634,7 @@ void ui_filter_saved_set(const char* from, const char* to, const ui_filter_chain
     bump();
 }
 
-int ui_filter_chain_len(uint8_t src, uint8_t dst)
+int ui_filter_chain_len(midi_tmask_t src, midi_tmask_t dst)
 {
     if (!s_t) return 0;
     portENTER_CRITICAL(&s_mux);
@@ -659,7 +659,7 @@ int ui_filter_live_count(void)
     return s_t ? UI_FILTER_CHAINS : 0;
 }
 
-bool ui_filter_live_get(int index, uint8_t* src, uint8_t* dst, uint32_t* rev,
+bool ui_filter_live_get(int index, midi_tmask_t* src, midi_tmask_t* dst, uint32_t* rev,
                         ui_filter_chain_t* out)
 {
     if (!s_t || index < 0 || index >= UI_FILTER_CHAINS) return false;
@@ -689,8 +689,8 @@ void ui_filter_restore(const char* only_key)
         portEXIT_CRITICAL(&s_mux);
         if (!sv.from[0]) continue;
         if (only_key && strcmp(sv.from, only_key) != 0 && strcmp(sv.to, only_key) != 0) continue;
-        uint8_t src = ui_mididev_bit_of_key(sv.from);
-        uint8_t dst = ui_mididev_bit_of_key(sv.to);
+        midi_tmask_t src = ui_mididev_bit_of_key(sv.from);
+        midi_tmask_t dst = ui_mididev_bit_of_key(sv.to);
         // An end still on standby (or not on this board): later, or never
         if (!src || !dst || !route_exists(src, dst)) continue;
         ui_filter_chain_set(src, dst, &sv.chain, UI_FILTER_SAVE_NONE);
@@ -713,7 +713,7 @@ void ui_filter_save_live(void)
         if (!ui_mididev_bit_of_key(sv.from) || !ui_mididev_bit_of_key(sv.to)) next[n++] = sv;
     }
     for (int i = 0; i < UI_FILTER_CHAINS && n < UI_FILTER_CHAINS; i++) {
-        uint8_t src, dst;
+        midi_tmask_t src, dst;
         ui_filter_chain_t chain;
         if (!ui_filter_live_get(i, &src, &dst, nullptr, &chain)) continue;
         Saved& sv = next[n];

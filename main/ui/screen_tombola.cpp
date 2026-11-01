@@ -569,7 +569,7 @@ extern "C" void ui_tombola_tick(void)
 
     for (int i = 0; i < hitCount; i++) {
         if (sound) {
-            MIDI_Note_trigger((uint8_t)transport, hits[i].channel,
+            MIDI_Note_trigger((midi_tmask_t)transport, hits[i].channel,
                               hits[i].note, hits[i].velocity, (uint32_t)duration);
         }
         if (notify) {

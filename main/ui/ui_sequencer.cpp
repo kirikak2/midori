@@ -55,8 +55,8 @@ static seq_engine_t* s_eng;
 static SemaphoreHandle_t s_lock;
 static QueueHandle_t s_queue;
 static esp_timer_handle_t s_timer;
-static uint8_t s_bit;                  // Transport registry bit, 0 if none
-static volatile uint8_t s_outMask;     // Destinations of its own, besides the routes
+static midi_tmask_t s_bit;             // Transport registry bit, 0 if none
+static volatile midi_tmask_t s_outMask;   // Destinations of its own, besides the routes
 static volatile uint32_t s_dropped;    // Packets the queue had no room for
 // UI_EVENT_SEQUENCER for Ruby (UI::Sequencer#on_*): off until a script asks
 static volatile bool s_patternEvents;
@@ -106,27 +106,27 @@ struct Lock {
 // --- Output ------------------------------------------------------------------
 
 // The token remembers where the note on went, for its note off: out_mask in
-// the low byte, the routes' destinations in the next.
+// the low 16 bits, the routes' destinations in the high 16.
 static uint32_t out_note_on(void* ctx, uint8_t channel, uint8_t note, uint8_t velocity)
 {
     (void)ctx;
     uint8_t status = 0x90 | (channel & 0x0F);
     // Route destinations go through MIDI_route_dispatch so their filters
     // (MIDI.filter) and listeners (MIDI.on) see the note; out_mask is direct.
-    uint8_t route = 0;
-    if (s_bit) route = MIDI_route_targets(s_bit, 0x9, status) & (uint8_t)~s_bit;   // Never back into itself
-    uint8_t mask = s_outMask & (uint8_t)~route & (uint8_t)~s_bit;
+    midi_tmask_t route = 0;
+    if (s_bit) route = MIDI_route_targets(s_bit, 0x9, status) & (midi_tmask_t)~s_bit;   // Never back into itself
+    midi_tmask_t mask = s_outMask & (midi_tmask_t)~route & (midi_tmask_t)~s_bit;
     if (mask) MIDI_transport_send(mask, 0, 0x9, status, note, velocity);
     if (s_bit) MIDI_route_dispatch(s_bit, route, 0x9, status, note, velocity);
-    return (uint32_t)mask | ((uint32_t)route << 8);
+    return (uint32_t)mask | ((uint32_t)route << 16);
 }
 
 static void out_note_off(void* ctx, uint32_t token, uint8_t channel, uint8_t note)
 {
     (void)ctx;
     uint8_t status = 0x80 | (channel & 0x0F);
-    uint8_t mask = token & 0xFF;
-    uint8_t route = (token >> 8) & 0xFF;
+    midi_tmask_t mask = token & 0xFFFF;
+    midi_tmask_t route = (token >> 16) & 0xFFFF;
     if (mask) MIDI_transport_send(mask, 0, 0x8, status, note, 0);
     if (s_bit) MIDI_route_dispatch(s_bit, route, 0x8, status, note, 0);
 }
@@ -136,9 +136,9 @@ static void out_message(void* ctx, uint8_t status, uint8_t d1, uint8_t d2)
 {
     (void)ctx;
     uint8_t cin = status >> 4;
-    uint8_t route = 0;
-    if (s_bit) route = MIDI_route_targets(s_bit, cin, status) & (uint8_t)~s_bit;
-    uint8_t mask = s_outMask & (uint8_t)~route & (uint8_t)~s_bit;
+    midi_tmask_t route = 0;
+    if (s_bit) route = MIDI_route_targets(s_bit, cin, status) & (midi_tmask_t)~s_bit;
+    midi_tmask_t mask = s_outMask & (midi_tmask_t)~route & (midi_tmask_t)~s_bit;
     if (mask) MIDI_transport_send(mask, 0, cin, status, d1, d2);
     if (s_bit) MIDI_route_dispatch(s_bit, route, cin, status, d1, d2);
 }
@@ -351,7 +351,7 @@ void ui_seq_init(void)
         // A device on the MIDI Devices screen (both IN and OUT)
         ui_mididev_register("seq", "Sequencer", s_bit, UI_COLOR_GREEN, true);
     }
-    ESP_LOGI(TAG, "sequencer ready (bit 0x%02x, %u bytes)", s_bit, (unsigned)sizeof(seq_engine_t));
+    ESP_LOGI(TAG, "sequencer ready (bit 0x%04x, %u bytes)", s_bit, (unsigned)sizeof(seq_engine_t));
 }
 
 void ui_seq_cleanup(void)
@@ -392,7 +392,7 @@ bool ui_seq_set_i(int pattern, int line, const char* name, int value)
 
     // Song
     if (name_is(name, "out_mask")) {
-        s_outMask = (uint8_t)(value & 0xFF) & (uint8_t)~s_bit;
+        s_outMask = (midi_tmask_t)value & (midi_tmask_t)~s_bit;
         return true;
     }
     if (name_is(name, "play_pattern")) return seq_select_pattern(e, value);
@@ -1060,23 +1060,23 @@ void preview_chord(int line)
     Lock lock;
     if (line < 0 || line >= s_eng->line_count) return;
     uint8_t ch = s_eng->lines[line].channel;
-    uint8_t mask = s_outMask;
-    if (s_bit) mask |= MIDI_route_targets(s_bit, 0x9, (uint8_t)(0x90 | ch)) & (uint8_t)~s_bit;
+    midi_tmask_t mask = s_outMask;
+    if (s_bit) mask |= MIDI_route_targets(s_bit, 0x9, (uint8_t)(0x90 | ch)) & (midi_tmask_t)~s_bit;
     if (!mask) return;
     for (int i = 0; i < s_eng->chord_n; i++) {
         MIDI_Note_trigger(mask, ch, s_eng->chord[i], s_eng->chord_vel[i], PREVIEW_MS);
     }
 }
 
-uint8_t ensure_clock()
+midi_tmask_t ensure_clock()
 {
     if (!s_bit) return 0;
-    uint8_t sources = MIDI_route_sources();
-    for (int b = 0; b < 8; b++) {
-        uint8_t src = (uint8_t)(1u << b);
+    midi_tmask_t sources = MIDI_route_sources();
+    for (int b = 0; b < MIDI_TRANSPORT_REGISTRY_SIZE; b++) {
+        midi_tmask_t src = (midi_tmask_t)(1u << b);
         if ((sources & src) && (MIDI_route_targets(src, 0xF, 0xF8) & s_bit)) return src;
     }
-    uint8_t tempo = ui_tempo_bit();
+    midi_tmask_t tempo = ui_tempo_bit();
     if (!tempo || MIDI_route_add(tempo, s_bit, MIDI_ROUTE_CLOCK_ONLY) != 0) return 0;
     ESP_LOGI(TAG, "clock routed from the Tempo");
     return tempo;

@@ -66,7 +66,7 @@ void ui_tempo_bpm_changed(float bpm)
     if (s_ready) MIDI_Clock_set_bpm(bpm);
 }
 
-uint8_t ui_tempo_bit(void)
+midi_tmask_t ui_tempo_bit(void)
 {
     return s_ready ? MIDI_Clock_bit() : 0;
 }

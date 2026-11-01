@@ -10,7 +10,9 @@
 //
 // Written by the PicoRuby task (register / select / restore) and the UI task
 // (taps on the screen, connection polling); the table is small and guarded
-// by one spinlock, NVS is written outside it.
+// by one spinlock, NVS is written outside it. The device and saved-patch
+// tables are on the heap (docs/MEMORY_ALLOCATION.md), made by the first
+// load_saved(); until then every count is 0.
 
 #include "ui_common.h"
 #include "midi.h"
@@ -29,7 +31,7 @@ static const char* TAG = "MIDI_DEVS";
 extern "C" void initialize_nvs(void);   // midori-runtime (picoruby-esp32.c)
 
 static constexpr const char* NVS_NAMESPACE = "midi_devs";
-static constexpr int SAVED_MAX = 16;
+static constexpr int SAVED_MAX = 32;
 // One saved patch as text: "from>to:0+9+clock" at its longest
 static constexpr int ITEM_LEN = 2 * UI_MIDIDEV_KEY_LEN + 48;
 static constexpr int PATCHES_LEN = SAVED_MAX * ITEM_LEN;
@@ -66,21 +68,21 @@ struct SavedPatch {
 // anything else by bit
 struct Selection {
     char key[UI_MIDIDEV_KEY_LEN];
-    uint8_t bit;
+    midi_tmask_t bit;
 };
 
 }  // namespace
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-static Device s_devs[UI_MIDIDEV_MAX];
+static Device* s_devs;               // [UI_MIDIDEV_MAX]
 static int s_count;
 static Selection s_sel[2];          // [0] IN, [1] OUT
 static Selection s_savedSel[2];
-static SavedPatch s_saved[SAVED_MAX];
+static SavedPatch* s_saved;          // [SAVED_MAX]
 static int s_savedCount;
 static bool s_loaded;
 static volatile uint32_t s_serial;
-static uint8_t s_connected;
+static midi_tmask_t s_connected;
 static uint32_t s_lastTickMs;
 
 static void copy_str(char* dst, const char* src, size_t len)
@@ -95,7 +97,7 @@ static void bump()
     s_serial = s_serial + 1;
 }
 
-static void post(ui_mididev_event_t kind, uint8_t from, uint8_t to, uint32_t sel)
+static void post(ui_mididev_event_t kind, midi_tmask_t from, midi_tmask_t to, uint32_t sel)
 {
     ui_event_t ev;
     ev.type = UI_EVENT_MIDI_DEVICES;
@@ -107,7 +109,7 @@ static void post(ui_mididev_event_t kind, uint8_t from, uint8_t to, uint32_t sel
     ui_event_push(&ev);
 }
 
-static bool transport_up(uint8_t bit)
+static bool transport_up(midi_tmask_t bit)
 {
     const midi_transport_t* t = MIDI_transport_get(bit);
     return t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx);
@@ -124,7 +126,7 @@ static int find_key_locked(const char* key)
     return -1;
 }
 
-static int find_bit_locked(uint8_t bit)
+static int find_bit_locked(midi_tmask_t bit)
 {
     if (bit == 0) return -1;
     for (int i = 0; i < s_count; i++) {
@@ -246,9 +248,25 @@ static void apply_defaults(uint8_t applied)
     ESP_LOGI(TAG, "default patches added (version %u)", DEFAULTS_VERSION);
 }
 
+static bool alloc_tables()
+{
+    if (s_devs && s_saved) return true;
+    Device* devs = (Device*)calloc(UI_MIDIDEV_MAX, sizeof(Device));
+    SavedPatch* saved = (SavedPatch*)calloc(SAVED_MAX, sizeof(SavedPatch));
+    if (!devs || !saved) {
+        free(devs);
+        free(saved);
+        ESP_LOGE(TAG, "no memory for the device list");
+        return false;
+    }
+    s_devs = devs;
+    s_saved = saved;
+    return true;
+}
+
 static void load_saved()
 {
-    if (s_loaded) return;
+    if (s_loaded || !alloc_tables()) return;
     s_loaded = true;
     initialize_nvs();
     uint8_t defaults = 0;
@@ -338,10 +356,11 @@ static void saved_remove_locked(int i)
 
 // --- Registering -----------------------------------------------------------------
 
-int ui_mididev_register(const char* key, const char* name, uint8_t bit,
+int ui_mididev_register(const char* key, const char* name, midi_tmask_t bit,
                         uint16_t color, bool builtin)
 {
     load_saved();
+    if (!s_devs) return -1;
     int index;
     portENTER_CRITICAL(&s_mux);
     index = builtin ? find_key_locked(key) : -1;
@@ -374,7 +393,7 @@ int ui_mididev_register(const char* key, const char* name, uint8_t bit,
     return index;
 }
 
-bool ui_mididev_unregister(uint8_t bit)
+bool ui_mididev_unregister(midi_tmask_t bit)
 {
     bool found = false;
     portENTER_CRITICAL(&s_mux);
@@ -391,7 +410,7 @@ bool ui_mididev_unregister(uint8_t bit)
 
 static void route_saved(const char* only_key);
 
-bool ui_mididev_activate(const char* key, uint8_t bit)
+bool ui_mididev_activate(const char* key, midi_tmask_t bit)
 {
     if (bit == 0) return false;
     bool found = false, was_standby = false;
@@ -443,7 +462,7 @@ bool ui_mididev_get(int index, ui_mididev_t* out)
     return ok;
 }
 
-bool ui_mididev_builtin_key(uint8_t bit, char* key, int len)
+bool ui_mididev_builtin_key(midi_tmask_t bit, char* key, int len)
 {
     bool ok = false;
     portENTER_CRITICAL(&s_mux);
@@ -456,16 +475,16 @@ bool ui_mididev_builtin_key(uint8_t bit, char* key, int len)
     return ok;
 }
 
-uint8_t ui_mididev_bit_of_key(const char* key)
+midi_tmask_t ui_mididev_bit_of_key(const char* key)
 {
     portENTER_CRITICAL(&s_mux);
     int i = find_key_locked(key);
-    uint8_t bit = i >= 0 ? s_devs[i].pub.bit : 0;
+    midi_tmask_t bit = i >= 0 ? s_devs[i].pub.bit : 0;
     portEXIT_CRITICAL(&s_mux);
     return bit;
 }
 
-int ui_mididev_find_bit(uint8_t bit)
+int ui_mididev_find_bit(midi_tmask_t bit)
 {
     portENTER_CRITICAL(&s_mux);
     int i = find_bit_locked(bit);
@@ -473,7 +492,7 @@ int ui_mididev_find_bit(uint8_t bit)
     return i;
 }
 
-uint8_t ui_mididev_connected_mask(void)
+midi_tmask_t ui_mididev_connected_mask(void)
 {
     return s_connected;
 }
@@ -497,7 +516,7 @@ void ui_mididev_select(bool out, int index, bool save)
 {
     load_saved();
     int k = out ? 1 : 0;
-    uint8_t bit = 0;
+    midi_tmask_t bit = 0;
     bool changed;
     bool saveable = true;
     portENTER_CRITICAL(&s_mux);
@@ -529,7 +548,7 @@ uint32_t ui_mididev_patch_selection(int from, int to)
         // Every route from a to b: a script may have routed channels separately
         uint32_t sel = 0;
         for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
-            uint8_t src, dst;
+            midi_tmask_t src, dst;
             uint32_t s;
             if (!MIDI_route_get_selection(i, &src, &dst, &s)) continue;
             if (src != a.bit || !(dst & b.bit)) continue;
@@ -606,9 +625,10 @@ void ui_mididev_toggle_patch(int from, int to)
 static int route_saved_count(const char* only_key)
 {
     int applied = 0;
-    uint8_t sources = 0;
+    midi_tmask_t sources = 0;
+    if (!s_saved) return 0;
 
-    SavedPatch saved[SAVED_MAX];
+    SavedPatch* saved = new SavedPatch[SAVED_MAX];   // ~900 bytes, kept off the caller's stack
     portENTER_CRITICAL(&s_mux);
     int n = s_savedCount;
     memcpy(saved, s_saved, sizeof(SavedPatch) * n);
@@ -618,7 +638,7 @@ static int route_saved_count(const char* only_key)
         if (only_key && strcmp(saved[p].from, only_key) != 0 && strcmp(saved[p].to, only_key) != 0) {
             continue;
         }
-        uint8_t src = 0, dst = 0;
+        midi_tmask_t src = 0, dst = 0;
         portENTER_CRITICAL(&s_mux);
         int a = find_key_locked(saved[p].from);
         int b = find_key_locked(saved[p].to);
@@ -636,7 +656,8 @@ static int route_saved_count(const char* only_key)
             applied++;
         }
     }
-    for (uint8_t bit = 1; bit; bit <<= 1) {
+    delete[] saved;
+    for (midi_tmask_t bit = 1; bit; bit <<= 1) {
         if (sources & bit) MIDI_route_start_source(bit);
     }
     return applied;
@@ -680,12 +701,12 @@ bool ui_mididev_save(void)
     }
     s_savedCount = keep;
     for (int r = 0; r < MIDI_ROUTE_MAX; r++) {
-        uint8_t src, dst;
+        midi_tmask_t src, dst;
         uint32_t sel;
         if (!MIDI_route_get_selection(r, &src, &dst, &sel)) continue;
         int a = find_bit_locked(src);
         if (a < 0 || !(s_devs[a].pub.flags & UI_MIDIDEV_BUILTIN)) continue;
-        for (uint8_t bit = 1; bit; bit <<= 1) {
+        for (midi_tmask_t bit = 1; bit; bit <<= 1) {
             if (!(dst & bit)) continue;
             int b = find_bit_locked(bit);
             if (b < 0 || !(s_devs[b].pub.flags & UI_MIDIDEV_BUILTIN)) continue;
@@ -741,21 +762,21 @@ void ui_mididev_tick(void)
     if (now - s_lastTickMs < TICK_MS) return;
     s_lastTickMs = now;
 
-    uint8_t bits[UI_MIDIDEV_MAX];
+    midi_tmask_t bits[UI_MIDIDEV_MAX];
     int n = 0;
     portENTER_CRITICAL(&s_mux);
     for (int i = 0; i < s_count; i++) bits[n++] = s_devs[i].pub.bit;
     portEXIT_CRITICAL(&s_mux);
 
-    uint8_t up = 0;
+    midi_tmask_t up = 0;
     for (int i = 0; i < n; i++) {
         if (bits[i] && transport_up(bits[i])) up |= bits[i];
     }
-    uint8_t changed = up ^ s_connected;
+    midi_tmask_t changed = up ^ s_connected;
     if (!changed) return;
     s_connected = up;
     bump();
-    for (uint8_t bit = 1; bit; bit <<= 1) {
+    for (midi_tmask_t bit = 1; bit; bit <<= 1) {
         if (changed & bit) {
             post((up & bit) ? UI_MIDIDEV_EVENT_CONNECT : UI_MIDIDEV_EVENT_DISCONNECT, bit, 0, 0);
         }

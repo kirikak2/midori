@@ -191,7 +191,7 @@ private:
     float m_internalBpm;
     float m_externalBpm;
     float m_externalBpmBySource[MIDI_INTERFACE_COUNT];
-    uint8_t m_clockWatch;            // Sources read for their clock (MIDI_route_set_watch)
+    midi_tmask_t m_clockWatch;       // Sources read for their clock (MIDI_route_set_watch)
     midi_interface_t m_selectedExternalBpmSource;
     bool m_syncMode;
     bpm_change_cb_t m_bpmChangeCallback;

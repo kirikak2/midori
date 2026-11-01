@@ -30,7 +30,7 @@ module UI
   module MIDIDevices
     FLAG_BUILTIN = 1
     FLAG_STANDBY = 2
-    ROUTE_SLOTS = 8   # MIDI_ROUTE_MAX
+    ROUTE_SLOTS = 32   # MIDI_ROUTE_MAX
 
     # A registered transport known only by its bit (one whose Ruby object
     # this VM never made, e.g. after a restart): enough for MIDI::Device.
@@ -219,7 +219,7 @@ module UI
         bit = MIDI.route_bit(device)
         return false if bit == 0
         b = 1
-        while b < 0x100
+        while b <= MIDI::ALL_TRANSPORTS
           if b != bit
             MIDI.unfilter(b, bit)
             MIDI._route_remove(b, bit)
@@ -304,7 +304,7 @@ module UI
           next unless r
           filtered = MIDI._route_filtered(r[0])
           b = 1
-          while b < 0x100
+          while b <= MIDI::ALL_TRANSPORTS
             if (r[1] & b) != 0
               list << { from: _device_for_bit(r[0]), to: _device_for_bit(b),
                         channel: MIDI._route_channel(r[2], r[3]),
@@ -423,7 +423,7 @@ module UI
       end
 
       def _chain_names(src, dst)
-        c = $__midi_chains__ ? $__midi_chains__[src * 0x1000 + dst] : nil
+        c = $__midi_chains__ ? $__midi_chains__[MIDI._pair_key(src, dst)] : nil
         c ? c.names : []
       end
 

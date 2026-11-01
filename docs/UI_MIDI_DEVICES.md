@@ -130,6 +130,29 @@ UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :y
 - **見出しを長押し**: デバイス詳細（キー・ビット・状態・USB Host の製品名と EP・USB Device の
   TinyUSB 診断・filter キューの溢れ件数）。タップで閉じる
 - 自分自身へのセル（同じデバイスの IN → OUT）は `─`
+
+### スクロールと表示フィルタ（2026-11-01）
+
+デバイスが最大 16 台になったので、全部は 1 画面に収まらない。
+
+- **スクロール**: セルには最小サイズがある（Tab5 / CrowPanel 84×52、CoreS3 34×22）。全部が入る
+  ときは従来どおり最大サイズまで広げ、入らないときは入るだけの行・列を並べて残りをスクロールする。
+  グリッドの上で**ドラッグ**すると指に付いてセル単位で動く（オフセットが変わったときだけ描き直す）。
+  行見出し・列見出し・**Prog 行 / 列は固定**で、常に見えている。はみ出している向きには、
+  右端 / 下端のマージンにスクロールバー（灰色のつまみ）が出る
+- **表示フィルタ**: 左上の角（行見出しの上、以前は空き）のボタンをタップするたびに
+  **All → Patched → Unpatched** と切り替わる（All 以外はシアン地）
+  - Patched: パッチ（ルート）が 1 本でも出ている IN の行と、1 本でも入っている OUT の列だけ
+  - Unpatched: パッチが 1 本も出ていない IN の行と、1 本も入っていない OUT の列だけ
+    （何にもつながっていない機器を探して、それ同士をつなぐ用。すでに使っている OUT へ
+    足すときは All に戻す）
+  - 判定は行・列（デバイス）単位。セル単位で絞るとグリッドにならないため
+  - **画面でパッチを付け外しした行・列は、フィルタを選び直すまで残る**（Unpatched でつないだ途端に
+    行が消えて隣のセルを押してしまう、などを防ぐ）。画面に入り直すか、デバイスの数が変わったときも解除
+  - 何も残らないときは Prog 行の下に `No patches` / `Nothing unpatched`
+  - 選んだ表示は画面を出ても保持する（NVS には保存しない）
+- 各セルのパッチ選択は、モデルが変わったとき（200ms ごとのハッシュ比較・タップ）に 1 回だけ
+  `ui_mididev_patch_selection()` で引いてヒープの Grid に持つ（描画は帯ごとに何度も呼ばれるため）
 - 変化の検出: 200ms ごとにモデルの serial・接続状態・ルート表・filter・選択のハッシュを取り、
   変わったら `ui_strip::repaint_content()` で描き直す（スクリプトが `MIDI.route` で張ったルートも出る）
 - 画面インデックスは `UI_SCREEN_MIDI_INFO`（= 2）を流用。Ruby は `:midi_devices`
@@ -224,7 +247,8 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 **キー文字列**で保存する。
 
 - 名前空間 `midi_devs`
-- `patches` … `"<from>><to>[:<ch>]"` を `,` で連結（例: `usb_host>amy,usb_host>uart:9,keys>amy`）、最大 16 件
+- `patches` … `"<from>><to>[:<ch>]"` を `,` で連結（例: `usb_host>amy,usb_host>uart:9,keys>amy`）、最大 32 件
+  （2026-11-01 まで 16 件）
 - `in` / `out` … Prog の選択（キー。未選択は削除）
 - `defaults` … 既定パッチをどの版まで足したか（u8、2026-10-25）
 
@@ -253,15 +277,16 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 |------|------|
 | picoruby-midi `midi_route.h` | `MIDI_route_get()`（ルート表の走査）、filter（[MIDI_FILTER.md](MIDI_FILTER.md)） |
 | picoruby-midi `midi.h` / port | `MIDI_route_start_source(bit)`: UART の入力開始と入力タスクの起動（Ruby の `MIDI._start_source` の C 版）。画面から張ったルートがスクリプトなしでも効くように |
-| `main/ui/ui_midi_devices.cpp` | デバイス表（最大 8 件、spinlock）、選択、保存済みパッチ、NVS、接続ポーリング（`ui_mididev_tick`）、終了処理（`ui_mididev_cleanup`、`UIManager::scriptCleanup` から） |
+| `main/ui/ui_midi_devices.cpp` | デバイス表（最大 16 件、spinlock。表と保存済みパッチは最初の読み込み時にヒープに確保）、選択、保存済みパッチ、NVS、接続ポーリング（`ui_mididev_tick`）、終了処理（`ui_mididev_cleanup`、`UIManager::scriptCleanup` から） |
 | `main/ui/screen_midi_devices.cpp` | マトリクスの描画とタッチ。セルのタップで `ui_mididev_toggle_patch()` → `MIDI_route_add` / `MIDI_route_remove` を UI タスクから直接 |
 | picoruby-ui `ports/esp32/ui.c` / `src/mruby/ui.c` | `UI._mididev_*` と `:midi_devices` イベント（mruby/c 版のバインディングは picoruby-ui 自体が追従していないので未対応） |
 | `main/platform/platform_freenove.c` | 画面の無い Freenove 用の no-op スタブ（一覧は常に空） |
 
 ## 制約
 
-- 登録表は 8 ビット（USB Host / UART / USB Device / AMY / Keys で既に 5）。**同時に登録できるのは実質 8 台**
-- ルート表は 8 件（送信元 × チャンネル集合ごとに 1 件、宛先はマスクで束ねる）
+- 登録表は 16 ビット（`midi_tmask_t` = `uint16_t`、2026-11-01 まで 8 ビット）。USB Host / UART / USB Device /
+  Tempo（クロック）/ AMY / Keys / Sequencer で既に 7。**同時に登録できるのは 16 台**（デバイス表も 16 件）
+- ルート表は 32 件（送信元 × チャンネル集合ごとに 1 件、宛先はマスクで束ねる。2026-11-01 まで 8 件）
 - 1 つのトランスポートを複数ケーブル・複数チャンネルに分けて別デバイスとして見せることはできない
 - `UI::MIDIDevices.input` の受信元は Prog(input) の選択 1 つ。スクリプトが自分で張った `MIDI.on(from, ...)` は
   固定の受信元を読み、選択には追従しない

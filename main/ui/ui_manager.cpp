@@ -752,22 +752,22 @@ float UIManager::getExternalBpm() const
 // is up or Sync is on, ask for every source that is there to be read.
 void UIManager::updateClockWatch()
 {
-    uint8_t want = 0;
+    midi_tmask_t want = 0;
     if (m_currentIndex == UI_SCREEN_MAIN || m_syncMode) {
 #if CONFIG_USB_MIDI_HOST_ENABLED
         want |= MIDI_TRANSPORT_USB;   // Read once a device is plugged in
 #endif
-        const uint8_t others[] = { MIDI_TRANSPORT_SAM2695, MIDI_TRANSPORT_USB_DEVICE };
-        for (uint8_t bit : others) {
+        const midi_tmask_t others[] = { MIDI_TRANSPORT_SAM2695, MIDI_TRANSPORT_USB_DEVICE };
+        for (midi_tmask_t bit : others) {
             const midi_transport_t* t = MIDI_transport_get(bit);
             if (t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx)) want |= bit;
         }
     }
     if (want == m_clockWatch) return;
-    uint8_t added = want & (uint8_t)~m_clockWatch;
+    midi_tmask_t added = want & (midi_tmask_t)~m_clockWatch;
     m_clockWatch = want;
     MIDI_route_set_watch(MIDI_WATCH_APP, want);
-    for (uint8_t bit = 1; bit; bit <<= 1) {
+    for (midi_tmask_t bit = 1; bit; bit <<= 1) {
         if (added & bit) MIDI_route_start_source(bit);
     }
 }

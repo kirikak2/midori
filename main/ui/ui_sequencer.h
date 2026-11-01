@@ -80,7 +80,7 @@ void notify_edit(int pattern, int line);
 // it. With none, routes the Tempo's clock to it first (clock only, until the
 // script's end clears the routes) -- what the screen's Play needs when no
 // script set anything up. 0 when there is no clock to route.
-uint8_t ensure_clock();
+midi_tmask_t ensure_clock();
 
 // The File sheet: ask Ruby to do something (UI_SEQ_REQ_*), and what it
 // listed (files_serial changes with each new list)
