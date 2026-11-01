@@ -641,6 +641,26 @@ void picoruby_ui_keys_set_channel_color(int channel, int color)
     ui_keys_set_channel_color(channel, color);
 }
 
+void picoruby_ui_tombola_receive(int cin, int b1, int b2, int b3)
+{
+    ui_tombola_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
+}
+
+int picoruby_ui_xypad_transport_bit(void)
+{
+    return ui_xypad_transport_bit();
+}
+
+int picoruby_ui_xypad_targets(int cin, int b1)
+{
+    return ui_xypad_targets((uint8_t)cin, (uint8_t)b1);
+}
+
+void picoruby_ui_xypad_dispatch(int route, int cin, int b1, int b2, int b3)
+{
+    ui_xypad_dispatch((midi_tmask_t)route, (uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
+}
+
 void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3)
 {
     ui_keys_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);

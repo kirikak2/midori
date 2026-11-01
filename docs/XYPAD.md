@@ -394,6 +394,26 @@ Knobs / Tombola と同じく、値が変わった範囲だけ差分描画する�
 `M5.Lcd.display()` を呼ぶのを忘れないこと（[docs/TOMBOLA.md](TOMBOLA.md)
 参照。Knobs 画面で一度これを落として画面が乱れた実績がある）。
 
+## MIDI トランスポートとして（2026-11-01）
+
+XYPad は**送るだけ**の picoruby-midi のトランスポートで、MIDI Devices 画面に `XYPad`（IN の行のみ、
+`UI_MIDIDEV_NO_OUT`）として出る（UI の初期化時に `ui_xypad_init()` が登録する。キー `xypad`）。
+**実機未確認**。
+
+```ruby
+pad = UI::XYPad.new(scale: [48, 50, 52, 55, 57], y_cc: 74)
+MIDI.route(pad, MIDIDevices.amy)        # device: なしでもルートで鳴る
+MIDI.on(pad, :note_on) { |m| ... }      # リスナーも付けられる
+```
+
+- MIDI を作るのは従来どおり Ruby の内蔵ハンドラ（`send_midi`）。各メッセージをスロットの `device:` と、
+  `UI._xypad_dispatch` → `MIDI_route_dispatch()` でパッドのビットからのルートへ送る
+- 送り先のルートは**タッチの down で `UI._xypad_targets` で決めて up まで使う**（途中でルートが
+  変わってもノートオフがノートオンと同じところへ行くように。Keys の `heldRoute` と同じ考え方）
+- `device:` がそのルートの宛先にも入っているときは `device:` には送らない（二重に鳴らないように）
+- 内蔵ハンドラは `auto_midi` なら `device:` がなくても動く（以前は `device:` 必須）
+- `UI.process` を回さないとルートにも何も流れないのは従来どおり（Keys / Tombola は C から送るので別）
+
 ## 値の配送とキューの扱い
 
 Knobs と同じ「スロットごとに高々 1 通」だが、**down / up は間引かない**。

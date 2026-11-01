@@ -520,6 +520,7 @@ void ui_tombola_tick(void);           // Physics step, called from ui_update()
 // Float keys : rotation radius gravity bounce friction spin_transfer ball_size
 // Int keys   : sides gravity_mode channel duration velocity_min velocity_max
 //              retrigger_ms max_voices transport sound touch_add notify
+//              transport_bit (read-only). transport < 0 unsets device:
 bool  ui_tombola_set_f(const char* name, float value);
 bool  ui_tombola_set_i(const char* name, int value);
 float ui_tombola_get_f(const char* name);
@@ -531,6 +532,14 @@ int  ui_tombola_add_ball(int note, int channel, uint16_t color, float velocity_s
 bool ui_tombola_remove_ball(int index);
 void ui_tombola_clear_balls(void);
 int  ui_tombola_ball_count(void);
+
+// The Tombola as a picoruby-midi transport (docs/TOMBOLA.md). init registers
+// it (UIManager::init). Its hits go to device: ("transport") and along the
+// routes from its bit; a note sent to it adds a ball playing that note (its
+// note off takes it away), Start / Continue / Stop run and stop it.
+// get_i("transport_bit") is its bit (0 if the registry was full).
+void ui_tombola_init(void);
+void ui_tombola_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
 
 // --- XYPad ------------------------------------------------------------------
 // Up to five simultaneous touches, each an independent "slot": its own X
@@ -601,6 +610,16 @@ int   ui_xypad_get_i(uint8_t index, const char* name);
 
 void    ui_xypad_set_scale(uint8_t index, const uint8_t* notes, uint8_t len);
 uint8_t ui_xypad_get_scale(uint8_t index, uint8_t* out, uint8_t max_len);  // Returns the count
+
+// The XYPad as a picoruby-midi transport that only sends (docs/XYPAD.md).
+// Ruby still makes its MIDI (UI::XYPad); it hands each message to dispatch,
+// which forwards it along the routes from the pad's bit (filters and
+// listeners included). targets is where a message would go, taken at a
+// touch's down and kept for the rest of it. init registers it (UIManager::init).
+void         ui_xypad_init(void);
+midi_tmask_t ui_xypad_transport_bit(void);   // 0 if the registry was full
+midi_tmask_t ui_xypad_targets(uint8_t cin, uint8_t b1);
+void         ui_xypad_dispatch(midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
 
 // NULL for an out-of-range index; the screen draws it as an empty slot.
 const xypad_slot_t* ui_xypad_get_slot(uint8_t index);

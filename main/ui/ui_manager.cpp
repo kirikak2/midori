@@ -95,6 +95,9 @@ esp_err_t UIManager::init()
     ui_tempo_init();
     // The sequencer is always there too (a transport, playing on the clock it gets)
     ui_seq_init();
+    // So are the Tombola and the XYPad (route sources; notes sent to the Tombola are balls)
+    ui_tombola_init();
+    ui_xypad_init();
 
     // Initialize screens (placeholders for now)
     initScreens();

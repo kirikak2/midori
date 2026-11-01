@@ -154,6 +154,32 @@ end
 キューは有限なので、`UI.process` を回さないまま放置すると溢れて捨てられる（音自体は
 C++ 側が鳴らすので影響しない）。
 
+### MIDI トランスポートとして（2026-11-01）
+
+`UI::Keys` と同じく picoruby-midi のトランスポート（送信元にも宛先にもなる）で、MIDI Devices 画面に
+`Tombola` として出る（UI の初期化時に `ui_tombola_init()` が登録する。キー `tombola`）。**実機未確認**。
+
+```ruby
+t = UI::Tombola.new(device: MIDI::Device.new(MIDIDevices.sam2695))
+MIDI.route(t, MIDIDevices.amy)                 # 衝突の音を AMY にも
+MIDI.route(MIDIDevices.usb_midi_host, t)       # 外部鍵盤で押した音がボールになる
+MIDI.route(UI::Tempo, t, channel: :clock)      # Tempo の Play / Stop で回す・止める
+```
+
+- **送信元**: 衝突のノートは C++ 側（UI タスク）から `device:` へ（従来どおりノートスケジューラ）と、
+  Tombola のビットから張られたルートへ `MIDI_route_dispatch()` で送る（filter / `MIDI.on` も見える）。
+  ルート側のノートオフは Tombola が自分で時間を計る（`PendingOff` 32 件、`ui_tombola_tick()` で送る。
+  停止中も送る）。`Tombola.new` / `reset` で鳴っている分はすぐ止める
+- **`device:` を指定しないとき**は従来どおり USB Host + UART（0x03）へ送るが、**Tombola からルートが
+  張られていればそちらだけ**にする（画面でパッチしたのに SAM2695 からも鳴る、を避けるため）。
+  `t.device = nil` でこの既定に戻る（C には `transport` = -1）
+- `sound = false` のときはルートにも送らない（`MIDI.on` のリスナーには届く）
+- **宛先**: 受けた Note On でそのノートを鳴らすボールが 1 個増える（Tombola のチャンネルで鳴る。
+  ベロシティでボールの強さ `velocity_scale` が決まる。同じチャンネル・ノートのボールは 1 個まで）。
+  その Note Off で消える。All Notes Off / All Sound Off はそのチャンネルの、System Reset は全部の
+  「ノートで増えたボール」を消す。Start / Continue で開始、Stop で停止。クロック（F8）は無視
+- 16 個埋まっていればノートは無視（ボールは増えない）
+
 ### 開始・停止
 
 ```ruby

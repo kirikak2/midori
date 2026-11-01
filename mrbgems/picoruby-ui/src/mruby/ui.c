@@ -1072,6 +1072,43 @@ mrb_ui_keys_set_channel_color(mrb_state *mrb, mrb_value self)
     return mrb_nil_value();
 }
 
+/* UI._tombola_receive(cin, b1, b2, b3): one USB-MIDI packet sent to the Tombola */
+static mrb_value
+mrb_ui_tombola_receive(mrb_state *mrb, mrb_value self)
+{
+    mrb_value cin, b1, b2, b3;
+    mrb_get_args(mrb, "oooo", &cin, &b1, &b2, &b3);
+    picoruby_ui_tombola_receive(val_to_i(cin), val_to_i(b1), val_to_i(b2), val_to_i(b3));
+    return mrb_fixnum_value(0);
+}
+
+/* UI._xypad_transport_bit -> the XYPad's transport bit (0: none) */
+static mrb_value
+mrb_ui_xypad_transport_bit(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_xypad_transport_bit());
+}
+
+/* UI._xypad_targets(cin, status) -> where a message from the XYPad is routed */
+static mrb_value
+mrb_ui_xypad_targets(mrb_state *mrb, mrb_value self)
+{
+    mrb_value cin, b1;
+    mrb_get_args(mrb, "oo", &cin, &b1);
+    return mrb_fixnum_value(picoruby_ui_xypad_targets(val_to_i(cin), val_to_i(b1)));
+}
+
+/* UI._xypad_dispatch(route, cin, b1, b2, b3): one message along those routes */
+static mrb_value
+mrb_ui_xypad_dispatch(mrb_state *mrb, mrb_value self)
+{
+    mrb_value route, cin, b1, b2, b3;
+    mrb_get_args(mrb, "ooooo", &route, &cin, &b1, &b2, &b3);
+    picoruby_ui_xypad_dispatch(val_to_i(route), val_to_i(cin), val_to_i(b1),
+                               val_to_i(b2), val_to_i(b3));
+    return mrb_nil_value();
+}
+
 /* UI._keys_receive(cin, b1, b2, b3): one USB-MIDI packet sent to the keyboard */
 static mrb_value
 mrb_ui_keys_receive(mrb_state *mrb, mrb_value self)
@@ -1787,6 +1824,10 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_keys_clear_key_colors,  mrb_ui_keys_clear_key_colors,  MRB_ARGS_NONE());
     DEF(_keys_set_channel_color, mrb_ui_keys_set_channel_color, MRB_ARGS_REQ(2));
     DEF(_keys_receive,           mrb_ui_keys_receive,           MRB_ARGS_REQ(4));
+    DEF(_tombola_receive,        mrb_ui_tombola_receive,        MRB_ARGS_REQ(4));
+    DEF(_xypad_transport_bit,    mrb_ui_xypad_transport_bit,    MRB_ARGS_NONE());
+    DEF(_xypad_targets,          mrb_ui_xypad_targets,          MRB_ARGS_REQ(2));
+    DEF(_xypad_dispatch,         mrb_ui_xypad_dispatch,         MRB_ARGS_REQ(5));
     DEF(_keys_clear_lights,      mrb_ui_keys_clear_lights,      MRB_ARGS_NONE());
     DEF(_keys_lit,               mrb_ui_keys_is_lit,            MRB_ARGS_REQ(1));
     DEF(_keys_pressed,           mrb_ui_keys_is_pressed,        MRB_ARGS_REQ(1));

@@ -748,6 +748,15 @@ module UI
   # That C++ state is a single global, so one Tombola exists at a time:
   # Tombola.new resets it and applies the options given.
   #
+  # It is also a picoruby-midi transport, like UI::Keys: the hits go along
+  # every MIDI.route from it (Ruby is not in the path), and notes sent to it
+  # become balls -- each plays the note that made it, until its note off.
+  # Start / Continue / Stop start and stop it. Without device:, the hits go to
+  # the USB host and the UART as before, unless the Tombola is routed.
+  #
+  #   MIDI.route(t, MIDIDevices.amy)                # the hits to AMY too
+  #   MIDI.route(MIDIDevices.usb_midi_host, t)      # a keyboard drops balls
+  #
   # @example
   #   t = UI::Tombola.new(sides: 6, gravity: 0.5, rotation: 12)
   #   t.device = MIDI::Device.new(MIDIDevices.sam2695)
@@ -969,14 +978,51 @@ module UI
       UI._tombola_set_i(:sound, value ? 1 : 0)
     end
 
-    # Where the notes go. Accepts a MIDI::Device or a raw transport.
+    # Where the notes go besides MIDI.route destinations. Accepts a
+    # MIDI::Device or a raw transport; nil goes back to the default (the USB
+    # host and the UART, unless the Tombola is routed).
     def device
       @device
     end
 
     def device=(dev)
       @device = dev
-      UI._tombola_set_i(:transport, Tombola.transport_mask_for(dev))
+      UI._tombola_set_i(:transport, dev.nil? ? -1 : Tombola.transport_mask_for(dev))
+    end
+
+    # --- Transport (picoruby-midi) ---
+
+    # Its bit in picoruby-midi's transport registry (0 on a board without a
+    # display, where it is no transport)
+    def transport_id
+      UI._tombola_get_i(:transport_bit)
+    end
+
+    def self.transport_id
+      UI._tombola_get_i(:transport_bit)
+    end
+
+    # A packet sent to the Tombola: a note on adds a ball, its note off
+    # takes it away; Start / Continue / Stop run and stop it
+    def send_packet(cable, cin, midi1, midi2, midi3)
+      UI._tombola_receive(cin, midi1, midi2, midi3)
+    end
+
+    # The hits are pushed to their destinations, never read
+    def bytes_available
+      0
+    end
+
+    def read_available
+      nil
+    end
+
+    def connected?
+      transport_id != 0
+    end
+
+    def device_info
+      "Tombola"
     end
 
     # Mirrors MIDI::Device#_get_transport_mask, which is private there.
@@ -1096,6 +1142,13 @@ module UI
   # snapping and the glide math, exactly like Knobs -- nothing there sends
   # MIDI. The built-in handler here does that from #dispatch_touch, unless a
   # slot's auto_midi is false.
+  #
+  # The pad is also a picoruby-midi transport that only sends: what the
+  # built-in handler plays goes to the slot's device: and along every
+  # MIDI.route from the pad (filters and MIDI.on included). Where a touch's
+  # messages go is taken at its down, so its note off follows its note on.
+  #
+  #   MIDI.route(pad, MIDIDevices.amy)               # every slot plays AMY too
   class XYPad
     MAX_TOUCHES = 5
     XMODE_NOTE = 0
@@ -1125,10 +1178,12 @@ module UI
       @channel_base = 0
       @slots = []
       @touch_x_mode = []
+      @touch_route = []
       i = 0
       while i < MAX_TOUCHES
         @slots << { x_cc: 70, y_cc: 74, velocity: 100, device: nil, auto_midi: true }
         @touch_x_mode << :note
+        @touch_route << 0
         i += 1
       end
 
@@ -1220,6 +1275,39 @@ module UI
       UI.show(:xypad)
     end
 
+    # --- Transport (picoruby-midi): MIDI.route(pad, dev) ---
+
+    # Its bit in picoruby-midi's transport registry (0 on a board without a
+    # display, where it is no transport)
+    def transport_id
+      UI._xypad_transport_bit
+    end
+
+    def self.transport_id
+      UI._xypad_transport_bit
+    end
+
+    # Nothing is sent to the pad: it only sends
+    def send_packet(cable, cin, midi1, midi2, midi3)
+      0
+    end
+
+    def bytes_available
+      0
+    end
+
+    def read_available
+      nil
+    end
+
+    def connected?
+      transport_id != 0
+    end
+
+    def device_info
+      "XYPad"
+    end
+
     # Internal: applies the built-in MIDI handler for one slot's touch event,
     # then forwards to #on_touch if one is registered. Called from
     # UI.dispatch_xypad_event, itself called from UI.process.
@@ -1236,7 +1324,7 @@ module UI
         @touch_x_mode[idx] = (UI._xypad_get_i(idx, :x_mode) == XMODE_CC) ? :cc : :note
       end
 
-      send_midi(s, @touch_x_mode[idx], idx, event) if s[:auto_midi] && s[:device]
+      send_midi(s, @touch_x_mode[idx], idx, event) if s[:auto_midi]
 
       @on_touch.call(event) if @on_touch
     rescue => e
@@ -1298,26 +1386,63 @@ module UI
 
     # Sends the actual MIDI for one touch phase. mode is this touch's frozen
     # x_mode (see #dispatch_touch), not necessarily the slot's live one.
+    #
+    # Each message goes to the slot's device and along the routes from the
+    # pad, which are taken at the touch's down and kept until its up. A device
+    # the routes already reach is left to them, so it does not hear it twice.
     def send_midi(s, mode, idx, event)
+      ch = event[:channel].to_i & 0x0F
+      if event[:phase] == :down
+        @touch_route[idx] = UI._xypad_targets(0x9, 0x90 | ch)
+      end
+      route = @touch_route[idx]
       dev = s[:device]
-      ch = event[:channel]
+      dev = nil if dev && (MIDI.route_bit(dev) & route) != 0
 
       case event[:phase]
       when :down
-        dev.note_on(event[:note], s[:velocity], channel: ch)
-        dev.control_change(s[:x_cc], event[:x].to_i, channel: ch) if mode == :cc
-        dev.control_change(s[:y_cc], event[:y].to_i, channel: ch)
+        note_msg(dev, route, ch, event[:note], s[:velocity])
+        cc_msg(dev, route, ch, s[:x_cc], event[:x]) if mode == :cc
+        cc_msg(dev, route, ch, s[:y_cc], event[:y])
       when :move
         if mode == :note
-          dev.pitch_bend(bend_raw(idx, event[:bend_semitones]), channel: ch)
+          bend_msg(dev, route, ch, bend_raw(idx, event[:bend_semitones]))
         else
-          dev.control_change(s[:x_cc], event[:x].to_i, channel: ch)
+          cc_msg(dev, route, ch, s[:x_cc], event[:x])
         end
-        dev.control_change(s[:y_cc], event[:y].to_i, channel: ch)
+        cc_msg(dev, route, ch, s[:y_cc], event[:y])
       when :up
-        dev.note_off(event[:note], 0, channel: ch)
-        dev.pitch_bend(0, channel: ch) if mode == :note
+        note_msg(dev, route, ch, event[:note], 0)
+        bend_msg(dev, route, ch, 0) if mode == :note
+        @touch_route[idx] = 0
       end
+    end
+
+    # A note on (velocity > 0) or off
+    def note_msg(dev, route, ch, note, velocity)
+      n = note.to_i & 0x7F
+      if velocity > 0
+        dev.note_on(n, velocity, channel: ch) if dev
+        UI._xypad_dispatch(route, 0x9, 0x90 | ch, n, velocity.to_i & 0x7F)
+      else
+        dev.note_off(n, 0, channel: ch) if dev
+        UI._xypad_dispatch(route, 0x8, 0x80 | ch, n, 0)
+      end
+    end
+
+    def cc_msg(dev, route, ch, cc, value)
+      v = value.to_i
+      v = 0 if v < 0
+      v = 127 if v > 127
+      dev.control_change(cc, v, channel: ch) if dev
+      UI._xypad_dispatch(route, 0xB, 0xB0 | ch, cc.to_i & 0x7F, v)
+    end
+
+    # raw: -8192..8191, as MIDI::Device#pitch_bend
+    def bend_msg(dev, route, ch, raw)
+      dev.pitch_bend(raw, channel: ch) if dev
+      u = raw + 8192
+      UI._xypad_dispatch(route, 0xE, 0xE0 | ch, u & 0x7F, (u >> 7) & 0x7F)
     end
 
     # bend_semitones -> the raw +-8192 unit MIDI::Device#pitch_bend takes,

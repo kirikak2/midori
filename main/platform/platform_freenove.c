@@ -296,6 +296,35 @@ int ui_tombola_ball_count(void)
     return 0;
 }
 
+void ui_tombola_init(void)
+{
+}
+
+void ui_tombola_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)cin; (void)b1; (void)b2; (void)b3;
+}
+
+void ui_xypad_init(void)
+{
+}
+
+midi_tmask_t ui_xypad_transport_bit(void)
+{
+    return 0;
+}
+
+midi_tmask_t ui_xypad_targets(uint8_t cin, uint8_t b1)
+{
+    (void)cin; (void)b1;
+    return 0;
+}
+
+void ui_xypad_dispatch(midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)route; (void)cin; (void)b1; (void)b2; (void)b3;
+}
+
 // XYPad stubs - the touch surface lives in ui/screen_xypad.cpp and its model
 // in ui/ui_common.cpp, neither of which is built for a board without a
 // display. Scripts that touch UI::XYPad here get silent no-ops.

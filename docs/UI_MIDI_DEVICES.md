@@ -230,6 +230,8 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 | `amy` | AMY | — | ○ | 起動時に決まる | standby で登録 |
 | `keys` | UI::Keys | ○ | ○ | 起動時に決まる | 鍵盤のモデルが作られたとき C 側（`ui_keys.cpp`）が自分で登録 |
 | `tempo` | UI::Tempo | ○ | — | 起動時に決まる | MIDI クロックを送る（docs/TEMPO.md）。UI の初期化時に C 側（`ui_tempo.cpp`）が登録。OUT の列は出さない（`UI_MIDIDEV_NO_OUT`） |
+| `tombola` | UI::Tombola | ○ | ○ | 起動時に決まる | 衝突のノートを送り、受けたノートをボールにする（docs/TOMBOLA.md）。UI の初期化時に C 側（`screen_tombola.cpp`）が登録 |
+| `xypad` | UI::XYPad | ○ | — | 起動時に決まる | Ruby の内蔵ハンドラが鳴らすメッセージをルートへも流す（docs/XYPAD.md）。UI の初期化時に C 側（`ui_common.cpp`）が登録。送るだけ（`UI_MIDIDEV_NO_OUT`） |
 
 - USB Host / UART / USB Device は起動時に工場ブロックを呼んで初期化する（スクリプトモードでも。
   以前は初回アクセスまで遅延していた）。UART は初期化しないと接続扱いにならず受信もしないため

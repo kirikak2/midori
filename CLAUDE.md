@@ -681,6 +681,11 @@ UI.pad(1, label: "Faster") { t.rotation = t.rotation + 4 }
 
 サンプル: [examples/tombola.rb](examples/tombola.rb)
 
+**MIDI トランスポート**（2026-11-01、実機未確認）: Keys と同様に送信元にも宛先にもなる（`MIDI.route(t, dev)` /
+`MIDI.route(kb, t)`、MIDI Devices 画面の `Tombola`）。ルートへは `MIDI_route_dispatch()` で送り、ノートオフは
+Tombola が自分で計る。受けたノートはそのノートを鳴らすボールになり、Start / Stop で回る・止まる。
+`device:` 未指定時の 0x03 への送信は、Tombola からルートがあれば止める。docs/TOMBOLA.md
+
 ## Tab5 の描画はキャッシュに残る（2026-08-10）
 
 Tab5 のパネルは**フレームバッファパネル**（`Panel_DSI` → `Panel_FrameBufferBase`）。
@@ -800,6 +805,10 @@ pad.show
 ```
 
 サンプル: [examples/xypad.rb](examples/xypad.rb)
+
+**MIDI トランスポート**（2026-11-01、実機未確認）: 送るだけのトランスポート（`MIDI.route(pad, dev)`、MIDI Devices
+画面の `XYPad` 行）。Ruby の内蔵ハンドラが作ったメッセージを `UI._xypad_dispatch` でルートへも流す。ルートは
+タッチの down で決めて up まで使う。docs/XYPAD.md
 
 ## Keys 画面（画面の鍵盤 / 2026-10-18）
 

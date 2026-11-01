@@ -188,6 +188,8 @@ int   picoruby_ui_tombola_add_ball(int note, int channel, int color, float veloc
 bool  picoruby_ui_tombola_remove_ball(int index);
 void  picoruby_ui_tombola_clear_balls(void);
 int   picoruby_ui_tombola_ball_count(void);
+/* The Tombola as a transport: a packet sent to it (note on adds a ball) */
+void  picoruby_ui_tombola_receive(int cin, int b1, int b2, int b3);
 
 /* XYPad.
  * Up to five simultaneous touches, each an independent "slot" with its own
@@ -204,6 +206,11 @@ int     picoruby_ui_xypad_get_i(int index, const char *name);
 void    picoruby_ui_xypad_set_scale(int index, const uint8_t *notes, int len);
 /* Writes up to max_len notes into out, returns how many. */
 int     picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len);
+/* The XYPad as a transport that only sends: its bit, where a message from it
+ * would be routed, and one message along those routes (filters included) */
+int     picoruby_ui_xypad_transport_bit(void);
+int     picoruby_ui_xypad_targets(int cin, int b1);
+void    picoruby_ui_xypad_dispatch(int route, int cin, int b1, int b2, int b3);
 
 /* Keys: the on-screen keyboard, also a picoruby-midi transport
  * (docs/KEYS.md). Parameters are string-keyed like Tombola's; see

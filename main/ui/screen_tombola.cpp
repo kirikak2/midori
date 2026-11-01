@@ -14,6 +14,7 @@
 
 extern "C" {
 #include "midi.h"
+#include "midi_route.h"
 }
 
 // Global instance
@@ -99,6 +100,7 @@ struct Ball {
     uint16_t color;
     float velScale;
     int64_t lastHitUs;
+    int16_t midiKey;     // Spawned by a note sent to the Tombola: channel * 128 + note, else -1
 };
 
 struct Hit {
@@ -132,6 +134,7 @@ struct Model {
     int retriggerMs;
     int maxVoices;
     int transport;
+    bool transportSet;   // device: given; else the legacy USB + UART, unless routed
     bool sound;          // Let the C side sound hits directly
     bool notify;         // Also queue hits for Ruby (set by Tombola#on_hit)
     bool touchAdd;       // Tapping inside the polygon spawns a ball
@@ -242,9 +245,124 @@ int spawnBall(float nx, float ny, int note, int channel, uint16_t color, float v
         b.color = color;
         b.velScale = velScale;
         b.lastHitUs = 0;
+        b.midiKey = -1;
         return i;
     }
     return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Transport (picoruby-midi)
+// ---------------------------------------------------------------------------
+//
+// The Tombola is a route source and destination like UI::Keys (docs/TOMBOLA.md).
+// Its hits go to device: through the note scheduler as before, and to the
+// routes from its bit through MIDI_route_dispatch, so filters and listeners
+// see them; the routes' note offs are timed here, ticked from ui_tombola_tick.
+// Notes sent to it become balls playing those notes.
+
+midi_tmask_t s_bit = 0;
+
+struct PendingOff {
+    int64_t atUs;            // 0: free
+    midi_tmask_t route;
+    uint8_t status;          // 0x80 | channel
+    uint8_t note;
+};
+
+// More than enough: 16 balls, each retriggering no faster than retrigger_ms
+constexpr int MAX_PENDING_OFFS = 32;
+PendingOff* s_offs = nullptr;   // [MAX_PENDING_OFFS], made by ui_tombola_init
+portMUX_TYPE s_offMux = portMUX_INITIALIZER_UNLOCKED;
+
+int tombolaTxSend(void* ctx, uint8_t cable, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)ctx; (void)cable;
+    ui_tombola_receive(cin, b1, b2, b3);
+    return 0;
+}
+
+bool tombolaTxConnected(void* ctx)
+{
+    (void)ctx;
+    return true;
+}
+
+const midi_transport_ops_t s_transportOps = {
+    .send_packet     = tombolaTxSend,
+    .read_bytes      = nullptr,     // Its hits are pushed, not read
+    .bytes_available = nullptr,
+    .is_connected    = tombolaTxConnected,
+    .transport_id    = MIDI_TRANSPORT_ID_NONE,   // Not a wire transport
+};
+
+const midi_transport_t s_transport = {
+    .ops = &s_transportOps,
+    .ctx = nullptr,
+};
+
+void dispatchOff(const PendingOff& o)
+{
+    MIDI_route_dispatch(s_bit, o.route, 0x8, o.status, o.note, 0);
+}
+
+// A route note off due at atUs. With every slot taken, the one due first goes
+// out now to make room.
+void scheduleOff(int64_t atUs, midi_tmask_t route, uint8_t status, uint8_t note)
+{
+    if (!s_offs) return;
+    PendingOff evicted = {};
+    portENTER_CRITICAL(&s_offMux);
+    int slot = -1, first = 0;
+    for (int i = 0; i < MAX_PENDING_OFFS; i++) {
+        if (s_offs[i].atUs == 0) { slot = i; break; }
+        if (s_offs[i].atUs < s_offs[first].atUs) first = i;
+    }
+    if (slot < 0) {
+        evicted = s_offs[first];
+        slot = first;
+    }
+    s_offs[slot] = { atUs, route, status, note };
+    portEXIT_CRITICAL(&s_offMux);
+    if (evicted.atUs) dispatchOff(evicted);
+}
+
+// Send the note offs due by nowUs (all of them for nowUs < 0)
+void serviceOffs(int64_t nowUs)
+{
+    if (!s_offs) return;
+    PendingOff due[MAX_PENDING_OFFS];
+    int n = 0;
+    portENTER_CRITICAL(&s_offMux);
+    for (int i = 0; i < MAX_PENDING_OFFS; i++) {
+        if (s_offs[i].atUs == 0 || (nowUs >= 0 && s_offs[i].atUs > nowUs)) continue;
+        due[n++] = s_offs[i];
+        s_offs[i].atUs = 0;
+    }
+    portEXIT_CRITICAL(&s_offMux);
+    for (int i = 0; i < n; i++) dispatchOff(due[i]);
+}
+
+// One hit to device: and the routes. transport / transportSet as the model had them.
+void sendHit(const Hit& h, int transport, bool transportSet, int durationMs, bool sound, int64_t nowUs)
+{
+    uint8_t status = 0x90 | (h.channel & 0x0F);
+    midi_tmask_t route = 0;
+    if (s_bit) route = MIDI_route_targets(s_bit, 0x9, status) & (midi_tmask_t)~s_bit;   // Never back into itself
+    if (sound) {
+        // Without device: the legacy USB host + UART, unless the Tombola is routed
+        midi_tmask_t mask = transportSet ? (midi_tmask_t)transport
+                          : (route ? 0 : (midi_tmask_t)MIDI_TRANSPORT_ALL);
+        mask &= (midi_tmask_t)~route & (midi_tmask_t)~s_bit;
+        if (mask) MIDI_Note_trigger(mask, h.channel, h.note, h.velocity, (uint32_t)durationMs);
+    } else {
+        route = 0;   // Ruby makes the noise (on_hit); listeners still hear the hit
+    }
+    if (!s_bit) return;
+    MIDI_route_dispatch(s_bit, route, 0x9, status, h.note, h.velocity);
+    if (route || (MIDI_route_filtered(s_bit) & MIDI_ROUTE_DST_RUBY)) {
+        scheduleOff(nowUs + (int64_t)durationMs * 1000, route, (uint8_t)(0x80 | (h.channel & 0x0F)), h.note);
+    }
 }
 
 // Advances m.angle for this step and returns the angular velocity it moved at,
@@ -503,6 +621,7 @@ extern "C" void ui_tombola_reset(void)
     modelLock();
     modelDefaults();
     modelUnlock();
+    serviceOffs(-1);   // The routes' notes still sounding end now
 }
 
 extern "C" void ui_tombola_start(void)
@@ -535,11 +654,14 @@ extern "C" bool ui_tombola_running(void)
 
 extern "C" void ui_tombola_tick(void)
 {
+    int64_t now = esp_timer_get_time();
+    // Stopped or not, the notes already sent along routes end on time
+    serviceOffs(now);
+
     // A drag turns the polygon even while the sequencer is stopped, so the
     // finger is never ignored.
     if (!g_model.running && !g_model.dragActive) return;
 
-    int64_t now = esp_timer_get_time();
     if (g_model.lastStepUs == 0) {
         g_model.lastStepUs = now;
         return;
@@ -551,7 +673,7 @@ extern "C" void ui_tombola_tick(void)
 
     Hit hits[UI_TOMBOLA_MAX_BALLS];
     int hitCount = 0;
-    bool sound, notify;
+    bool sound, notify, transportSet;
     int transport, duration;
 
     modelLock();
@@ -564,14 +686,12 @@ extern "C" void ui_tombola_tick(void)
     sound = g_model.sound;
     notify = g_model.notify;
     transport = g_model.transport;
+    transportSet = g_model.transportSet;
     duration = g_model.durationMs;
     modelUnlock();
 
     for (int i = 0; i < hitCount; i++) {
-        if (sound) {
-            MIDI_Note_trigger((midi_tmask_t)transport, hits[i].channel,
-                              hits[i].note, hits[i].velocity, (uint32_t)duration);
-        }
+        sendHit(hits[i], transport, transportSet, duration, sound, now);
         if (notify) {
             ui_event_t event;
             event.type = UI_EVENT_TOMBOLA_HIT;
@@ -619,7 +739,11 @@ extern "C" bool ui_tombola_set_i(const char* name, int value)
     else if (strcmp(name, "velocity_max") == 0) m.velMax = clampInt(value, 1, 127);
     else if (strcmp(name, "retrigger_ms") == 0) m.retriggerMs = clampInt(value, 0, 5000);
     else if (strcmp(name, "max_voices") == 0)   m.maxVoices = clampInt(value, 1, UI_TOMBOLA_MAX_BALLS);
-    else if (strcmp(name, "transport") == 0)    m.transport = value;
+    else if (strcmp(name, "transport") == 0) {
+        // < 0: device: taken away, back to the default
+        m.transportSet = value >= 0;
+        m.transport = value >= 0 ? value : MIDI_TRANSPORT_ALL;
+    }
     else if (strcmp(name, "sound") == 0)        m.sound = (value != 0);
     else if (strcmp(name, "touch_add") == 0)    m.touchAdd = (value != 0);
     else if (strcmp(name, "notify") == 0)       m.notify = (value != 0);
@@ -661,6 +785,7 @@ extern "C" int ui_tombola_get_i(const char* name)
     if (strcmp(name, "sound") == 0)        return m.sound ? 1 : 0;
     if (strcmp(name, "touch_add") == 0)    return m.touchAdd ? 1 : 0;
     if (strcmp(name, "notify") == 0)       return m.notify ? 1 : 0;
+    if (strcmp(name, "transport_bit") == 0) return s_bit;
     return 0;
 }
 
@@ -705,6 +830,91 @@ extern "C" void ui_tombola_clear_balls(void)
         g_model.balls[i].active = false;
     }
     modelUnlock();
+}
+
+// --- Transport --------------------------------------------------------------
+
+extern "C" void ui_tombola_init(void)
+{
+    if (s_bit) return;
+    s_offs = (PendingOff*)calloc(MAX_PENDING_OFFS, sizeof(PendingOff));
+    s_bit = MIDI_transport_register(&s_transport);
+    if (s_bit == 0) {
+        ESP_LOGW("TOMBOLA", "MIDI transport registry full: the Tombola is no transport");
+        return;
+    }
+    MIDI_route_set_source(s_bit, true);
+    // A device on the MIDI Devices screen (both IN and OUT)
+    ui_mididev_register("tombola", "Tombola", s_bit, UI_COLOR_PURPLE, true);
+}
+
+// Caller holds the lock
+static void removeMidiBalls(int channel)   // channel < 0: every channel
+{
+    for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
+        Ball& b = g_model.balls[i];
+        if (!b.active || b.midiKey < 0) continue;
+        if (channel < 0 || b.midiKey / 128 == channel) b.active = false;
+    }
+}
+
+extern "C" void ui_tombola_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    int channel = b1 & 0x0F;
+    switch (cin & 0x0F) {
+    case 0x9:
+        if ((b1 & 0xF0) != 0x90 || b2 > 127) return;
+        if (b3 > 0) {
+            // A ball playing that note on the Tombola's channel, as hard as it was struck
+            int16_t key = (int16_t)(channel * 128 + b2);
+            float a = randUnit() * (float)M_PI;
+            float velScale = clampFloat((float)b3 / 100.0f, 0.1f, 1.27f);
+            modelLock();
+            bool there = false;
+            for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
+                if (g_model.balls[i].active && g_model.balls[i].midiKey == key) there = true;
+            }
+            int index = there ? -1 : spawnBall(cosf(a) * 0.4f, sinf(a) * 0.4f, b2, -1,
+                                               UI_COLOR_CYAN, velScale);
+            if (index >= 0) g_model.balls[index].midiKey = key;
+            modelUnlock();
+            return;
+        }
+        [[fallthrough]];   // Velocity 0 is a note off
+    case 0x8: {
+        if ((b1 & 0xE0) != 0x80 || b2 > 127) return;
+        int16_t key = (int16_t)(channel * 128 + b2);
+        modelLock();
+        for (int i = 0; i < UI_TOMBOLA_MAX_BALLS; i++) {
+            Ball& b = g_model.balls[i];
+            if (b.active && b.midiKey == key) b.active = false;
+        }
+        modelUnlock();
+        return;
+    }
+    case 0xB:
+        // All Sound Off / All Notes Off: that channel's balls go
+        if ((b1 & 0xF0) != 0xB0 || (b2 != 120 && b2 != 123)) return;
+        modelLock();
+        removeMidiBalls(channel);
+        modelUnlock();
+        return;
+    case 0xF:
+        // Start / Continue / Stop run the simulation; System Reset drops the
+        // balls notes made. The clock (F8) itself does nothing here.
+        if (b1 == 0xFA || b1 == 0xFB) {
+            if (!ui_tombola_running()) ui_tombola_start();
+        } else if (b1 == 0xFC) {
+            ui_tombola_stop();
+        } else if (b1 == 0xFF) {
+            modelLock();
+            removeMidiBalls(-1);
+            modelUnlock();
+        }
+        return;
+    default:
+        return;
+    }
 }
 
 // Drag control, used by the screen below. Not part of the ui_tombola_* C API:

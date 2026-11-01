@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cmath>
 #include "esp_log.h"
+#include "midi_route.h"
 
 // Global pad configuration
 pad_config_t g_pads[UI_PAD_COUNT] = {0};
@@ -876,6 +877,66 @@ uint8_t ui_xypad_get_scale(uint8_t index, uint8_t* out, uint8_t max_len)
 const xypad_slot_t* ui_xypad_get_slot(uint8_t index)
 {
     return xypad_slot_at(index);
+}
+
+// The pad as a transport that only sends: Ruby makes its MIDI, and hands each
+// message here to go along the routes from the pad's bit (ui_common.h).
+static midi_tmask_t s_xypad_bit = 0;
+
+static int xypad_tx_send(void* ctx, uint8_t cable, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)ctx; (void)cable; (void)cin; (void)b1; (void)b2; (void)b3;
+    return 0;   // Nothing is sent to the pad
+}
+
+static bool xypad_tx_connected(void* ctx)
+{
+    (void)ctx;
+    return true;
+}
+
+static const midi_transport_ops_t s_xypad_ops = {
+    .send_packet     = xypad_tx_send,
+    .read_bytes      = nullptr,
+    .bytes_available = nullptr,
+    .is_connected    = xypad_tx_connected,
+    .transport_id    = MIDI_TRANSPORT_ID_NONE,   // Not a wire transport
+};
+
+static const midi_transport_t s_xypad_transport = {
+    .ops = &s_xypad_ops,
+    .ctx = nullptr,
+};
+
+void ui_xypad_init(void)
+{
+    if (s_xypad_bit) return;
+    s_xypad_bit = MIDI_transport_register(&s_xypad_transport);
+    if (s_xypad_bit == 0) {
+        ESP_LOGW("XYPAD", "MIDI transport registry full: the XYPad is no transport");
+        return;
+    }
+    MIDI_route_set_source(s_xypad_bit, true);
+    // A device on the MIDI Devices screen, as a MIDI IN only
+    ui_mididev_register("xypad", "XYPad", s_xypad_bit, UI_COLOR_RED, true);
+    ui_mididev_set_no_out("xypad");
+}
+
+midi_tmask_t ui_xypad_transport_bit(void)
+{
+    return s_xypad_bit;
+}
+
+midi_tmask_t ui_xypad_targets(uint8_t cin, uint8_t b1)
+{
+    if (!s_xypad_bit) return 0;
+    return MIDI_route_targets(s_xypad_bit, cin, b1) & (midi_tmask_t)~s_xypad_bit;
+}
+
+void ui_xypad_dispatch(midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    if (!s_xypad_bit) return;
+    MIDI_route_dispatch(s_xypad_bit, route & (midi_tmask_t)~s_xypad_bit, cin, b1, b2, b3);
 }
 
 static int xypad_find_free_slot(void)
