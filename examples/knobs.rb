@@ -56,7 +56,8 @@ rescue => e
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# MIDI Devices 画面で選んだ OUT へ送る。未選択ならここで決める。エンコーダを
+# スクリプトの出力（MIDI Devices 画面の Script）へ送る。Script から何もパッチ
+# されていなければここでつなぐ。エンコーダを
 # 使う場合、プライマリ I2C が SAM2695 と競合するので USB を優先する。
 md = UI::MIDIDevices
 md.midi_out ||= if encoders.empty?

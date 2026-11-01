@@ -14,7 +14,7 @@
 # イベントのブロックは UI.process の中で走るので、メインループで UI.process を回す。
 # on_step は 1 拍に何通も来るため、UI.process が遅れて UI のイベントキューが半分埋まると捨てられる
 # （そのときは周回の数え漏れが出る）。ループを短く回し、見るラインも on_step(line:) で絞る。
-# OUT は MIDI Devices 画面の Prog(output) 行で選ぶ。
+# 鳴らすのはスクリプトの出力（MIDI Devices 画面の Script）。行き先は画面で Script の行をパッチして決める。
 
 require 'midi'
 require 'ui'
@@ -26,7 +26,7 @@ unless md.midi_out
   return
 end
 
-seq = UI::Sequencer.new(device: md.midi_out, input: md.midi_in)
+seq = UI::Sequencer.new(device: md.output, input: MIDIDevices.usb_midi_host)
 unless seq.respond_to?(:on_step)
   puts "This firmware has no UI::Sequencer#on_step: flash a build with docs/SEQUENCER.md stage 6"
   return

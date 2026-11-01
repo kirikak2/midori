@@ -179,7 +179,8 @@ class EncoderChannel
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI Device (USB-C)。
+# スクリプトの出力（MIDI Devices 画面の Script）へ送る。Script から何もパッチされて
+# いなければ USB-MIDI Device (USB-C) へつなぐ。
 md = UI::MIDIDevices
 md.midi_out ||= MIDIDevices.usb_midi_device
 unless md.midi_out

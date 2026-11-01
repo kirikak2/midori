@@ -177,7 +177,8 @@ else
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI デバイス (USB-C)。
+# スクリプトの出力（MIDI Devices 画面の Script）へ送る。Script から何もパッチ
+# されていなければ USB-MIDI デバイス (USB-C) へつなぐ。
 # エンコーダの有無に関係なく使える（プライマリ I2C とは競合しない）。
 md = UI::MIDIDevices
 md.midi_out ||= MIDIDevices.usb_midi_device
@@ -199,7 +200,7 @@ t = UI::Tombola.new(
   channel: 9,
   duration: 120,
   velocity_range: 40..127,
-  device: md.midi_out
+  device: md.output      # Script: そのパッチの先へ（画面で張り替えれば移る）
 )
 
 # General MIDI drums, one per side of the hexagon
@@ -216,10 +217,6 @@ t.on_hit do |hit|
   md.midi_out&.trigger(hit[:note], hit[:velocity], duration: t.duration)
 end
 
-# OUT を選び直したら Tombola の送信先も差し替える
-md.on_change do |e|
-  t.device = md.midi_out if e[:kind] == :select_out
-end
 
 t.start
 t.show

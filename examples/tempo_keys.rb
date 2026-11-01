@@ -9,30 +9,26 @@
 #   │       Keys（2 オクターブ）     │
 #   └─────────────────────────────┘
 #
-# 鍵盤は MIDI Devices 画面で選んだ OUT（未選択なら AMY / SAM2695 / PC のうち
-# 最初に見つかったもの）を鳴らし、テンポも MIDI クロックとして同じ OUT へ送る
-# （docs/TEMPO.md）。OUT を選び直すと両方とも移る。
+# 鍵盤はスクリプトの出力（MIDI Devices 画面の Script。何もパッチされていなければ
+# AMY / SAM2695 / PC のうち最初に見つかったものへパッチする）を鳴らす。Script の
+# パッチを画面で張り替えると鍵盤の行き先も移る。テンポは MIDI クロックとして
+# 同じ機器へ送る（docs/TEMPO.md。画面で Tempo の行を張り替えられる）。
 
 require 'midi'
 require 'ui'
 
 md = UI::MIDIDevices
 
-# 未選択ならここで決める（画面で選び直せる）
-md.midi_out ||= MIDIDevices.amy || MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
-unless md.midi_out
+dest = MIDIDevices.amy || MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
+unless dest
   puts "No MIDI output available"
   return
 end
 
-# クロックの送り先（MIDI Devices 画面で Tempo の行をパッチしても同じ）
-clock_to = nil
-follow_out = Proc.new do
-  MIDI.unroute(UI::Tempo, clock_to) if clock_to
-  clock_to = md.midi_out
-  MIDI.route(UI::Tempo, clock_to) if clock_to
-end
-follow_out.call
+# Script から何もパッチされていなければここでつなぐ（画面で張り替えられる）
+md.midi_out ||= dest
+# クロックも同じ機器へ（Script へのルートは Script の入力になるので、機器へ直接）
+MIDI.route(UI::Tempo, dest, channel: :clock)
 
 screen = UI.layout("Tempo + Keys", cols: 4, rows: 2) do
   tempo col: 0..2, row: 0
@@ -40,19 +36,12 @@ screen = UI.layout("Tempo + Keys", cols: 4, rows: 2) do
        min: 40, max: 240, step: 1, value: UI::Tempo.bpm do |v|
     UI::Tempo.bpm = v
   end
-  keys col: 0..3, row: 1, id: :keys, octaves: 2, low: 48, device: md.midi_out
+  keys col: 0..3, row: 1, id: :keys, octaves: 2, low: 48, device: md.output
 end
 
 # TAP / Sync / 他のスクリプトでテンポが変わったら、ノブの表示を合わせる
 # （notify: false でノブのブロックは呼ばない）
 UI::Tempo.on_change { |bpm| screen[:bpm].set_value(bpm, notify: false) }
-
-# OUT を選び直したら、鍵盤の送信先とクロックの送り先を移す
-md.on_change do |e|
-  next unless e[:kind] == :select_out
-  screen[:keys].device = md.midi_out
-  follow_out.call
-end
 
 screen.show
 

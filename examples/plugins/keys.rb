@@ -10,7 +10,8 @@
 #   │                           │
 #   └───────────────────────────┘
 #
-# 鍵盤とノブは MIDI Devices 画面で選んだ OUT を鳴らす（未選択なら鳴らない）。
+# 鍵盤とノブはスクリプトの出力（MIDI Devices 画面の Script）を鳴らす（Script から
+# 何もパッチされていなければ鳴らない）。
 # 外部の鍵盤や PC の DAW から来たノートで鍵を光らせるには、MIDI Devices 画面で
 # その機器の行から Keys の列へパッチする（画面のパッチは保存される）。
 #
@@ -26,7 +27,7 @@ return unless $midori_mode == :ui
 md = UI::MIDIDevices
 
 # 先に作って keys: で渡す（パッドのブロックから参照するため）
-kb = UI::Keys.new(octaves: 3, low: 48, device: md.midi_out)
+kb = UI::Keys.new(octaves: 3, low: 48, device: md.output)
 
 UI.layout("Play", cols: 4, rows: [1, 2]) do
   knob col: 0, row: 0, label: "Cutoff", color: :cyan, value: 64 do |v|
@@ -41,7 +42,3 @@ UI.layout("Play", cols: 4, rows: [1, 2]) do
   keys col: 0..3, row: 1, keys: kb
 end
 
-# 鍵盤の送信先は C が覚えているので、OUT を選び直したら渡し直す
-md.on_change do |e|
-  kb.device = md.midi_out if e[:kind] == :select_out
-end

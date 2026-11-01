@@ -3,8 +3,8 @@
 # encoder8_cc.rb の DFRobot 版。
 #
 # プライマリ I2C (BoardConfig::PRIMARY_I2C_SDA_PIN / PRIMARY_I2C_SCL_PIN) にモジュールを接続し、
-# ノブの絶対値 (0-1023) を CC 値 (0-127) にして、MIDI Devices 画面で選んだ OUT
-# (未選択なら USB-MIDI Device = USB-C の先のホスト) へ送る。
+# ノブの絶対値 (0-1023) を CC 値 (0-127) にして、スクリプトの出力（MIDI Devices 画面の
+# Script。何もパッチされていなければ USB-MIDI Device = USB-C の先のホストへつなぐ）へ送る。
 #
 #   - ノブを回すと CC #(BASE_CC + i) が増減 (LED リングが現在値を表示)
 #   - ノブのボタンを押すと その CC を中央 (64) にリセット
@@ -89,7 +89,8 @@ REL_MARGIN  = GAIN_RELATIVE * 4
 V_MAX = (1023 / GAIN) * GAIN
 
 # ---- 出力先 ----------------------------------------------------------
-# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI Device (USB-C)。
+# スクリプトの出力（MIDI Devices 画面の Script）へ送る。Script から何もパッチされて
+# いなければ USB-MIDI Device (USB-C) へつなぐ。
 md = UI::MIDIDevices
 md.midi_out ||= MIDIDevices.usb_midi_device
 unless md.midi_out

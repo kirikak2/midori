@@ -26,7 +26,8 @@
 #   | 4台目 | bounce     | オクターブ +1  |
 #
 # DFRobot Visual Rotary Encoder（SEN0502）がプライマリ I2C に無ければ 0 台で動く。
-# 出力は MIDI Devices 画面で選んだ OUT（未選択なら USB-MIDI デバイス、USB-C）。
+# 出力はスクリプトの出力（MIDI Devices 画面の Script。何もパッチされていなければ
+# USB-MIDI デバイス、USB-C へつなぐ）。
 #
 # Tombola 画面と違ってナビバー中央に Start / Stop は無い（スクリプトで start 済み）。
 
@@ -158,7 +159,8 @@ else
 end
 
 # ---- 出力先 ----------------------------------------------------------
-# MIDI Devices 画面で選んだ OUT へ送る。未選択なら USB-MIDI デバイス (USB-C)。
+# スクリプトの出力（MIDI Devices 画面の Script）へ送る。Script から何もパッチ
+# されていなければ USB-MIDI デバイス (USB-C) へつなぐ。
 # エンコーダの有無に関係なく使える（プライマリ I2C とは競合しない）。
 md = UI::MIDIDevices
 md.midi_out ||= MIDIDevices.usb_midi_device
@@ -181,7 +183,7 @@ t = UI::Tombola.new(
   channel: 9,
   duration: 120,
   velocity_range: 40..127,
-  device: md.midi_out
+  device: md.output      # Script: そのパッチの先へ（画面で張り替えれば移る）
 )
 
 t.scale = [36, 38, 42, 45, 46, 49]
@@ -195,10 +197,6 @@ t.on_hit do |hit|
   md.midi_out&.trigger(hit[:note], hit[:velocity], duration: t.duration)
 end
 
-# OUT を選び直したら Tombola の送信先も差し替える
-md.on_change do |e|
-  t.device = md.midi_out if e[:kind] == :select_out
-end
 
 t.start
 

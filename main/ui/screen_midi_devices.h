@@ -7,7 +7,8 @@
 
 // MIDI Devices: a crossbar of the registered devices (docs/UI_MIDI_DEVICES.md).
 // Rows are MIDI INs, columns MIDI OUTs; a cell is a route (MIDI.route). The
-// "Prog" column / row pick the program's own IN / OUT. A long press on a cell
+// script is the "Script" device (its midi_out is its row, its midi_in its
+// column). A long press on a cell
 // opens its picker: the channels it passes, or (Filters tab) the named
 // filters chained on it and their parameters (docs/MIDI_FILTER_REGISTRY.md).
 // Rows and columns that do not fit scroll (drag); the corner button shows all
@@ -104,12 +105,11 @@ private:
     uint32_t signature() const;
 
     // Hit testing. Returns false outside the grid. row / col are positions in
-    // rows / cols (scrolling taken into account); rowCount / colCount mean the
-    // Prog row / column; -1 a header.
+    // rows / cols (scrolling taken into account); -1 a header.
     bool hit(int x, int y, int* row, int* col) const;
     bool cornerHit(int x, int y) const;    // The view button
-    int  rowY(int row) const;              // Top of row (a position in rows, or rowCount)
-    int  colX(int col) const;              // Left of col (... cols, or colCount)
+    int  rowY(int row) const;              // Top of row (a position in rows)
+    int  colX(int col) const;              // Left of col (... in cols)
     void keep(int from, int to);           // A patch changed here: keep its row / column
     void setView(View view);
     void tap(int x, int y);
@@ -142,6 +142,7 @@ private:
     int  paramRows() const;                        // Rows per page
     void displayName(const ui_mididev_t& d, char* buf, int len) const;
     bool isUp(const ui_mididev_t& d) const;
+    bool isScript(const ui_mididev_t& d) const;
 };
 
 // Global instance

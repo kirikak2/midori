@@ -14,9 +14,11 @@
 #   - クロックは Tempo から（UI::Sequencer.new の既定）。Play で Tempo を Start する
 #   - パターン 0 = 基本のビート、パターン 1 = 2 小節目の終わりにフィル。どちらも 2 小節（Bass が 32 ステップ）。
 #     チェーンは 0 × 3 → 1（2 小節 × 3 回のあとにフィル）
-#   - 選んだ IN（外部の鍵盤など）で弾いた和音を、Chord パッドで Keys ラインに置ける
+#   - 外部の鍵盤（USB-MIDI Host。MIDI Devices 画面で Sequencer の列へ別の機器をパッチしても
+#     よい）で弾いた和音を、Chord パッドで Keys ラインに置ける
 #
-# IN / OUT は MIDI Devices 画面の Prog(input) 列 / Prog(output) 行で選ぶ。
+# 鳴らすのはスクリプトの出力（MIDI Devices 画面の Script）。行き先は画面で Script の行を
+# パッチして決める。
 
 require 'midi'
 require 'ui'
@@ -28,7 +30,7 @@ unless md.midi_out
   return
 end
 
-seq = UI::Sequencer.new(device: md.midi_out, input: md.midi_in)
+seq = UI::Sequencer.new(device: md.output, input: MIDIDevices.usb_midi_host)
 
 # --- パターン 0 ---
 seq.line(0, name: "Kick",  channel: 9).pattern("x...x...x...x...", notes: [36])

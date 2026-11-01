@@ -18,10 +18,11 @@
 # 画面切り替え（docs/UI_NAVIGATION.md）:
 #   - Home のタイル（各レイアウトが 1 枚ずつ）、ナビバーの Home / Back
 #   - パッドから layout.show
-#   - MIDI Devices 画面で選んだ IN（USB-MIDI のコントローラなど）の
+#   - MIDI Devices 画面で Script へパッチした機器（USB-MIDI のコントローラなど）の
 #     プログラムチェンジ 0 / 1
 #
-# 音は MIDI Devices 画面で選んだ OUT へ送る（未選択なら鳴らない）。
+# 音はスクリプトの出力（MIDI Devices 画面の Script）へ送る（Script から何もパッチされて
+# いなければ鳴らない）。
 #
 # 起動時に読むファイルなので、ループも show も書かない（ブロックは UI モードの
 # ループの UI.process で走る）。ノブの値も、回すまでは送らない。
@@ -93,7 +94,7 @@ end
 perform.widgets.each { |w| xy = w if w.is_a?(UI::XYPad) }
 
 # ---- MIDI 入力から画面を切り替える ----------------------------------------
-# md.input は選んだ IN に追従する（画面で IN を選び直してもハンドラはそのまま）
+# md.input は Script へパッチされた機器から届く（画面で張り替えてもハンドラはそのまま）
 pages = [perform, mix]
 md.input.on(:program_change) do |m|
   page = pages[m.program]

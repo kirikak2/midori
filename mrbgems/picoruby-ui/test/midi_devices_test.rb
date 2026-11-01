@@ -1,6 +1,6 @@
 # Host tests for UI::MIDIDevices (mrblib/ui_midi_devices.rb) on top of the
 # MIDI filter / route Ruby code. The C sides of both gems are stubbed: the UI
-# model is a small Ruby imitation of ui_midi_devices.cpp's list / selection.
+# model is a small Ruby imitation of ui_midi_devices.cpp's list.
 #
 #   ruby test/midi_devices_test.rb          (from the picoruby-ui directory)
 
@@ -14,11 +14,13 @@ load File.join(midi, "mrblib/midi_clock.rb")
 load File.join(midi, "mrblib/midi_filter_class.rb")
 
 $up = {}   # bit => connected?
+SCRIPT = 0x100              # The Script device: picoruby-midi's virtual port
+$stub[:virtual] = SCRIPT
 
 module MIDI
   class << self
     def _transport_connected?(bit); $up[bit] ? true : false; end
-    def _route_sources; 0x07 | 0x20; end   # + the on-screen keys
+    def _route_sources; 0x07 | 0x20 | SCRIPT; end   # + the on-screen keys, Script
     def _route_get(i)
       r = $stub[:routes][i]
       r ? [r[0], r[1], r[2], r[3]] : nil
@@ -33,7 +35,6 @@ end
 
 # The C model (ui_midi_devices.cpp), reduced to what Ruby sees
 $devs = []        # [bit, flags, key, name]
-$sel = [-1, -1]
 $wanted = []
 $serial = 0
 $events = []
@@ -79,8 +80,6 @@ module UI
 
     def _mididev_count; $devs.size; end
     def _mididev_get(i); $devs[i] ? $devs[i].dup : nil; end
-    def _mididev_selected(out); $sel[out ? 1 : 0]; end
-    def _mididev_select(out, i, save); $sel[out ? 1 : 0] = i; $serial += 1; end
     def _mididev_restore; 0; end
     def _mididev_save; true; end
     def _mididev_take_wanted; $wanted.shift; end
@@ -164,27 +163,25 @@ check "script device default name", [0x10, 0, "", "Extra"], $devs[3]
 check "script device wrapped", MIDI::Device, extra.class
 check_raises("unregistered transport", "not a registered") { M.register(FakeTransport.new(0, "x")) }
 
-# --- selection ---------------------------------------------------------------------
+# --- Script: the script's IN / OUT ------------------------------------------------
 
-check "nothing selected", nil, M.midi_in
+$devs.unshift([SCRIPT, 1, "script", "Script"])   # Registered by C before the rest
+check "nothing patched to Script", nil, M.midi_in
+check "nothing patched from Script", nil, M.midi_out
 M.midi_in = j6
-check "midi_in index", 0, $sel[0]
-check "midi_in device", j6, M.midi_in
-check_raises("IN must be a source", "no MIDI IN") { M.midi_in = MIDI::Device.new(AMY) }
+check "midi_in= patches to Script", [[0x01, SCRIPT, MIDI::ROUTE_ALL_CHANNELS]], $stub[:routes]
+check "midi_in is Script", SCRIPT, MIDI.route_bit(M.midi_in)
+M.midi_in = MIDI::Device.new(FakeTransport.new(0x04, "PC"))
+check "midi_in= replaces", [[0x04, SCRIPT, MIDI::ROUTE_ALL_CHANNELS]], $stub[:routes]
+check_raises("IN must be a source", "source must be") { M.midi_in = MIDI::Device.new(AMY) }
 M.midi_out = MIDI::Device.new(AMY)
-check "midi_out device bit", 0x08, MIDI.route_bit(M.midi_out)
+check "midi_out is Script", SCRIPT, MIDI.route_bit(M.midi_out)
+check "midi_out= patches from Script", [SCRIPT, 0x08], $stub[:routes].last[0, 2]
 M.midi_out = nil
 check "midi_out cleared", nil, M.midi_out
-
-# A standby OUT starts when asked for
-$devs[2][0] = 0
-$devs[2][1] |= 2
-$ui_mididev_devices.delete(0x08)
-started.clear
-$sel[1] = 2
-out = M.midi_out
-check "standby OUT started on access", [:amy], started
-check "and returned", 0x08, MIDI.route_bit(out)
+M.midi_in = nil
+check "midi_in cleared", [], $stub[:routes]
+$stub[:routes] = []
 
 # A bit nobody made an object for this VM: a BitTransport device
 $devs << [0x20, 1, "keys", "Keys"]
@@ -222,87 +219,34 @@ M.unregister(UART)
 check "unregister drops patches to it", 2, M.patches.size
 check "unregister drops entry", nil, $devs.index { |d| d[0] == 0x02 }
 
-# --- input follows the selection --------------------------------------------------------
+# --- input: what is routed into Script ----------------------------------------------------
 
 $stub[:filters] = {}
 $__midi_filters__ = {}
-$sel[0] = -1
 got = []
 inp = M.input
 h = inp.on(:note_on) { |m| got << [m.note, m.source] }
-check "no source yet", false, $stub[:filters].key?([0x01, MIDI::DST_RUBY])
-
-$sel[0] = 0
-$serial += 1
-MIDI.run_filters                       # the hook notices the new serial
-check "listening on the IN", true, $stub[:filters].key?([0x01, MIDI::DST_RUBY])
-check "input device", j6, inp.device
-$stub[:queue] << [MIDI::DST_RUBY, 0x01, 0x9, 0x90, 60, 100]
+check "listening on Script by types", 1 << 0x9, $stub[:vlisten] & (1 << 0x9)
+check "no C filter for it", false, $stub[:filters].key?([SCRIPT, MIDI::DST_RUBY])
+check "input device: nothing patched yet", nil, inp.device
+MIDI.route(j6, SCRIPT)
+check "input device: Script", SCRIPT, MIDI.route_bit(inp.device)
+$stub[:queue] << [MIDI::DST_VIRTUAL, 0x01, 0x9, 0x90, 60, 100]
 MIDI.run_filters
-check "handler got it", [[60, :usb_host]], got
-
-# the user picks another IN: the handler moves
-keys_index = $devs.index { |d| d[2] == "keys" }
-$sel[0] = keys_index
-$serial += 1
-MIDI.run_filters
-check "old source dropped", false, $stub[:filters].key?([0x01, MIDI::DST_RUBY])
-check "new source", true, $stub[:filters].key?([0x20, MIDI::DST_RUBY])
-
+check "handler got it, with its source", [[60, :usb_host]], got
+check "external bpm from what is patched", 120.0, inp.external_bpm
 inp.off(h)
-check "off", false, $stub[:filters].key?([0x20, MIDI::DST_RUBY])
+check "off", 0, $stub[:vlisten]
+MIDI.unroute_all
 
-# a selection that cannot be a source (AMY) is taken as none, not an error
-inp.on(:note_on) { |m| m }
-$sel[0] = $devs.index { |d| d[2] == "amy" }
-$serial += 1
-MIDI.run_filters
-check "non-source IN ignored", nil, inp.device
-check "nothing listened", false, $stub[:filters].key?([0x08, MIDI::DST_RUBY])
+# --- output: Script as a device -----------------------------------------------------------
 
-# --- the OUT that follows the selection ---------------------------------------------------
-
-class RecTransport < FakeTransport
-  attr_reader :sent
-  def initialize(bit, info); super; @sent = []; end
-  def send_packet(cable, cin, b1, b2, b3); @sent << [cin, b1, b2, b3]; 0; end
-end
-
-SYN_A = RecTransport.new(0x40, "Synth A")
-SYN_B = RecTransport.new(0x80, "Synth B")
-M.register(SYN_A)
-M.register(SYN_B)
-
-$sel[1] = -1
-$serial += 1
 out = M.output
 check "output is kept", out, M.output
-check "no OUT: nowhere to send", 0, out.transport.transport_id
-check "no OUT: send is a no-op", 0, out.note_on(60, 100)
-
-$sel[1] = $devs.index { |d| d[0] == 0x40 }
-$serial += 1
+check "output is Script", SCRIPT, MIDI.route_bit(out)
+$stub[:sent] = []
 out.note_on(60, 100)
-check "sent to the OUT picked", [[0x9, 0x90, 60, 100]], SYN_A.sent
-check "its bit (trigger / route)", 0x40, MIDI.route_bit(out)
-check "info", "Synth A", out.info
-
-# the user picks another OUT: the kept device follows at once, and the old
-# OUT gets All Notes Off on every channel
-$sel[1] = $devs.index { |d| d[0] == 0x80 }
-$serial += 1
-out.note_off(60)
-check "now sent to the new OUT", [[0x8, 0x80, 60, 0]], SYN_B.sent
-check "old OUT: All Notes Off x16", 16, SYN_A.sent.count { |p| p[0] == 0xB && p[2] == 123 }
-check "old OUT: one per channel", (0..15).to_a, SYN_A.sent.select { |p| p[2] == 123 }.map { |p| p[1] & 0x0F }
-
-# a change found by the hook (no message sent in between) also releases
-SYN_B.sent.clear
-$sel[1] = -1
-$serial += 1
-MIDI.run_filters
-check "deselected: old OUT released from the hook", 16, SYN_B.sent.size
-check "deselected: nothing to send to", 0, out.transport.transport_id
+check "sent to Script (C sends it along its routes)", [[SCRIPT, 0x9, 0x90, 60, 100]], $stub[:sent]
 
 # --- events -----------------------------------------------------------------------------
 

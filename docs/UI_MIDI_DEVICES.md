@@ -7,7 +7,7 @@ MIDI デバイスを列挙し、デバイス間の IN → OUT をパッチング
 旧 MIDI Info 画面を置き換えた（USB デバイス診断はデバイス詳細へ移した）。
 
 - 画面: [main/ui/screen_midi_devices.cpp](../main/ui/screen_midi_devices.cpp)
-- モデル（デバイス一覧・選択・NVS）: [main/ui/ui_midi_devices.cpp](../main/ui/ui_midi_devices.cpp)
+- モデル（デバイス一覧・Script・NVS）: [main/ui/ui_midi_devices.cpp](../main/ui/ui_midi_devices.cpp)
 - Ruby API: [mrbgems/picoruby-ui/mrblib/ui_midi_devices.rb](../mrbgems/picoruby-ui/mrblib/ui_midi_devices.rb)
 - 内蔵デバイスの登録: `components/midori-runtime/mrblib/main_task_base.rb` の `setup_midi_devices`
 - サンプル: [examples/midi_devices.rb](../examples/midi_devices.rb)
@@ -20,7 +20,8 @@ MIDI デバイスを列挙し、デバイス間の IN → OUT をパッチング
 3. 異なるデバイスの IN / OUT をパッチングして、任意の MIDI IN を MIDI OUT にルーティングできる
 4. ネゴシエーションできていない（未接続の）デバイスは非活性になり、ルーティングがあっても何もしない
 5. Ruby プログラムが使う `MIDI::Device` を設定でき、`UI::MIDIDevices.midi_in` /
-   `UI::MIDIDevices.midi_out` で取り出せる
+   `UI::MIDIDevices.midi_out` で取り出せる → 2026-11-01 から**スクリプト自身を `Script` という
+   デバイス**にし、`midi_in` / `midi_out` はその仮想デバイス（下の「Script デバイス」）
 
 ## 決定事項
 
@@ -28,7 +29,7 @@ MIDI デバイスを列挙し、デバイス間の IN → OUT をパッチング
 |------|------|
 | 内蔵デバイスの登録 | **起動時に自動登録**（UI モードでもパッチ盤として使えるように） |
 | パッチの保存 | **NVS に保存**（UI モード・再起動後も残る） |
-| `midi_in` 変更時の入力の追従 | **選択に追従する `UI::MIDIDevices.input` を gem 側で提供**（実体は [MIDI_FILTER.md](MIDI_FILTER.md) の宛先のない filter） |
+| スクリプトの IN / OUT | **`Script` デバイス**（picoruby-midi の仮想ポート、1 ビット）。2026-11-01 まで Prog(input) 列 / Prog(output) 行で 1 台ずつ選んでいた |
 
 ## 基本方針
 
@@ -37,7 +38,7 @@ MIDI デバイスを列挙し、デバイス間の IN → OUT をパッチング
 - **画面に出すパッチは C のルート表そのもの**（[midi_route.h](../mrbgems/picoruby-midi/include/midi_route.h)）。
   `patch` は `MIDI.route` の別名。スクリプトや `UI::Keys` が `MIDI.route` で張ったルートも、
   両端が登録済みなら画面に出る。モデル（`ui_midi_devices.cpp`）が持つのは、ルート表が知らないこと
-  だけ：どのビットを一覧に出すか、表示名、内蔵デバイスの NVS 用キー、Prog の選択、保存済みパッチ
+  だけ：どのビットを一覧に出すか、表示名、内蔵デバイスの NVS 用キー、保存済みパッチ
 - 向きは Midori から見た向き:
   - **MIDI IN** … デバイスから Midori に入ってくる側 = ルートの送信元（`MIDI_route_sources()` に含まれるもの）
   - **MIDI OUT** … Midori からデバイスへ送る側 = 登録表の任意のトランスポート
@@ -58,19 +59,20 @@ md.patch(pc, sam, channel: :clock)  # クロックだけ
 md.patch(j6, amy, channel: [0, 9, :clock])  # チャンネル 1・10 とクロック（ルート 1 件）
 md.unpatch(j6, sam)              # = MIDI.unroute
 md.patches   # => [{from:, to:, channel: nil, active: true, filtered: false}, ...]（channel は 0..15 / nil = 全部 / :clock / それらの Array）
-md.save      # 今の内蔵デバイス間のパッチと選択を NVS に保存（スクリプトの初期状態にする）
+md.save      # 今の内蔵デバイス間のパッチを NVS に保存（スクリプトの初期状態にする）
 
-md.midi_in  = j6                 # プログラムが使うデバイス（スクリプト限り。保存はしない）
-md.midi_out = amy
-md.midi_in                       # => MIDI::Device または nil（画面で変わるので毎回聞き直す）
-md.midi_out                      # standby の AMY が選ばれていればここで起動する
-md.input                         # 選択中の IN に追従する入力（後述）
-md.output                        # 選択中の OUT に追従する MIDI::Device（後述）
+md.midi_in  = j6                 # j6 → Script に張り替える（スクリプト限り。nil で全部外す）
+md.midi_out = amy                # Script → amy に張り替える
+md.midi_in                       # => Script（何かが Script へパッチされていれば）/ nil
+md.midi_out                      # => Script（Script から何かへパッチされていれば）/ nil
+md.input                         # Script へ届くもの（後述）
+md.output                        # Script の MIDI::Device。nil にならない（後述）
+md.script_bit                    # Script のビット（= MIDI._route_virtual。無いボードでは 0）
 md.devices                       # => 起動済みデバイスの MIDI::Device 配列
 md.active?(j6)                   # => 接続済みか（transport の is_connected）
 
 md.on_change do |e|              # UI.process 経由
-  # e[:kind] = :select_in / :select_out / :patch / :unpatch / :connect / :disconnect
+  # e[:kind] = :patch / :unpatch / :connect / :disconnect（:select_in / :select_out は出なくなった）
   # e[:device]（= e[:from]）/ e[:to] は MIDI::Device、e[:channel] は nil / 0..15 / :clock / それらの Array
 end
 md.show                          # = UI.show(:midi_devices) / UI.midi_devices
@@ -98,22 +100,25 @@ UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :y
 
 ## 画面
 
-クロスバー。行が IN（送信元になれるデバイス）、列が OUT（全デバイス）。最後の列が **Prog(input)**（プログラムの IN を選ぶ）、最後の行が **Prog(output)**（OUT を選ぶ）。
-見出しが 1 行に収まらないとき（CrowPanel / CoreS3 の列幅など）は `Prog` と `(input)` / `(output)` の 2 行にする。
+クロスバー。行が IN（送信元になれるデバイス）、列が OUT（全デバイス）。**スクリプト自身も `Script`
+というデバイス**で、ほかと同じく行と列を 1 つずつ持つ（見出しはシアン、一覧の先頭）。Script の行が
+スクリプトの出力の行き先、Script の列がスクリプトの入力の出どころ。
 
 ```
-              J-6  SAM  AMY   PC │Prog(input)
-● J-6          ─    ●    ●    ·  │ ◉
-○ PC           ○    ·    ·    ─  │ ○
-● Keys         ·    ·    ●    ·  │ ○
-─────────────────────────────────┼────
-  Prog(output)  ·   ◉    ·    ·  │
+            Script J-6  SAM  AMY   PC
+● Script      ─     ·    ●    ●    ·      ← midi_out は SAM と AMY へ
+● J-6         ●     ─    ·    ●    ·      ← J-6 は Script（midi_in）と AMY へ
+○ PC          ·     ○    ·    ·    ─
+● Keys        ·     ·    ·    ●    ·
 ```
 
 - 行見出しの丸: 緑 = 接続済み、暗い灰色 = 未接続。列見出しの下の線: 緑 / 灰色 / **黄 = standby**（AMY 起動前）
 - パッチ: 送信元の色で塗った丸。**片端が未接続（または standby）なら灰色の輪**（要件 4 の表示）。
   チャンネル指定は左下に `1-4,10,clk` のように（3 つ以上続くチャンネルは範囲、クロックは `clk`。
   セルに収まらなければ末尾を `+` で切る）、Ruby の filter があれば右上に黄色の `f`
+- **パッチを外すと宛先の音を止める**（2026-11-01）: そのパッチでノートを通したチャンネルにだけ、宛先へ
+  Sustain Off（CC64 = 0）と All Notes Off（CC123）を送る（picoruby-midi の `MIDI_route_remove()`。
+  鳴っている音のノートオフは、外したあとでは届かないため）。チャンネルを選び直したとき（外して張り直す）も同じ
 - **セルをタップ**: パッチの付け外し（新規は全チャンネル）。**長押し**: チャンネル選択
   （All / **Clock** / 1〜16 / Off / Done）。**Clock と 1〜16 は複数選べる**（タップで個別に入り切り。
   All を選んでいたら外れる。最後の 1 つを切るとパッチごと外れる）。All と Off は選んだら閉じる。
@@ -125,8 +130,7 @@ UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :y
   （`channel: [0, 9, :clock]`、C では `MIDI_route_add_selection()` / `MIDI_ROUTE_SEL_*`）。
   NVS では `from>to:clock` / `from>to:0+9+clock`（0 始まりのチャンネルを `+` でつなぐ。旧形式の
   `from>to:9` もそのまま読める）
-- **Prog(input) 列**のタップで `midi_in`、**Prog(output) 行**で `midi_out` を選ぶ（もう一度タップで解除）。
-  画面での選択は NVS に保存する（ユーザーの明示的な操作なので）
+- Script → Script のセルは自分自身なので `─`（張れない）
 - **見出しを長押し**: デバイス詳細（キー・ビット・状態・USB Host の製品名と EP・USB Device の
   TinyUSB 診断・filter キューの溢れ件数）。タップで閉じる
 - 自分自身へのセル（同じデバイスの IN → OUT）は `─`
@@ -138,7 +142,7 @@ UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :y
 - **スクロール**: セルには最小サイズがある（Tab5 / CrowPanel 84×52、CoreS3 34×22）。全部が入る
   ときは従来どおり最大サイズまで広げ、入らないときは入るだけの行・列を並べて残りをスクロールする。
   グリッドの上で**ドラッグ**すると指に付いてセル単位で動く（オフセットが変わったときだけ描き直す）。
-  行見出し・列見出し・**Prog 行 / 列は固定**で、常に見えている。はみ出している向きには、
+  行見出し・列見出しは**固定**で、常に見えている。はみ出している向きには、
   右端 / 下端のマージンにスクロールバー（灰色のつまみ）が出る
 - **表示フィルタ**: 左上の角（行見出しの上、以前は空き）のボタンをタップするたびに
   **All → Patched → Unpatched** と切り替わる（All 以外はシアン地）
@@ -149,7 +153,7 @@ UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :y
   - 判定は行・列（デバイス）単位。セル単位で絞るとグリッドにならないため
   - **画面でパッチを付け外しした行・列は、フィルタを選び直すまで残る**（Unpatched でつないだ途端に
     行が消えて隣のセルを押してしまう、などを防ぐ）。画面に入り直すか、デバイスの数が変わったときも解除
-  - 何も残らないときは Prog 行の下に `No patches` / `Nothing unpatched`
+  - 何も残らないときはグリッドの下に `No patches` / `Nothing unpatched`
   - 選んだ表示は画面を出ても保持する（NVS には保存しない）
 - 各セルのパッチ選択は、モデルが変わったとき（200ms ごとのハッシュ比較・タップ）に 1 回だけ
   `ui_mididev_patch_selection()` で引いてヒープの Grid に持つ（描画は帯ごとに何度も呼ばれるため）
@@ -171,50 +175,60 @@ UI::MIDIDevices.register_builtin(:din2, "DIN 2", MIDI.route_bit(din2), color: :y
 （`ui_mididev_tick()`、250ms ごと）が見て、変化したら `:connect` / `:disconnect` を発行する。
 `midi_out` は未接続でも nil にしない（抜き差しでスクリプトの分岐が変わらないように）。
 
-## 選択に追従する出力（UI::MIDIDevices.output）
+## Script デバイス（midi_in / midi_out / input / output、2026-11-01）
 
-`midi_out` が返すのは**その時点で選ばれている機器**の `MIDI::Device` で、変数に入れたり
-プレイヤに渡したりすると、あとで画面の Prog(output) 行を選び直しても古い機器へ送り続ける
-（2026-10-23 に bach_air.rb で発覚）。保持するなら `output` を使う。
+スクリプト自身を **`Script`** というデバイスにした（キー `script`、UI の初期化時に C の
+`ui_mididev_script_init()` が一覧の先頭に登録）。2026-11-01 までは Prog(input) 列 / Prog(output) 行で
+スクリプトの IN / OUT を 1 台ずつ選んでいたが、ほかの機器と同じくパッチで表すようにした。
+
+**ビットは 1 つ**（IN / OUT を分けない）。向きで意味が変わる:
+
+| 操作 | 意味 |
+|---|---|
+| Script **へ送る**（`midi_out` / `output` への送信、`device: md.output` にした `UI::Keys` などの C からの送信、`trigger`） | **Script からの出力**。Script から張ったルートへ流れる（`MIDI_route_packet(script, ...)`） |
+| 他の機器から Script **へのルート** | **スクリプトの入力**。ルート表はトランスポートへ送らず、Ruby のキューへ積む（`midi_in` / `input` / `MIDI.on(script)`） |
+| Script → Script | 張れない（送信元と宛先が同じルートは C が拒む） |
+
+仕組みは picoruby-midi の**仮想ポート**（[midi_route.h](../mrbgems/picoruby-midi/include/midi_route.h)、
+`MIDI_route_set_virtual()`）。登録表のビットを 1 つ仮想ポートに指定すると、`MIDI_route_dispatch()` は
+宛先に入ったそのビットを `MIDI_transport_send()` から外し、`MIDI_ROUTE_DST_VIRTUAL`（0x20000）を付けて
+filter のキューへ積む（Ruby が聞いている CIN だけ。`MIDI_route_set_virtual_listen()`）。
+Script のトランスポートの `send_packet` は `MIDI_route_packet()` を呼ぶだけ。
+filter の付いたルートの宛先が Script のときも、Ruby は filter の結果を送らずに Script のリスナーへ渡す
+（`MIDI._deliver`）。
 
 ```ruby
-out = UI::MIDIDevices.output         # 何度呼んでも同じオブジェクト
+md = UI::MIDIDevices
+out = md.output                      # Script の MIDI::Device。何度呼んでも同じ、nil にならない
 player = MIDI::MML::CombinedPlayer.new(out)
-UI.pad(1) { out.trigger(36) }
-xy = UI::XYPad.new(device: out)      # XYPad は Ruby から送るのでこれで追従する
-```
+UI.pad(1) { out.trigger(36) }        # スケジューラもビットで Script へ → パッチの先で鳴る
+keys = UI::Keys.new(device: out)     # C から送る部品も、画面で Script を張り替えれば行き先が移る
 
-- 中身は `OutputTransport`（Ruby）を包んだ `MIDI::Device`。送るたびにモデルの serial を見て、
-  変わっていれば `midi_out` を引き直す。`transport_id` も今の OUT のビットを返すので、
-  `trigger` / `trigger_batch`（C のスケジューラにビットで渡る）も今の OUT へ行く。
-  OUT が未選択の間は何も送らない（`transport_id` は 0）
-- OUT が替わったら、**前の OUT に全チャンネルの All Notes Off** を送る（前の OUT で鳴らした
-  ノートの note off が新しい OUT へ行って、鳴りっぱなしになるのを防ぐ）。何も送らない間の
-  切り替えも `input` と同じフック（`MIDI.run_filters` / `UI.process`）で拾う
-- **C から送る部品には効かない**: `UI::Keys` / `UI::Tombola` の `device:` と `MIDI.route` は、
-  渡された時点のビットを C に覚える。これらは `on_change` の `:select_out` で `midi_out` を
-  渡し直す（examples/keys.rb / tombola.rb）。`MIDI.start!(output:)` のクロックのルートも同じで、
-  examples/bach_air.rb は `MIDI::Clock` のルートを自分で張り直している
-
-## 選択に追従する入力（UI::MIDIDevices.input）
-
-```ruby
-inp = UI::MIDIDevices.input          # 何度呼んでも同じオブジェクト
-h = inp.on(:note_on) { |m| UI::MIDIDevices.midi_out&.note_on(m.note + 12, m.velocity) }
-inp.on(:any) { |m| puts m.device }  # m は MIDI::Message（MIDI.on と同じ）
+inp = md.input                       # Script へパッチされた機器から届く（何台でも）
+h = inp.on(:note_on) { |m| out.note_on(m.note + 12, m.velocity) }
+inp.on(:any) { |m| puts m.source }   # どの機器から来たか
 inp.off(h)
-inp.device                           # 今聞いているデバイス
-inp.external_bpm                     # その外部クロックの BPM
-MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
+inp.external_bpm                     # Script へパッチされた機器のうち、最初にクロックが測れたもの
+MIDI.on(md.script_bit, :control_change) { |m| ... }   # input と同じ
+
+md.midi_out ||= MIDIDevices.amy      # Script から何もパッチされていなければ AMY へつなぐ
+md.midi_in  ||= MIDIDevices.usb_midi_host
 ```
 
-- ハンドラを持つ小さな Ruby オブジェクト。選択中の IN に対して `MIDI.on` を張り、選択が変わったら
-  旧受信元の `MIDI.off` → 新受信元の `MIDI.on` で付け替える
-- **付け替えは Ruby 側**。`MIDI.run_filters` の先頭のフック（`$__midi_filter_hooks__`）で
-  モデルの serial を見て、変わっていれば追従する。`MIDI.sleep_ms` / クロックループ / `UI.process`
-  のどれかを回していれば数十 ms で切り替わる（設計段階では UI タスクが C で直接付け替える案だった。
-  `MIDI.on` の listener と同じ C のスロットを共有するので、Ruby の filter 表と食い違わないよう Ruby に寄せた）
-- 選択が送信元でない（登録解除された等）ときは「選択なし」として扱う（例外を出さない）
+- `midi_out` / `midi_in` は、Script からの / Script へのパッチが**ある間だけ** Script を返し、なければ nil
+  （以前の「未選択なら nil」に合わせた。`md.midi_out ||= dev` と `md.midi_out&.note_on` がそのまま動く）。
+  保持するなら `output` / `input`
+- `midi_out = dev` / `midi_in = dev` は Script からの / への**パッチを張り替える**（スクリプト限り。
+  スクリプトが終わればルート表ごと消え、保存済みのパッチに戻る）。`nil` で全部外す
+- 以前の「選択に追従する」仕掛け（`OutputTransport`、`:select_out` での `device:` の渡し直し、
+  OUT を替えたときの All Notes Off）は不要になった。Script のビット自体は変わらないので、C に覚えさせても
+  パッチの張り替えに追従する
+- **`MIDI.start!` / `bpm_loop` の `output: md.output`**: クロックを Script へルートするとスクリプトの
+  入力になってしまうので、`MIDI::Clock._attach` は仮想ポートを断り、ループが自分で F8 / Start / Stop を
+  Script へ送る（＝パッチの先へ出ていく。Ruby の計時）
+- **`UI::Sequencer.new(input: md.midi_in)` は意味が変わった**: Script → Sequencer のルート（スクリプトの
+  出力をシーケンサへ）になる。外部の鍵盤を入力にするなら機器を直接渡す（examples/sequencer.rb）
+- 同様に `MIDI.route(md.midi_in, x)` は「スクリプトの出力 → x」になる。機器どうしを直接つなぐ
 
 ## 内蔵デバイスの自動登録
 
@@ -224,6 +238,7 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 
 | キー（NVS 用） | デバイス | IN | OUT | ビット | 備考 |
 |------|---------|----|-----|-----|------|
+| `script` | このスクリプト | ○ | ○ | 起動時に決まる | 仮想ポート（上の「Script デバイス」）。UI の初期化時に C 側（`ui_midi_devices.cpp`）が一覧の先頭に登録 |
 | `usb_host` | USB-MIDI Host | ○ | ○ | 0x01 | 表示名は接続中デバイスの製品名、未接続時 "USB Host" |
 | `uart` | SAM2695 | ○ | ○ | 0x02 | |
 | `usb_dev` | USB-MIDI Device | ○ | ○ | 0x04 | 表示名 "PC" |
@@ -236,7 +251,7 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 - USB Host / UART / USB Device は起動時に工場ブロックを呼んで初期化する（スクリプトモードでも。
   以前は初回アクセスまで遅延していた）。UART は初期化しないと接続扱いにならず受信もしないため
 - **AMY は standby**（ビット 0）で登録する。`AMY::Transport.instance` はオーディオエンジンを起動する
-  （I2S・ディレイライン・Tab5 の USB パッドの付け替え）ので、保存済みパッチ・Prog の選択・画面での
+  （I2S・ディレイライン・Tab5 の USB パッドの付け替え）ので、保存済みパッチ・画面での
   パッチで必要になったときに初めて起動する（C が「wanted」に印を付け、Ruby が `UI::MIDIDevices._poll`
   で拾って工場ブロックを呼ぶ）。スクリプトが `MIDIDevices.amy` で起動した場合も `init_amy` が
   `UI._mididev_activate` を呼ぶ。起動すると、**AMY が関わる保存済みパッチだけ**を張る
@@ -251,7 +266,8 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 - 名前空間 `midi_devs`
 - `patches` … `"<from>><to>[:<ch>]"` を `,` で連結（例: `usb_host>amy,usb_host>uart:9,keys>amy`）、最大 32 件
   （2026-11-01 まで 16 件）
-- `in` / `out` … Prog の選択（キー。未選択は削除）
+- `in` / `out` … 以前の Prog の選択（キー）。2026-11-01 から使わない。残っていれば最初の読み込みで
+  `<in>>script` / `script><out>` の保存済みパッチに置き換え（すでにあれば足さない）、キーは消す
 - `defaults` … 既定パッチをどの版まで足したか（u8、2026-10-25）
 
 既定パッチ（`ui_midi_devices.cpp` の `DEFAULT_PATCHES`）: 起動して初めて NVS を読んだとき、`defaults` が
@@ -270,16 +286,16 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 - 起動時に張り直す。片端のデバイスがこのボードに無い行は読み飛ばす（保存内容は消さない）
 - **スクリプトが `patch` / `MIDI.route` で張ったものはスクリプト限り**。終了時にルート表ごと消え、
   次のモードの起動時に NVS の内容で張り直される。残したいときは `md.save`
-- `md.midi_in=` / `md.midi_out=` もスクリプト限り（終了時に NVS の選択へ戻る）
-- スクリプトが `register` したデバイスが絡むパッチ・選択は保存しない
+- `md.midi_in=` / `md.midi_out=` も Script のパッチの張り替えなのでスクリプト限り
+- スクリプトが `register` したデバイスが絡むパッチは保存しない
 
 ## C 側の構成
 
 | 場所 | 内容 |
 |------|------|
-| picoruby-midi `midi_route.h` | `MIDI_route_get()`（ルート表の走査）、filter（[MIDI_FILTER.md](MIDI_FILTER.md)） |
+| picoruby-midi `midi_route.h` | `MIDI_route_get()`（ルート表の走査）、filter（[MIDI_FILTER.md](MIDI_FILTER.md)）、仮想ポート（Script） |
 | picoruby-midi `midi.h` / port | `MIDI_route_start_source(bit)`: UART の入力開始と入力タスクの起動（Ruby の `MIDI._start_source` の C 版）。画面から張ったルートがスクリプトなしでも効くように |
-| `main/ui/ui_midi_devices.cpp` | デバイス表（最大 16 件、spinlock。表と保存済みパッチは最初の読み込み時にヒープに確保）、選択、保存済みパッチ、NVS、接続ポーリング（`ui_mididev_tick`）、終了処理（`ui_mididev_cleanup`、`UIManager::scriptCleanup` から） |
+| `main/ui/ui_midi_devices.cpp` | デバイス表（最大 16 件、spinlock。表と保存済みパッチは最初の読み込み時にヒープに確保）、Script のトランスポート、保存済みパッチ、NVS、接続ポーリング（`ui_mididev_tick`）、終了処理（`ui_mididev_cleanup`、`UIManager::scriptCleanup` から） |
 | `main/ui/screen_midi_devices.cpp` | マトリクスの描画とタッチ。セルのタップで `ui_mididev_toggle_patch()` → `MIDI_route_add` / `MIDI_route_remove` を UI タスクから直接 |
 | picoruby-ui `ports/esp32/ui.c` / `src/mruby/ui.c` | `UI._mididev_*` と `:midi_devices` イベント（mruby/c 版のバインディングは picoruby-ui 自体が追従していないので未対応） |
 | `main/platform/platform_freenove.c` | 画面の無い Freenove 用の no-op スタブ（一覧は常に空） |
@@ -287,9 +303,9 @@ MIDI.bpm_loop(120, sync_from: inp) { |tick| ... }
 ## 制約
 
 - 登録表は 16 ビット（`midi_tmask_t` = `uint16_t`、2026-11-01 まで 8 ビット）。USB Host / UART / USB Device /
-  Tempo（クロック）/ AMY / Keys / Sequencer で既に 7。**同時に登録できるのは 16 台**（デバイス表も 16 件）
+  Script / Tempo（クロック）/ AMY / Keys / Sequencer / Tombola / XYPad で既に 10。**同時に登録できるのは 16 台**（デバイス表も 16 件）
 - ルート表は 32 件（送信元 × チャンネル集合ごとに 1 件、宛先はマスクで束ねる。2026-11-01 まで 8 件）
 - 1 つのトランスポートを複数ケーブル・複数チャンネルに分けて別デバイスとして見せることはできない
-- `UI::MIDIDevices.input` の受信元は Prog(input) の選択 1 つ。スクリプトが自分で張った `MIDI.on(from, ...)` は
-  固定の受信元を読み、選択には追従しない
-- Freenove（画面なし）では一覧が空で、`midi_in` / `midi_out` は常に nil
+- 仮想ポートは 1 つ（Script）。Script へのルートの内容は filter と同じキュー（64 件）を通るので、
+  スクリプトが `UI.process` / `MIDI.sleep_ms` を回さないと溢れる（溢れた分は捨てる）
+- Freenove（画面なし）では一覧が空で Script も無く、`midi_in` / `midi_out` は常に nil、`output` はどこにも送らない

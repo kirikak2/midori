@@ -3,13 +3,15 @@
 #   M = UI::MIDIDevices
 #   M.register(MIDI::Device.new(MIDIDevices.usb_midi_host), name: "J-6")
 #   M.patch(j6, amy)                  # MIDI.route, shown on the screen
-#   M.midi_in  = j6                   # the program's IN / OUT; the user may
-#   M.midi_out = amy                  # change them on the screen
+#   M.midi_in  = j6                   # j6 -> Script (the script's IN)
+#   M.midi_out = amy                  # Script -> amy (the script's OUT)
 #   M.input.on(:note_on) { |m| M.output.note_on(m.note + 12, m.velocity) }
 #
-# M.input / M.output follow the selection: keep them in a variable or hand
-# them to a player and they still reach whatever is picked later. What
-# midi_in / midi_out return is the device picked now and stays that device.
+# The script is itself a device on the screen, "Script" (picoruby-midi's
+# virtual port, one transport bit): what it sends to it (midi_out / output)
+# goes out along Script's routes, and what other devices' routes bring into
+# it reaches midi_in / input. The user patches Script like any other device,
+# so M.output and M.input keep reaching whatever is patched later.
 #
 # Devices are picoruby-midi transports. The firmware's own (USB host, UART,
 # USB device, AMY, the on-screen keys) are registered at every start
@@ -22,7 +24,6 @@ $ui_mididev_devices = {}
 # built-in key => Proc giving its transport (or MIDI::Device)
 $ui_mididev_factories = {}
 $ui_mididev_input = nil
-$ui_mididev_output = nil
 $ui_mididev_hooked = false
 $ui_mididev_serial = -1
 
@@ -64,131 +65,52 @@ module UI
       end
     end
 
-    # The program's IN, following the selection: what arrives on whichever
-    # device is selected as the IN, now and after the user picks another.
+    # The script's IN: what the routes into Script bring (from every device
+    # patched to it), now and after the user patches another.
     #
     #   inp = UI::MIDIDevices.input
-    #   inp.on(:note_on) { |m| ... }
+    #   inp.on(:note_on) { |m| m.source }   # m.source: the device it came from
     class Input
       def initialize
         @handlers = []   # [type, channel, block]
-        @src = 0
-        @src_device = nil
       end
 
-      # Like MIDI.on, on the selected IN. Returns the block (for #off).
+      # Like MIDI.on, on Script. Returns the block (for #off).
       def on(type = :any, channel: nil, &block)
         raise ArgumentError, "UI::MIDIDevices.input.on: a block is required" unless block
         @handlers << [type, channel, block]
-        MIDI.on(@src, type, channel: channel, &block) if @src != 0
+        bit = MIDIDevices.script_bit
+        MIDI.on(bit, type, channel: channel, &block) if bit != 0
         block
       end
 
       # Remove one handler, or all of them.
       def off(handler = nil)
+        bit = MIDIDevices.script_bit
         @handlers.each do |h|
           next unless handler.nil? || h[2] == handler
-          MIDI.off(@src, nil, h[2]) if @src != 0
+          MIDI.off(bit, nil, h[2]) if bit != 0
         end
         @handlers.delete_if { |h| handler.nil? || h[2] == handler }
         self
       end
 
-      # The device heard now (nil when none is selected)
+      # Script, while something is patched to it (nil otherwise)
       def device
-        @src_device
+        MIDIDevices.midi_in
       end
 
+      # The external clock of the first device patched to Script that has one
       def external_bpm
-        @src == 0 ? 0.0 : MIDI.external_bpm(@src)
+        MIDIDevices._script_sources.each do |src|
+          bpm = MIDI.external_bpm(src)
+          return bpm if bpm > 0.0
+        end
+        0.0
       end
 
       def reset_external_clock
-        MIDI.reset_external_clock(@src) if @src != 0
-      end
-
-      # Internal: move the handlers when the selection changed.
-      def _sync
-        dev = MIDIDevices.midi_in
-        bit = dev ? MIDI.route_bit(dev) : 0
-        # Only a route source can be listened to (a stale selection is none)
-        if bit != 0 && (bit & MIDI._route_sources) == 0
-          bit = 0
-          dev = nil
-        end
-        return if bit == @src
-        if @src != 0
-          @handlers.each { |h| MIDI.off(@src, nil, h[2]) }
-        end
-        @src = bit
-        @src_device = dev
-        if bit != 0
-          @handlers.each { |h| MIDI.on(bit, h[0], channel: h[1], &h[2]) }
-          MIDI.reset_external_clock(bit)
-        end
-      end
-    end
-
-    # The transport of UI::MIDIDevices.output: sends to whichever device is
-    # selected as the OUT at the time of each message (nothing while none is).
-    # When the selection moves, the previous OUT gets All Notes Off on every
-    # channel, so a note started there does not hang when its note off goes
-    # to the new one.
-    class OutputTransport
-      def initialize
-        @serial = nil
-        @device = nil
-      end
-
-      # The OUT now (the selection is read again only when the model changed)
-      def device
-        _sync
-        @device
-      end
-
-      # Its bit: what trigger / trigger_batch and MIDI.route_bit see
-      def transport_id
-        dev = device
-        dev ? MIDI.route_bit(dev) : 0
-      end
-
-      def send_packet(cable, cin, midi1, midi2, midi3)
-        dev = device
-        dev ? dev.transport.send_packet(cable, cin, midi1, midi2, midi3) : 0
-      end
-
-      def connected?
-        dev = device
-        dev ? dev.connected? : false
-      end
-
-      def bytes_available
-        0
-      end
-
-      def read_available
-        nil
-      end
-
-      def device_info
-        dev = device
-        dev ? dev.info : "MIDI OUT (none selected)"
-      end
-
-      # Internal: catch up with the selection
-      def _sync
-        serial = UI._mididev_serial
-        return if serial == @serial
-        @serial = serial
-        dev = MIDIDevices.midi_out
-        old = @device
-        @device = dev
-        return if old.nil? || (dev && MIDI.route_bit(dev) == MIDI.route_bit(old))
-        ch = 0
-        while ch < 16
-          old.all_notes_off(channel: ch)
-          ch += 1
-        end
+        MIDIDevices._script_sources.each { |src| MIDI.reset_external_clock(src) }
       end
     end
 
@@ -242,9 +164,10 @@ module UI
         nil
       end
 
-      # Route the saved patches and pick the saved IN / OUT (main_task.rb,
-      # after register_builtin).
+      # Route the saved patches (main_task.rb, after register_builtin).
       def boot
+        bit = script_bit
+        MIDI._set_source_info(bit, :script, _script_device) if bit != 0
         MIDIFilters.install
         UI._mididev_restore
         service
@@ -323,55 +246,78 @@ module UI
         UI._mididev_save
       end
 
-      # The program's IN / OUT (nil for none). The user may change them on
-      # the screen at any time; ask again rather than keeping the result.
+      # The Script device's bit (0 on a board without the MIDI Devices screen)
+      def script_bit
+        MIDI._route_virtual
+      end
+
+      # The script's IN / OUT: the Script device, while something is patched
+      # to it / from it (nil otherwise, so `md.midi_out ||= dev` patches dev).
+      # The user may patch more or other devices on the screen; Script stays
+      # the same device, so it can be kept.
       def midi_in
-        _device_at(UI._mididev_selected(false))
+        _script_sources.empty? ? nil : _script_device
       end
 
       def midi_out
-        _device_at(UI._mididev_selected(true))
+        bit = script_bit
+        bit != 0 && MIDI._route_targets_of(bit) != 0 ? _script_device : nil
       end
 
+      # Patch `device` (all channels) to Script in place of what was, for the
+      # script's run (the patches made on the screen come back after it).
+      # nil takes every patch to Script off.
       def midi_in=(device)
-        _select(false, device)
+        bit = script_bit
+        return device if bit == 0
+        _script_sources.each do |src|
+          MIDI.unfilter(src, bit)
+          MIDI._route_remove(src, bit)
+        end
+        if device
+          register(device) unless _index_of_bit(MIDI.route_bit(device))
+          MIDI.route(device, bit)
+        end
+        device
       end
 
+      # Patch Script to `device` (all channels) in place of what was, for the
+      # script's run. nil takes every patch from Script off.
       def midi_out=(device)
-        _select(true, device)
+        bit = script_bit
+        return device if bit == 0
+        MIDI.unroute(bit)
+        if device
+          register(device) unless _index_of_bit(MIDI.route_bit(device))
+          MIDI.route(bit, device)
+        end
+        device
       end
 
-      # What arrives on the IN, following the selection (see Input).
+      # What arrives on Script (see Input).
       def input
         unless $ui_mididev_input
           $ui_mididev_input = Input.new
           _hook
-          $ui_mididev_input._sync
         end
         $ui_mididev_input
       end
 
-      # The OUT as a MIDI::Device that follows the selection (see
-      # OutputTransport). Unlike midi_out, it can be kept:
+      # Script as a MIDI::Device: what is sent to it goes out along its
+      # routes. Unlike midi_out, never nil (it sends nowhere while unpatched).
       #
       #   out = UI::MIDIDevices.output
       #   player = MIDI::MML::CombinedPlayer.new(out)
       #   UI.pad(1) { out.trigger(36) }
       #
-      # Objects that send from C (UI::Keys, UI::Tombola) take the device's bit
-      # when given it, so give those midi_out again from on_change instead.
+      # Objects that send from C (UI::Keys, UI::Tombola device:, the note
+      # scheduler) take its bit and so follow the patches too.
       def output
-        unless $ui_mididev_output
-          $ui_mididev_output = MIDI::Device.new(OutputTransport.new)
-          _hook
-          $ui_mididev_output.transport._sync
-        end
-        $ui_mididev_output
+        _script_device
       end
 
-      # Selection, patch and connection changes. The block gets a Hash:
-      # kind: (:select_in / :select_out / :patch / :unpatch / :connect /
-      # :disconnect), device: / from: / to: (MIDI::Device), channel: (patches:
+      # Patch and connection changes. The block gets a Hash:
+      # kind: (:patch / :unpatch / :connect / :disconnect), device: / from: / to: (MIDI::Device), channel: (patches:
       # 0..15, nil for all, :clock for the clock alone, an Array of those for
       # several).
       def on_change(&block)
@@ -391,8 +337,6 @@ module UI
         return if serial == $ui_mididev_serial
         $ui_mididev_serial = serial
         service
-        $ui_mididev_input._sync if $ui_mididev_input
-        $ui_mididev_output.transport._sync if $ui_mididev_output
       end
 
       # Follow the model from every run of the MIDI filters (once)
@@ -433,28 +377,25 @@ module UI
         e ? e[3] : "?"
       end
 
-      def _device_at(index)
-        entry = _entry(index)
-        return nil unless entry
-        return _start(entry[2]) if entry[0] == 0   # standby: start it now
-        _device_for_bit(entry[0])
+      # Script as a MIDI::Device (sends to nothing on a board without it)
+      def _script_device
+        bit = script_bit
+        return _device_for_bit(bit) if bit != 0
+        $ui_mididev_devices[0] ||= MIDI::Device.new(BitTransport.new(0, "Script"))
       end
 
-      def _select(out, device)
-        if device.nil?
-          UI._mididev_select(out, -1, false)
-        else
-          bit = MIDI.route_bit(device)
-          raise ArgumentError, "UI::MIDIDevices: not a registered MIDI transport" if bit == 0
-          if !out && (bit & MIDI._route_sources) == 0
-            raise ArgumentError, "UI::MIDIDevices.midi_in: the device has no MIDI IN"
-          end
-          register(device) unless _index_of_bit(bit)
-          $ui_mididev_devices[bit] ||= _wrap(device)
-          UI._mididev_select(out, _index_of_bit(bit), false)
+      # The bits of the devices patched to Script
+      def _script_sources
+        bit = script_bit
+        list = []
+        return list if bit == 0
+        i = 0
+        while i < ROUTE_SLOTS
+          r = MIDI._route_get(i)
+          i += 1
+          list << r[0] if r && (r[1] & bit) != 0 && !list.include?(r[0])
         end
-        $ui_mididev_input._sync if $ui_mididev_input && !out
-        device
+        list
       end
 
       # Run a built-in's factory: its device, now with a bit

@@ -1,20 +1,21 @@
 // MIDI Devices screen: a crossbar of the devices in ui_midi_devices.cpp
 // (docs/UI_MIDI_DEVICES.md).
 //
-//   rows    = devices with a MIDI IN (route sources), then "Prog"
-//   columns = devices with a MIDI OUT, then "Prog"
+//   rows    = devices with a MIDI IN (route sources)
+//   columns = devices with a MIDI OUT
+//
+// The script is one of them, "Script" (picoruby-midi's virtual port): its row
+// is where the script's midi_out goes, its column what reaches its midi_in.
 //
 // A cell between two devices is a route in picoruby-midi's table -- tap to
 // patch / unpatch, hold to pick what it passes (all, or any channels and / or the
 // clock), or -- on the picker's Filters tab -- the named filters chained on it
-// (docs/MIDI_FILTER_REGISTRY.md) and, holding one, its parameters. The Prog
-// column picks the program's IN, the Prog row its OUT. Hold a device's name
-// for its details.
+// (docs/MIDI_FILTER_REGISTRY.md) and, holding one, its parameters. Hold a
+// device's name for its details.
 //
 // Up to UI_MIDIDEV_MAX devices each way do not fit at a usable size: cells
 // keep a minimum size, and the rows / columns beyond it scroll by whole cells
-// (drag anywhere on the grid) under the fixed headers and the Prog row /
-// column. The corner button above the row names picks the view: all devices,
+// (drag anywhere on the grid) under the fixed headers. The corner button above the row names picks the view: all devices,
 // only those patched (a row with a patch from it, a column with one to it) or
 // only those with none.
 
@@ -76,7 +77,7 @@ static constexpr uint32_t CHECK_MS = 200;
 static constexpr uint32_t LONG_PRESS_MS = 500;
 static constexpr uint16_t CELL_BG_A = 0x1082;
 static constexpr uint16_t CELL_BG_B = 0x18E3;
-static constexpr uint16_t PROG_COLOR = UI_COLOR_CYAN;
+static constexpr uint16_t SCRIPT_COLOR = UI_COLOR_CYAN;   // The Script device's name
 static constexpr int SCROLLBAR = MARGIN / 2;   // In the right / bottom margin
 
 static const char* const VIEW_NAMES[] = { "All", "Patched", "Unpatched" };
@@ -150,31 +151,6 @@ static void selection_label(uint32_t sel, char* buf, int len)
     if (sel & MIDI_ROUTE_SEL_CLOCK) put("clk");
 }
 
-// The Prog header, "Prog(input)" / "Prog(output)": on one line when it fits the
-// box, else "Prog" over the "(input)" / "(output)". Centred in the box when
-// center, else from its left edge.
-static void print_prog(int x, int y, int w, int h, const char* suffix, bool center)
-{
-    auto& gfx = ui_gfx();
-    char one[24];
-    snprintf(one, sizeof(one), "Prog%s", suffix);
-    int maxChars = w / CHAR_W;
-    const char* lines[2] = { one, nullptr };
-    int count = 1;
-    if ((int)strlen(one) > maxChars) {
-        lines[0] = "Prog";
-        lines[1] = suffix;
-        count = 2;
-    }
-    int top = y + (h - count * CHAR_H) / 2;
-    for (int i = 0; i < count; i++) {
-        int n = (int)strlen(lines[i]);
-        if (n > maxChars) n = maxChars;
-        gfx.setCursor(center ? x + (w - n * CHAR_W) / 2 : x, top + i * CHAR_H);
-        print_fit(lines[i], maxChars);
-    }
-}
-
 ScreenMidiDevices::ScreenMidiDevices()
     : m_isActive(false)
     , m_needsRedraw(false)
@@ -235,6 +211,11 @@ bool ScreenMidiDevices::isUp(const ui_mididev_t& d) const
     return d.bit != 0 && (ui_mididev_connected_mask() & d.bit) != 0;
 }
 
+bool ScreenMidiDevices::isScript(const ui_mididev_t& d) const
+{
+    return d.bit != 0 && d.bit == ui_mididev_script_bit();
+}
+
 void ScreenMidiDevices::displayName(const ui_mididev_t& d, char* buf, int len) const
 {
     // The USB host port is named after what is plugged in
@@ -248,19 +229,19 @@ void ScreenMidiDevices::displayName(const ui_mididev_t& d, char* buf, int len) c
     snprintf(buf, len, "%s", d.name);
 }
 
-// How many cells of an axis fit in avail, the Prog one included: all of them
-// at up to maxSize, else as many as fit at minSize, stretched to fill avail
+// How many cells of an axis fit in avail: all of them at up to maxSize, else
+// as many as fit at minSize, stretched to fill avail
 static void fit_cells(int avail, int count, int minSize, int maxSize, int* size, int* shown)
 {
-    int slots = count + 1;
+    int slots = count > 0 ? count : 1;
     int s = avail / slots;
     if (s < minSize) {
         slots = avail / minSize;
-        if (slots < 2) slots = 2;   // One device and Prog, however small
+        if (slots < 1) slots = 1;   // One device, however small
         s = avail / slots;
     }
     *size = s > maxSize ? maxSize : s;
-    *shown = slots - 1 < count ? slots - 1 : count;
+    *shown = slots < count ? slots : count;
 }
 
 static int clamp_offset(int off, int count, int shown)
@@ -330,15 +311,13 @@ void ScreenMidiDevices::rebuild()
 int ScreenMidiDevices::rowY(int row) const
 {
     const Grid& g = *m_grid;
-    int pos = (row >= g.rowCount) ? g.shownRows : row - g.rowOff;
-    return g.y0 + pos * g.cellH;
+    return g.y0 + (row - g.rowOff) * g.cellH;
 }
 
 int ScreenMidiDevices::colX(int col) const
 {
     const Grid& g = *m_grid;
-    int pos = (col >= g.colCount) ? g.shownCols : col - g.colOff;
-    return g.x0 + pos * g.cellW;
+    return g.x0 + (col - g.colOff) * g.cellW;
 }
 
 void ScreenMidiDevices::keep(int from, int to)
@@ -360,7 +339,7 @@ void ScreenMidiDevices::setView(View view)
 uint32_t ScreenMidiDevices::signature() const
 {
     // FNV-1a over everything the grid shows: the model, connections, the route
-    // table (a script may route behind the model's back), filters, selection
+    // table (a script may route behind the model's back), filters
     uint32_t h = 2166136261u;
     auto mix = [&h](uint32_t v) {
         for (int i = 0; i < 4; i++) {
@@ -371,8 +350,6 @@ uint32_t ScreenMidiDevices::signature() const
     mix(ui_mididev_serial());
     mix(ui_filter_serial());
     mix(ui_mididev_connected_mask());
-    mix((uint32_t)ui_mididev_selected(false) + 1);
-    mix((uint32_t)ui_mididev_selected(true) + 1);
     mix(MIDI_route_sources());
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
         midi_tmask_t src = 0, dst = 0;
@@ -466,23 +443,22 @@ void ScreenMidiDevices::drawGrid()
     int lastCol = g.colOff + g.shownCols;
     int lastRow = g.rowOff + g.shownRows;
 
-    // Column headers (OUT), then the program as a destination: picks its IN
+    // Column headers (OUT)
     for (int c = g.colOff; c < lastCol; c++) {
         int x = colX(c);
         const ui_mididev_t& d = g.devs[g.cols[c]];
         displayName(d, name, sizeof(name));
         const char* label = name;
-        uint16_t color = isUp(d) ? UI_COLOR_WHITE : UI_COLOR_GRAY;
+        uint16_t color = isScript(d) ? SCRIPT_COLOR
+                       : isUp(d) ? (uint16_t)UI_COLOR_WHITE : (uint16_t)UI_COLOR_GRAY;
         int n = (int)strlen(label);
         if (n > colChars) n = colChars;
         gfx.setTextColor(color, UI_COLOR_BLACK);
         gfx.setCursor(x + (g.cellW - n * CHAR_W) / 2, g.y0 - g.headerH + (g.headerH - CHAR_H) / 2);
         print_fit(label, colChars);
     }
-    gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
-    print_prog(colX(g.colCount) + 1, g.y0 - g.headerH, g.cellW - 2, g.headerH, "(input)", true);
 
-    // Row headers (IN), then the program as a source: picks its OUT
+    // Row headers (IN)
     int nameChars = (g.nameW - 4 * DOT_R) / CHAR_W;
     for (int r = g.rowOff; r < lastRow; r++) {
         int y = rowY(r);
@@ -491,12 +467,12 @@ void ScreenMidiDevices::drawGrid()
         bool up = isUp(d);
         gfx.fillCircle(MARGIN + DOT_R, y + g.cellH / 2, DOT_R, up ? UI_COLOR_GREEN : UI_COLOR_DARKGRAY);
         displayName(d, name, sizeof(name));
-        gfx.setTextColor(up ? UI_COLOR_WHITE : UI_COLOR_GRAY, UI_COLOR_BLACK);
+        uint16_t fg = isScript(d) ? SCRIPT_COLOR
+                    : up ? (uint16_t)UI_COLOR_WHITE : (uint16_t)UI_COLOR_GRAY;
+        gfx.setTextColor(fg, UI_COLOR_BLACK);
         gfx.setCursor(MARGIN + 3 * DOT_R, ty);
         print_fit(name, nameChars);
     }
-    gfx.setTextColor(PROG_COLOR, UI_COLOR_BLACK);
-    print_prog(MARGIN + 3 * DOT_R, rowY(g.rowCount), nameChars * CHAR_W, g.cellH, "(output)", false);
 
     // Device status for the OUT-only ones (AMY): a dot under the header
     for (int c = g.colOff; c < lastCol; c++) {
@@ -508,18 +484,10 @@ void ScreenMidiDevices::drawGrid()
 
     for (int r = g.rowOff; r < lastRow; r++) {
         for (int c = g.colOff; c < lastCol; c++) drawCell(r, c);
-        drawCell(r, g.colCount);
     }
-    for (int c = g.colOff; c < lastCol; c++) drawCell(g.rowCount, c);
-    drawCell(g.rowCount, g.colCount);
 
-    // Separators before the Prog row / column
-    int gridW = (g.shownCols + 1) * g.cellW;
-    int gridH = (g.shownRows + 1) * g.cellH;
-    gfx.drawFastVLine(colX(g.colCount), g.y0 - g.headerH, gridH + g.headerH, PROG_COLOR);
-    gfx.drawFastHLine(MARGIN, rowY(g.rowCount), g.nameW + gridW - MARGIN, PROG_COLOR);
-
-    // A view that leaves nothing to show says so, under the Prog row
+    // A view that leaves nothing to show says so, under the grid
+    int gridH = g.shownRows * g.cellH;
     if (m_view != VIEW_ALL && (g.rowCount == 0 || g.colCount == 0)) {
         const char* text = (m_view == VIEW_PATCHED) ? "No patches" : "Nothing unpatched";
         gfx.setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
@@ -598,20 +566,8 @@ void ScreenMidiDevices::drawCell(int row, int col)
     int cy = y + g.cellH / 2;
     int r = (g.cellW < g.cellH ? g.cellW : g.cellH) / 4;
     if (r < 3) r = 3;
-    bool progRow = (row == g.rowCount);
-    bool progCol = (col == g.colCount);
 
     gfx.fillRect(x + 1, y + 1, g.cellW - 2, g.cellH - 2, ((row + col) & 1) ? CELL_BG_B : CELL_BG_A);
-    if (progRow && progCol) return;
-
-    // Prog: the program's IN (column) / OUT (row), one of each
-    if (progRow || progCol) {
-        int dev = progCol ? g.rows[row] : g.cols[col];
-        bool selected = ui_mididev_selected(progRow) == dev;
-        gfx.drawCircle(cx, cy, r, selected ? PROG_COLOR : (uint16_t)UI_COLOR_DARKGRAY);
-        if (selected) gfx.fillCircle(cx, cy, r / 2 > 1 ? r / 2 : 2, PROG_COLOR);
-        return;
-    }
 
     int from = g.rows[row];
     int to = g.cols[col];
@@ -882,13 +838,13 @@ bool ScreenMidiDevices::hit(int x, int y, int* row, int* col) const
 {
     const Grid& g = *m_grid;
     if (g.count == 0) return false;
-    int gridW = (g.shownCols + 1) * g.cellW;
-    int gridH = (g.shownRows + 1) * g.cellH;
+    int gridW = g.shownCols * g.cellW;
+    int gridH = g.shownRows * g.cellH;
     bool inCols = x >= g.x0 && x < g.x0 + gridW;
     bool inRows = y >= g.y0 && y < g.y0 + gridH;
-    // Screen position -> place in rows / cols: the Prog one after the shown ones
-    auto toRow = [&g](int pos) { return pos >= g.shownRows ? g.rowCount : g.rowOff + pos; };
-    auto toCol = [&g](int pos) { return pos >= g.shownCols ? g.colCount : g.colOff + pos; };
+    // Screen position -> place in rows / cols
+    auto toRow = [&g](int pos) { return g.rowOff + pos; };
+    auto toCol = [&g](int pos) { return g.colOff + pos; };
     if (inCols && inRows) {
         *row = toRow((y - g.y0) / g.cellH);
         *col = toCol((x - g.x0) / g.cellW);
@@ -972,23 +928,11 @@ void ScreenMidiDevices::tap(int x, int y)
     const Grid& g = *m_grid;
     int row, col;
     if (!hit(x, y, &row, &col) || row < 0 || col < 0) return;
-    bool progRow = (row == g.rowCount);
-    bool progCol = (col == g.colCount);
-    if (progRow && progCol) return;
-
-    if (progCol) {
-        int dev = g.rows[row];
-        ui_mididev_select(false, ui_mididev_selected(false) == dev ? -1 : dev, true);
-    } else if (progRow) {
-        int dev = g.cols[col];
-        ui_mididev_select(true, ui_mididev_selected(true) == dev ? -1 : dev, true);
-    } else {
-        int from = g.rows[row];
-        int to = g.cols[col];
-        if (from == to) return;
-        ui_mididev_toggle_patch(from, to);
-        keep(from, to);
-    }
+    int from = g.rows[row];
+    int to = g.cols[col];
+    if (from == to) return;   // Script to Script, or any device to itself
+    ui_mididev_toggle_patch(from, to);
+    keep(from, to);
     rebuild();
     m_signature = signature();
     m_needsRedraw = true;

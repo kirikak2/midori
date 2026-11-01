@@ -172,6 +172,23 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... } # input: / sync: の代わり（MI
 - 入力タスクが USB Device を読む条件 `MIDI_route_from()` は filter（listener 含む）も数える。
   `MIDI_route_active()` も同様
 
+### 仮想ポート（Script、2026-11-01）
+
+登録表のビットを 1 つ「仮想ポート」に指定できる（`MIDI_route_set_virtual(bit)`。Midori では MIDI Devices の
+`Script`、docs/UI_MIDI_DEVICES.md）。**そのビットへ送る = そこからの出力**（トランスポートの `send_packet` が
+`MIDI_route_packet(bit, ...)` を呼ぶ）、**そのビットへのルート = Ruby への入力**:
+`MIDI_route_dispatch()` は宛先の仮想ポートを `MIDI_transport_send()` から外し、Ruby が聞いている CIN
+（`MIDI_route_set_virtual_listen(types)`、`MIDI.on(port)` が設定）なら `MIDI_ROUTE_DST_VIRTUAL`（0x20000）を
+付けてキューへ積む。キューが溢れたときの bypass も仮想ポートへは送らない。
+
+- Ruby: `MIDI.on(port, ...)` / `MIDI.off(port)` は C の filter 表を使わず listen の CIN だけを設定する
+  （`_filter_apply` / `_filter_store`）。`run_filters` は `DST_VIRTUAL` の付いたイベントを port のリスナーへ
+  （`Message#source` は元の送信元）。filter の結果やチェーンの出力の宛先が port のときも `MIDI._deliver` が
+  リスナーへ渡す（`_transport_send` すると出力になってしまう）
+- `MIDI._route_virtual` / `MIDI._route_virtual_listen(types)`。`MIDI_route_clear()` は listen を 0 に戻す
+- `MIDI::Clock._attach` は仮想ポートを断る（クロックをルートすると入力になる）。`MIDI.start!(output: port)` は
+  Ruby の計時で port へ F8 を送る
+
 ### C API
 
 ```c

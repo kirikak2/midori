@@ -1,8 +1,7 @@
 # AMY FM synth on the built-in speaker (Tab5 / CrowPanel)
 #
-# A DX7-style FM synth played from the screen and from the MIDI IN chosen on
-# the MIDI Devices screen (a USB-MIDI keyboard on the USB host port unless
-# another is chosen; routed to AMY in C with MIDI.route). Use the nav bar to
+# A DX7-style FM synth played from the screen and from a USB-MIDI keyboard on
+# the USB host port (routed to AMY in C with MIDI.route). Use the nav bar to
 # move between the three screens.
 #
 #   Pads    12 notes of C major, held for as long as you press (note_on on
@@ -39,9 +38,10 @@ raise "AMY is not available on this board" unless MIDIDevices.amy
 FIRST_PATCH = 128   # DX7 presets: 128..255
 fm  = AMY.add_fm(channel: 0, voices: 6, patch: FIRST_PATCH)
 
-# MIDI (pads, XYPad, CC knobs) goes to the OUT chosen on the MIDI Devices
-# screen, which starts out as AMY. Picking another synth there sends the
-# playing to it; the knobs that set AMY parameters directly stay on AMY.
+# MIDI (pads, XYPad, CC knobs) goes out of the script -- the Script device
+# on the MIDI Devices screen -- which starts out patched to AMY. Patching
+# Script to another synth there sends the playing to it too; the knobs that
+# set AMY parameters directly stay on AMY.
 md = UI::MIDIDevices
 md.midi_out = fm.transport
 
@@ -214,7 +214,7 @@ xy = UI::XYPad.new(
   y_cc: CC_CUTOFF,
   y_range: 0..127,
   velocity: 100,
-  device: md.output      # follows the OUT picked on the screen
+  device: md.output      # Script: follows its patches on the screen
 )
 
 # ---- Octave (knob 12, bank A) -----------------------------------------------
@@ -237,21 +237,18 @@ UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
 end
 
 # ---- MIDI IN (optional: a USB-MIDI keyboard, ...) ---------------------------
-# The IN is the one chosen on the MIDI Devices screen; picking another there
-# moves the route below (follow_in) and the md.input handler with it.
-# MIDI.route forwards everything the keyboard sends straight to AMY in C
-# (the input task), so playing it does not wait on this script's loop.
-# Mapped CCs (74 cutoff, 71 reso, ...) land in AMY's CC mappings that way.
+# A patch forwards everything the keyboard sends straight to AMY in C (the
+# input task), so playing it does not wait on this script's loop. Mapped CCs
+# (74 cutoff, 71 reso, ...) land in AMY's CC mappings that way.
 # What AMY cannot map -- the envelopes -- is picked out in Ruby on the side:
-# CC 73 / 72 (attack / release on many keyboards) set operator 1's envelope.
-md.midi_in ||= MIDIDevices.usb_midi_host
-routed_from = nil
-follow_in = Proc.new do
-  MIDI.unroute(routed_from, fm.transport) if routed_from
-  routed_from = md.midi_in
-  MIDI.route(routed_from, fm.transport) if routed_from
+# the keyboard is patched to Script too, and CC 73 / 72 (attack / release on
+# many keyboards) set operator 1's envelope (so do those of any other device
+# patched to Script on the screen).
+kb = MIDIDevices.usb_midi_host
+if kb
+  md.patch(kb, fm.transport)
+  md.midi_in ||= kb
 end
-follow_in.call
 
 md.input.on(:control_change) do |m|
   case m.cc
@@ -260,7 +257,6 @@ md.input.on(:control_change) do |m|
   end
 end
 
-md.on_change { |e| follow_in.call if e[:kind] == :select_in }
 
 UI.knobs
 puts "AMY FM ready (#{AMY.patch_name(fm.patch)}). Render load is printed every 5 s."

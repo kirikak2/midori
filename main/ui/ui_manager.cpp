@@ -91,6 +91,8 @@ esp_err_t UIManager::init()
     // buffer only fits there if it is taken while the heap is still whole.
     ui_strip::init();
     ui_layout::init();
+    // The script itself is the first MIDI device (midi_in / midi_out)
+    ui_mididev_script_init();
     // The tempo's clock is a MIDI device from the start (MIDI Devices, MIDI.route)
     ui_tempo_init();
     // The sequencer is always there too (a transport, playing on the clock it gets)

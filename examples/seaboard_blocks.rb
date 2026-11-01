@@ -2,8 +2,8 @@
 # ROLI Seaboard BLOCKS からの MPE MIDI 入力（ch 1〜15）を
 # 単一チャンネルに変換して出力する。
 #
-# 入力は MIDI Devices 画面で選んだ IN（未選択なら USB-MIDI Host）、
-# 出力は選んだ OUT（未選択なら MIDI-DIN = SAM2695）。
+# 入力は MIDI Devices 画面で Script へパッチした IN（なければ USB-MIDI Host）、
+# 出力は Script からパッチした先（なければ MIDI-DIN = SAM2695）。
 #
 # ROLI Seaboard BLOCKS は MPE（MIDI Polyphonic Expression）を使用し、
 # 各指を独立したチャンネル（1〜15）に割り当てる。
@@ -25,12 +25,12 @@ require 'ui'
 
 md = UI::MIDIDevices
 
-# 未選択ならここで決める（画面で選び直せる）
+# Script（このスクリプト）に何もパッチされていなければここでつなぐ（画面で張り替えられる）
 md.midi_in  ||= MIDIDevices.usb_midi_host
 md.midi_out ||= MIDIDevices.sam2695
 
 unless md.midi_in && md.midi_out
-  UI.log("Select the Seaboard (IN) and a synth (OUT) on the MIDI Devices screen")
+  UI.log("Patch the Seaboard to Script and Script to a synth on the MIDI Devices screen")
   return
 end
 
@@ -59,11 +59,11 @@ end
 
 setup_pb_range(md.midi_out, $out_ch, PB_SEMITONES)
 
-# OUT を選び直したら、新しい OUT にもピッチベンドレンジを設定する
+# Script から新しい音源へパッチしたら、そこにもピッチベンドレンジを設定する
 md.on_change do |e|
-  if e[:kind] == :select_out && md.midi_out
-    setup_pb_range(md.midi_out, $out_ch, PB_SEMITONES)
-    UI.log("OUT: #{md.midi_out.info}")
+  if e[:kind] == :patch && e[:to] && MIDI.route_bit(e[:from]) == md.script_bit
+    setup_pb_range(e[:to], $out_ch, PB_SEMITONES)
+    UI.log("OUT: #{e[:to].info}")
   end
 end
 
@@ -71,8 +71,8 @@ UI.log("Seaboard BLOCKS -> #{md.midi_out.info}")
 UI.log("Output: ch1  PB: +-#{PB_SEMITONES}st")
 
 # ---- MPE → 単チャンネル変換 ------------------------------------------------
-# md.input は選んだ IN に追従する。m は MIDI::Message（チャンネルは捨てて
-# $out_ch に寄せる）。OUT は毎回 md.midi_out を聞き直す
+# md.input は Script へパッチされた IN から届く。m は MIDI::Message（チャンネルは
+# 捨てて $out_ch に寄せる）。md.midi_out は Script で、そのパッチの先へ出ていく
 
 inp = md.input
 

@@ -1,6 +1,6 @@
 # midi_to_lumi.rb
-# MIDI 入力（MIDI Devices 画面で選んだ IN、未選択なら SAM2695 の MIDI IN）を
-# 受け取り、LUMI Keys（選んだ OUT、未選択なら USB-MIDI Host）の対応する
+# MIDI 入力（MIDI Devices 画面で Script へパッチした機器、なければ SAM2695 の MIDI IN）を
+# 受け取り、LUMI Keys（Script からのパッチ先、なければ USB-MIDI Host）の対応する
 # キーを光らせる信号を送るスクリプト
 #
 # LUMI Keys SysExプロトコルは benob/LUMI-lights により解析済み:
@@ -11,15 +11,15 @@ require 'ui'
 
 md = UI::MIDIDevices
 
-# 未選択ならここで決める（画面で選び直せる）
+# Script に何もパッチされていなければここでつなぐ（画面で張り替えられる）
 md.midi_in  ||= MIDIDevices.sam2695
 md.midi_out ||= MIDIDevices.usb_midi_host
 
-# LUMI Keys = OUT。md.output は選択に追従するので、実行中に OUT を選び直すと
-# そちらへ送る（md.midi_out はその時点の機器のまま変わらない）
+# LUMI Keys = Script の出力。md.output は Script そのものなので、実行中に Script の
+# パッチを張り替えるとそちらへ送る
 lumi = md.output
 unless md.midi_in && md.midi_out
-  puts "Error: select the MIDI IN and the LUMI Keys (OUT) on the MIDI Devices screen"
+  puts "Error: patch a MIDI IN to Script and Script to the LUMI Keys on the MIDI Devices screen"
   return
 end
 
@@ -134,14 +134,14 @@ setup_lumi = Proc.new do
 end
 setup_lumi.call
 
-# OUT を選び直したら、新しい LUMI Keys も設定し直す
-md.on_change { |e| setup_lumi.call if e[:kind] == :select_out }
+# Script から新しい LUMI Keys へパッチしたら、それも設定する
+md.on_change { |e| setup_lumi.call if e[:kind] == :patch && MIDI.route_bit(e[:from]) == md.script_bit }
 
-puts "LUMI Keys initialized. Forwarding #{md.midi_in.info} MIDI input..."
+puts "LUMI Keys initialized. Forwarding the MIDI input patched to Script..."
 
 # =============================================================================
 # MIDI入力 → LUMI Keys 転送
-# md.input は選んだ IN に追従する（画面で IN を選び直してもハンドラはそのまま）
+# md.input は Script へパッチされた機器から届く（画面で張り替えてもハンドラはそのまま）
 # =============================================================================
 md.input.on(:note_on) do |m|
   lumi.note_on(m.note, m.velocity, channel: m.channel)

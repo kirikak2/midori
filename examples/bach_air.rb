@@ -9,9 +9,9 @@ require "ui"
 
 UI.log("Loading Bach Suite No.3 - Air...")
 
-# 演奏先は MIDI Devices 画面で選んだ OUT（未選択なら SAM2695）。
-# md.output は選択に追従する MIDI::Device なので、演奏中に OUT を選び直すと
-# そちらで鳴る（md.midi_out はその時点の機器のまま変わらない）
+# 演奏先はスクリプトの出力（MIDI Devices 画面の Script。何もパッチされて
+# いなければ SAM2695 へつなぐ）。md.output は Script そのものなので、演奏中に
+# 画面で Script のパッチを張り替えるとそちらで鳴る
 md = UI::MIDIDevices
 md.midi_out ||= MIDIDevices.sam2695
 unless md.midi_out
@@ -56,19 +56,9 @@ set_programs = Proc.new do
 end
 set_programs.call
 
-# MIDI クロックも OUT へ送る。MIDI.start! の output: は開始時の OUT にしか
-# ルートを張らないので、選び直したらここで張り直す（音色も設定し直す）
-clock_to = nil
-follow_out = Proc.new do
-  MIDI.unroute(MIDI::Clock, clock_to) if clock_to
-  clock_to = md.midi_out
-  MIDI.route(MIDI::Clock, clock_to) if clock_to
-end
-follow_out.call
+# Script から新しい機器へパッチしたら、そこへも音色を送る
 md.on_change do |e|
-  next unless e[:kind] == :select_out
-  follow_out.call
-  set_programs.call
+  set_programs.call if e[:kind] == :patch && MIDI.route_bit(e[:from]) == md.script_bit
 end
 
 # Create MML sequences
@@ -110,8 +100,8 @@ UI.pad(5, label: "Continuo 2", color: :orange, type: :toggle) do |on|
 end
 
 # Main playback loop: the block runs on every clock (24 per quarter note).
-# The clock is already routed to the OUT above, so MIDI.start! leaves that
-# route alone and only sends Start / Stop along it
+# The output is Script, so MIDI.start! times the clock itself and sends it,
+# with Start / Stop, to Script -- out along its patches like the notes
 MIDI.start!(bpm: 25, output: device, subdivisions: 24) do |clock|
   player.tick(clock)
 end

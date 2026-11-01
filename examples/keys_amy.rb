@@ -17,10 +17,10 @@
 #   Knobs 画面（[Edit] で移動、ナビの Back で戻る）
 #     Amp A/D/S/R、Filter A/D/S/R、LFO Rate、Vibrato、LFO>Filter、Chorus
 #
-# - 鍵盤は device: に OUT（始めは AMY）を渡すだけで鳴る。発音は C 側
-#   （UI タスク）なので、このスクリプトのループの速さに左右されない
-# - MIDI Devices 画面で選んだ IN（既定は USB-MIDI Host の鍵盤）の演奏も AMY で
-#   鳴り、画面の鍵が光る（MIDI.route で C から転送。Ruby は通らない）
+# - 鍵盤は device: にスクリプトの出力（Script。始めは AMY へパッチ）を渡すだけで
+#   鳴る。発音は C 側（UI タスク）なので、このスクリプトのループの速さに左右されない
+# - 外部の鍵盤（USB-MIDI Host）の演奏も AMY で鳴り、画面の鍵が光る
+#   （MIDI.route で C から転送。Ruby は通らない。MIDI Devices 画面で張り替えられる）
 # - Patch ノブでプリセット（-1 = Init、0..127 = Juno-60）を変えると、
 #   ほかのノブがプリセットの値へ動く
 # - [Scale] で C メジャーペンタトニックの鍵に色を付ける（鍵ごとの色）
@@ -33,8 +33,9 @@ raise "AMY is not available on this board" unless MIDIDevices.amy
 
 syn = AMY.add_synth(channel: 0, voices: 8)
 
-# 鍵盤と CC のノブは MIDI Devices 画面で選ぶ OUT へ送る。始めは AMY。
-# 画面で OUT を別の音源にすると演奏はそちらへ行く（音色のノブは AMY のまま）
+# 鍵盤と CC のノブはスクリプトの出力（MIDI Devices 画面の Script）へ送る。始めは
+# AMY へパッチする。画面で Script を別の音源へパッチすると演奏はそちらへも行く
+# （音色のノブは AMY のまま）
 md = UI::MIDIDevices
 md.midi_out = syn.transport
 
@@ -86,7 +87,7 @@ end
 # パッドのブロックから参照するので先に作り、レイアウトには keys: で渡す
 kb = UI::Keys.new(octaves: 3, low: 48,     # C3〜C6（37 鍵）
                   velocity: 100,
-                  device: md.midi_out,
+                  device: md.output,       # Script: そのパッチの先で鳴る
                   press: :cyan,            # 指で押している鍵
                   light: :orange)          # 外部鍵盤で押されている鍵
 
@@ -105,28 +106,11 @@ show_scale = Proc.new do |on|
   end
 end
 
-# ---- MIDI IN（外部の USB-MIDI 鍵盤など）→ AMY と画面の鍵盤 ----------------------
-# IN は MIDI Devices 画面で選ぶ（未選択なら USB-MIDI Host）。選び直したら張り直す
-md.midi_in ||= MIDIDevices.usb_midi_host
-routed_from = nil
-follow_in = Proc.new do
-  if routed_from
-    MIDI.unroute(routed_from, syn.transport)
-    MIDI.unroute(routed_from, kb)
-  end
-  routed_from = md.midi_in
-  if routed_from
-    MIDI.route(routed_from, syn.transport, channel: 0)   # ch 1 を AMY へ
-    MIDI.route(routed_from, kb)                          # 全チャンネルで鍵を光らせる
-  end
-end
-follow_in.call
-
-md.on_change do |e|
-  case e[:kind]
-  when :select_in  then follow_in.call
-  when :select_out then kb.device = md.midi_out
-  end
+# ---- 外部の USB-MIDI 鍵盤 → AMY と画面の鍵盤 -------------------------------------
+host = MIDIDevices.usb_midi_host
+if host
+  MIDI.route(host, syn.transport, channel: 0)   # ch 1 を AMY へ
+  MIDI.route(host, kb)                          # 全チャンネルで鍵を光らせる
 end
 
 # ---- レイアウト ----------------------------------------------------------------

@@ -800,15 +800,13 @@ bool ui_mididev_get(int index, ui_mididev_t *out)
     return false;
 }
 
-int ui_mididev_selected(bool out)
+void ui_mididev_script_init(void)
 {
-    (void)out;
-    return -1;
 }
 
-void ui_mididev_select(bool out, int index, bool save)
+midi_tmask_t ui_mididev_script_bit(void)
 {
-    (void)out; (void)index; (void)save;
+    return 0;
 }
 
 int ui_mididev_restore(void)

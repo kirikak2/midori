@@ -1,6 +1,7 @@
 # midi_monitor.rb
-# MIDI Devices 画面で選んだ IN に入ってくる MIDI 信号をキャプチャして
-# UI ログに出力する汎用モニタ。見る機器は画面の Prog(input) 列でいつでも選び直せる。
+# スクリプトの入力（MIDI Devices 画面の Script）に入ってくる MIDI 信号をキャプチャして
+# UI ログに出力する汎用モニタ。見る機器は画面で Script の列へパッチすれば増やせる
+# （何台でも。どの機器から来たかも出す）。
 #
 # 対応イベント:
 #   Channel Voice   : note_on / note_off / control_change / program_change
@@ -13,15 +14,17 @@ require 'ui'
 
 md = UI::MIDIDevices
 
-# 未選択ならここで決める（画面で選び直せる）
+# Script に何もパッチされていなければここでつなぐ（画面で張り替えられる）
 md.midi_in ||= MIDIDevices.usb_midi_host || MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
 
 UI.log("MIDI Monitor started")
 UI.log("Board: #{BoardConfig::BOARD_NAME}")
-UI.log("IN: #{md.midi_in ? md.midi_in.info : '- (select one on the MIDI Devices screen)'}")
+UI.log(md.midi_in ? "IN: Script" : "IN: - (patch a device to Script on the MIDI Devices screen)")
 
 md.on_change do |e|
-  UI.log("IN: #{e[:device] ? e[:device].info : '-'}") if e[:kind] == :select_in
+  next unless e[:kind] == :patch || e[:kind] == :unpatch
+  next unless MIDI.route_bit(e[:to]) == md.script_bit
+  UI.log("#{e[:kind] == :patch ? '+' : '-'} IN: #{e[:from] ? e[:from].info : '?'}")
 end
 
 # ---- 表示ヘルパ --------------------------------------------------------
@@ -39,7 +42,7 @@ LOG_CLOCK = false
 
 # ---- ハンドラ ----------------------------------------------------------
 #
-# md.input は選んだ IN に追従する。ハンドラが受け取る m は MIDI::Message で、
+# md.input は Script へパッチされた機器から届く。ハンドラが受け取る m は MIDI::Message で、
 # m.source が受信元（:usb_host / :uart / :usb_dev など）。
 
 inp = md.input

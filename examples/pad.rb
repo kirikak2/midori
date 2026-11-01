@@ -1,15 +1,15 @@
 # pad.rb
 #
-# 画面のパッドでドラムを叩く。音は MIDI Devices 画面で選んだ OUT
-# （UI::MIDIDevices.midi_out）へ送るので、どの音源で鳴らすかは画面の
-# Prog(output) 行でいつでも変えられる。
+# 画面のパッドでドラムを叩く。音はスクリプトの出力（UI::MIDIDevices.midi_out =
+# MIDI Devices 画面の Script）へ送るので、どの音源で鳴らすかは画面で Script の行を
+# パッチしていつでも変えられる。
 
 require 'midi'
 require 'ui'
 
 md = UI::MIDIDevices
 
-# OUT が未選択なら SAM2695（なければ PC）にする。画面で選び直せる
+# Script から何もパッチされていなければ SAM2695（なければ PC）へつなぐ。画面で張り替えられる
 md.midi_out ||= MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
 unless md.midi_out
   puts "No MIDI output available"
@@ -27,7 +27,7 @@ OPEN_HH = 46
 CYMBAL = 49
 TOM = 45
 
-# OUT は画面で変わるので、叩くたびに md.midi_out を聞き直す
+# パッチが全部外されると midi_out は nil になるので &. で送る
 UI.pad(1, label: "Kick", color: :red, type: :trigger) do
   md.midi_out&.trigger(KICK, 127, channel: DRUM_CH, duration: 100)
 end

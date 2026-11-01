@@ -8,7 +8,11 @@
 // -- the stable key NVS stores patches by (bits of transports registered at
 // run time, such as AMY's, change from boot to boot).
 //
-// Written by the PicoRuby task (register / select / restore) and the UI task
+// The script itself is a device too, "Script" (key "script"): picoruby-midi's
+// virtual port. A script's midi_out sends to it, which is output from Script
+// along its routes; routes into it are the script's midi_in.
+//
+// Written by the PicoRuby task (register / restore) and the UI task
 // (taps on the screen, connection polling); the table is small and guarded
 // by one spinlock, NVS is written outside it. The device and saved-patch
 // tables are on the heap (docs/MEMORY_ALLOCATION.md), made by the first
@@ -36,6 +40,7 @@ static constexpr int SAVED_MAX = 32;
 static constexpr int ITEM_LEN = 2 * UI_MIDIDEV_KEY_LEN + 48;
 static constexpr int PATCHES_LEN = SAVED_MAX * ITEM_LEN;
 static constexpr uint32_t TICK_MS = 250;
+static constexpr const char* SCRIPT_KEY = "script";
 
 // Patches every board starts with: added once (NVS "defaults" records the
 // version applied), so one the user takes off stays off. A board without
@@ -64,20 +69,11 @@ struct SavedPatch {
     uint32_t sel;   // MIDI_ROUTE_SEL_*
 };
 
-// The program's IN / OUT: a built-in by key (survives its bit changing),
-// anything else by bit
-struct Selection {
-    char key[UI_MIDIDEV_KEY_LEN];
-    midi_tmask_t bit;
-};
-
 }  // namespace
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static Device* s_devs;               // [UI_MIDIDEV_MAX]
 static int s_count;
-static Selection s_sel[2];          // [0] IN, [1] OUT
-static Selection s_savedSel[2];
 static SavedPatch* s_saved;          // [SAVED_MAX]
 static int s_savedCount;
 static bool s_loaded;
@@ -135,31 +131,10 @@ static int find_bit_locked(midi_tmask_t bit)
     return -1;
 }
 
-static int resolve_locked(const Selection& sel)
-{
-    return sel.key[0] ? find_key_locked(sel.key) : find_bit_locked(sel.bit);
-}
-
-static void set_selection_locked(Selection& sel, int index)
-{
-    if (index < 0 || index >= s_count) {
-        sel.key[0] = '\0';
-        sel.bit = 0;
-        return;
-    }
-    const Device& d = s_devs[index];
-    if (d.pub.flags & UI_MIDIDEV_BUILTIN) {
-        copy_str(sel.key, d.pub.key, sizeof(sel.key));
-        sel.bit = 0;
-    } else {
-        sel.key[0] = '\0';
-        sel.bit = d.pub.bit;
-    }
-}
-
 // --- NVS -----------------------------------------------------------------------
 // "patches": "from>to[:sel],..." by key, sel being channels 0..15 and / or
-// "clock" joined by '+' (none: everything); "in" / "out": the selection's key.
+// "clock" joined by '+' (none: everything). "in" / "out" were the program's
+// IN / OUT before the Script device: read once as patches to / from it.
 
 // "0+9+clock" -> its MIDI_ROUTE_SEL_* bits; everything when nothing valid
 static uint32_t parse_selection(char* text)
@@ -264,24 +239,46 @@ static bool alloc_tables()
     return true;
 }
 
+// The old program IN / OUT as a patch into / out of Script, unless there is one
+static bool migrate_selection(const char* from, const char* to)
+{
+    if (!from[0] || !to[0] || saved_find_locked(from, to) >= 0 || s_savedCount >= SAVED_MAX) {
+        return false;
+    }
+    SavedPatch& sp = s_saved[s_savedCount++];
+    copy_str(sp.from, from, sizeof(sp.from));
+    copy_str(sp.to, to, sizeof(sp.to));
+    sp.sel = MIDI_ROUTE_SEL_ALL;
+    return true;
+}
+
 static void load_saved()
 {
     if (s_loaded || !alloc_tables()) return;
     s_loaded = true;
     initialize_nvs();
     uint8_t defaults = 0;
+    char in[UI_MIDIDEV_KEY_LEN] = "", out[UI_MIDIDEV_KEY_LEN] = "";
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {   // Else nothing saved yet
         char* buf = new char[PATCHES_LEN];   // Kept off the caller's stack
         size_t len = PATCHES_LEN;
         if (nvs_get_str(h, "patches", buf, &len) == ESP_OK) parse_patches(buf);
         delete[] buf;
-        len = sizeof(s_savedSel[0].key);
-        if (nvs_get_str(h, "in", s_savedSel[0].key, &len) != ESP_OK) s_savedSel[0].key[0] = '\0';
-        len = sizeof(s_savedSel[1].key);
-        if (nvs_get_str(h, "out", s_savedSel[1].key, &len) != ESP_OK) s_savedSel[1].key[0] = '\0';
+        len = sizeof(in);
+        if (nvs_get_str(h, "in", in, &len) != ESP_OK) in[0] = '\0';
+        len = sizeof(out);
+        if (nvs_get_str(h, "out", out, &len) != ESP_OK) out[0] = '\0';
         if (nvs_get_u8(h, "defaults", &defaults) != ESP_OK) defaults = 0;
         nvs_close(h);
+    }
+    if (in[0] || out[0]) {
+        portENTER_CRITICAL(&s_mux);
+        migrate_selection(in, SCRIPT_KEY);
+        migrate_selection(SCRIPT_KEY, out);
+        portEXIT_CRITICAL(&s_mux);
+        save_now();   // Also takes "in" / "out" away
+        ESP_LOGI(TAG, "program IN / OUT (%s / %s) became patches of Script", in, out);
     }
     apply_defaults(defaults);
 }
@@ -289,8 +286,6 @@ static void load_saved()
 // Snapshot of what to write, taken under the lock
 struct SavedSnapshot {
     char patches[PATCHES_LEN];
-    char in[UI_MIDIDEV_KEY_LEN];
-    char out[UI_MIDIDEV_KEY_LEN];
 };
 
 static void snapshot_locked(SavedSnapshot& snap)
@@ -312,8 +307,6 @@ static void snapshot_locked(SavedSnapshot& snap)
         strcpy(snap.patches + pos, item);
         pos += strlen(item);
     }
-    copy_str(snap.in, s_savedSel[0].key, sizeof(snap.in));
-    copy_str(snap.out, s_savedSel[1].key, sizeof(snap.out));
 }
 
 static void write_saved(const SavedSnapshot& snap)
@@ -324,8 +317,8 @@ static void write_saved(const SavedSnapshot& snap)
         return;
     }
     nvs_set_str(h, "patches", snap.patches);
-    if (snap.in[0]) nvs_set_str(h, "in", snap.in); else nvs_erase_key(h, "in");
-    if (snap.out[0]) nvs_set_str(h, "out", snap.out); else nvs_erase_key(h, "out");
+    nvs_erase_key(h, "in");    // The old program IN / OUT (load_saved moved them)
+    nvs_erase_key(h, "out");
     nvs_commit(h);
     nvs_close(h);
 }
@@ -502,40 +495,57 @@ uint32_t ui_mididev_serial(void)
     return s_serial;
 }
 
-// --- Selection -------------------------------------------------------------------
+// --- Script ------------------------------------------------------------------------
+// picoruby-midi's virtual port (midi_route.h). A send to its transport --
+// the script's midi_out, or a C sender given it as device: -- is output from
+// Script, so it goes along Script's routes. The route table never sends
+// what is routed into Script to the transport: that is queued for the
+// script's midi_in (MIDI.on).
 
-int ui_mididev_selected(bool out)
+static midi_tmask_t s_scriptBit;
+
+static int script_tx_send(void* ctx, uint8_t cable, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
 {
-    portENTER_CRITICAL(&s_mux);
-    int i = resolve_locked(s_sel[out ? 1 : 0]);
-    portEXIT_CRITICAL(&s_mux);
-    return i;
+    (void)ctx; (void)cable;
+    if (s_scriptBit) MIDI_route_packet(s_scriptBit, cin & 0x0F, b1, b2, b3);
+    return 0;
 }
 
-void ui_mididev_select(bool out, int index, bool save)
+static bool script_tx_connected(void* ctx)
 {
-    load_saved();
-    int k = out ? 1 : 0;
-    midi_tmask_t bit = 0;
-    bool changed;
-    bool saveable = true;
-    portENTER_CRITICAL(&s_mux);
-    int before = resolve_locked(s_sel[k]);
-    set_selection_locked(s_sel[k], index);
-    changed = (before != resolve_locked(s_sel[k]));
-    if (index >= 0 && index < s_count) {
-        Device& d = s_devs[index];
-        bit = d.pub.bit;
-        if (d.pub.flags & UI_MIDIDEV_STANDBY) d.wanted = true;
-        saveable = (d.pub.flags & UI_MIDIDEV_BUILTIN) != 0;
+    (void)ctx;
+    return true;
+}
+
+static const midi_transport_ops_t s_scriptOps = {
+    .send_packet     = script_tx_send,
+    .read_bytes      = nullptr,     // What reaches it is queued for Ruby, not read
+    .bytes_available = nullptr,
+    .is_connected    = script_tx_connected,
+    .transport_id    = MIDI_TRANSPORT_ID_NONE,   // Not a wire transport
+};
+
+static const midi_transport_t s_scriptTransport = {
+    .ops = &s_scriptOps,
+    .ctx = nullptr,
+};
+
+void ui_mididev_script_init(void)
+{
+    if (s_scriptBit) return;
+    s_scriptBit = MIDI_transport_register(&s_scriptTransport);
+    if (s_scriptBit == 0) {
+        ESP_LOGW(TAG, "MIDI transport registry full: no Script device");
+        return;
     }
-    if (save && saveable) set_selection_locked(s_savedSel[k], index);
-    portEXIT_CRITICAL(&s_mux);
-    if (save && saveable) save_now();
-    if (changed) {
-        bump();
-        post(out ? UI_MIDIDEV_EVENT_SELECT_OUT : UI_MIDIDEV_EVENT_SELECT_IN, bit, 0, 0);
-    }
+    MIDI_route_set_source(s_scriptBit, true);
+    MIDI_route_set_virtual(s_scriptBit);
+    ui_mididev_register(SCRIPT_KEY, "Script", s_scriptBit, UI_COLOR_WHITE, true);
+}
+
+midi_tmask_t ui_mididev_script_bit(void)
+{
+    return s_scriptBit;
 }
 
 // --- Patches -------------------------------------------------------------------------
@@ -671,15 +681,6 @@ static void route_saved(const char* only_key)
 int ui_mididev_restore(void)
 {
     load_saved();
-    portENTER_CRITICAL(&s_mux);
-    s_sel[0] = s_savedSel[0];
-    s_sel[1] = s_savedSel[1];
-    // A selected standby device is wanted too
-    for (int k = 0; k < 2; k++) {
-        int i = resolve_locked(s_sel[k]);
-        if (i >= 0 && (s_devs[i].pub.flags & UI_MIDIDEV_STANDBY)) s_devs[i].wanted = true;
-    }
-    portEXIT_CRITICAL(&s_mux);
     int applied = route_saved_count(nullptr);
     ui_filter_restore(nullptr);
     bump();
@@ -722,13 +723,6 @@ bool ui_mididev_save(void)
             copy_str(sp.from, s_devs[a].pub.key, sizeof(sp.from));
             copy_str(sp.to, s_devs[b].pub.key, sizeof(sp.to));
             sp.sel = sel;
-        }
-    }
-    // The selection too, when it is a built-in
-    for (int k = 0; k < 2; k++) {
-        int i = resolve_locked(s_sel[k]);
-        if (i < 0 || (s_devs[i].pub.flags & UI_MIDIDEV_BUILTIN)) {
-            set_selection_locked(s_savedSel[k], i);
         }
     }
     portEXIT_CRITICAL(&s_mux);
@@ -796,9 +790,6 @@ void ui_mididev_cleanup(void)
         s_devs[keep++] = d;
     }
     s_count = keep;
-    // The script's IN / OUT choice was its own
-    s_sel[0] = s_savedSel[0];
-    s_sel[1] = s_savedSel[1];
     portEXIT_CRITICAL(&s_mux);
     // The script's filters went with its VM
     ui_filter_cleanup();

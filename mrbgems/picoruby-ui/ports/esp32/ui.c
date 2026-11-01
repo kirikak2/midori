@@ -911,15 +911,6 @@ bool picoruby_ui_mididev_get(int index, int *bit, int *flags, char *key, int key
     return true;
 }
 
-int picoruby_ui_mididev_selected(bool out)
-{
-    return ui_mididev_selected(out);
-}
-
-void picoruby_ui_mididev_select(bool out, int index, bool save)
-{
-    ui_mididev_select(out, index, save);
-}
 
 int picoruby_ui_mididev_restore(void)
 {

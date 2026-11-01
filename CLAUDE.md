@@ -899,22 +899,26 @@ Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-
 流用、Ruby は `:midi_devices`）。**実機未確認**。
 
 - 行 = MIDI IN（ルートの送信元）、列 = MIDI OUT のクロスバー。セル = `MIDI.route` のルート
-  （画面はルート表をそのまま読む）。最後の列 **Prog(input)** / 行 **Prog(output)** でプログラムの IN / OUT を選ぶ
-  （`UI::MIDIDevices.midi_out` / `.midi_in`、選択に追従する入力は `.input`）
-- モデルは [main/ui/ui_midi_devices.cpp](main/ui/ui_midi_devices.cpp)（デバイス一覧・選択・NVS `midi_devs`）。
+  （画面はルート表をそのまま読む）
+- **スクリプト自身は `Script` デバイス**（2026-11-01、それまでの Prog(input) 列 / Prog(output) 行を置き換え）。
+  picoruby-midi の**仮想ポート**（1 ビット、`MIDI_route_set_virtual()`）で、**Script へ送る = Script からの出力**
+  （そのトランスポートの `send_packet` が `MIDI_route_packet(script)` でルートへ流す）、**他の機器から Script への
+  ルート = スクリプトの入力**（ルート表はトランスポートへ送らず `MIDI_ROUTE_DST_VIRTUAL` でキューへ。
+  `MIDI.on(script)` / `UI::MIDIDevices.input`）。Script → Script は張れない。`midi_out` / `midi_in` は Script
+  （パッチが無ければ nil）、`output` は常に Script、`midi_out=` / `midi_in=` は Script のパッチの張り替え。
+  ビットが変わらないので `UI::Keys` などの `device: md.output` もパッチに追従する。クロックを Script へは
+  ルートできない（入力になる）ので `MIDI.start!(output: md.output)` は Ruby の計時で F8 を送る。
+  NVS の旧 `in` / `out` は最初の読み込みで `x>script` / `script>x` のパッチに置き換える。docs/UI_MIDI_DEVICES.md
+- モデルは [main/ui/ui_midi_devices.cpp](main/ui/ui_midi_devices.cpp)（デバイス一覧・Script・NVS `midi_devs`）。
   内蔵デバイスは**どのモードでも起動時に** `main_task_base.rb` の `setup_midi_devices` が登録し、
   保存済みパッチを張り直す（スーパーバイザが切り替えのたびにルートを消すため）。NVS のキーは
   ビットではなく `usb_host` / `uart` / `usb_dev` / `amy` / `keys`（AMY と Keys のビットは起動ごとに変わる）
-- **AMY は standby**（ビット 0）で登録し、保存済みパッチ・選択・画面で必要になったとき初めて起動する
+- **AMY は standby**（ビット 0）で登録し、保存済みパッチ・画面で必要になったとき初めて起動する
   （起動するとオーディオ・I2S・Tab5 の USB パッドに触るため）。画面の鍵盤は C（`ui_keys.cpp`）が自分で登録
-- `midi_out` / `midi_in` が返すのは**その時点で選ばれている機器**。変数やプレイヤに渡すと選び直しに
-  追従しないので、保持するなら `UI::MIDIDevices.output`（OUT に追従する `MIDI::Device`、切り替え時に前の OUT へ
-  All Notes Off）/ `.input` を使う。C から送るもの（`UI::Keys` / `UI::Tombola` の `device:`、`MIDI.route`、
-  `MIDI.start!(output:)` のクロック）はビットを覚えるので `on_change` の `:select_out` で渡し直す
-- 画面で変えたパッチ（両端が内蔵）と選択は即 NVS に保存。スクリプトの `patch` / `midi_in=` は
+- 画面で変えたパッチ（両端が内蔵）は即 NVS に保存。スクリプトの `patch` / `midi_in=` は
   スクリプト限り（`UI::MIDIDevices.save` で保存）
 - Ruby のホストテスト: `ruby test/midi_devices_test.rb`（picoruby-ui ディレクトリで）
-- **最大 16 台**（2026-11-01、それまで 8）。収まらない行・列はドラッグでセル単位にスクロール（見出しと Prog 行 / 列は固定）。
+- **最大 16 台**（2026-11-01、それまで 8）。収まらない行・列はドラッグでセル単位にスクロール（見出しは固定）。
   左上の角のボタンで **All / Patched / Unpatched**（パッチのある / ない IN 行・OUT 列だけ）を切り替える。
   画面で付け外しした行・列はフィルタを選び直すまで残す。Grid とデバイス表・保存済みパッチ（最大 32 件）はヒープ
 
@@ -1164,6 +1168,12 @@ USB Device 0x04 は互換のため固定ビット（`ports/esp32/midi.c` のコ�
 その間 `read_available` とは併用しない）（と、自分で転送する送信元として宣言したトランスポート。例: `UI::Keys`）、送信先は登録表の任意のトランスポート。
 `MIDI.unroute(from, to = nil)` / `MIDI.unroute_all`。スクリプト停止時に
 `picoruby_esp32_midi_cleanup()` が `MIDI_route_clear()` で全消去する。
+
+- **ルートを外すと宛先の音を止める**（2026-11-01）: ルートごとにノートオンを通したチャンネルを覚えておき
+  （`MIDI_route_targets()` で記録）、`MIDI_route_remove()` / `MIDI_route_clear()` で外れた宛先へ、その
+  チャンネルにだけ Sustain Off（CC64 = 0）と All Notes Off（CC123）を送る。ノートを通していないルート
+  （クロックだけ）は何も送らない。宛先が仮想ポート（Script）なら Ruby のリスナーへ入力として届ける。
+  画面のパッチ解除・`MIDI.unroute`・チャンネルの選び直し（外して張り直す）のどれでも効く
 
 - 入力タスクは「`MIDI::Input` が読んでいる」か「ルートがある」間動き、Ruby 用キューへの積み込みは
   前者のときだけ（`MIDI_Input_set_queueing()`）

@@ -76,7 +76,6 @@ module UI
     def _mididev_activate(key, bit); true; end
     def _mididev_count; $devs.size; end
     def _mididev_get(i); $devs[i] ? $devs[i].dup : nil; end
-    def _mididev_selected(out); -1; end
     def _mididev_restore; 0; end
     def _mididev_take_wanted; nil; end
     def _mididev_serial; $serial; end

@@ -289,8 +289,6 @@ int  picoruby_ui_mididev_count(void);
 /* Copies entry `index`: its bit, flags (1 built-in, 2 standby), key and name */
 bool picoruby_ui_mididev_get(int index, int *bit, int *flags, char *key, int key_len,
                              char *name, int name_len);
-int  picoruby_ui_mididev_selected(bool out);
-void picoruby_ui_mididev_select(bool out, int index, bool save);
 int  picoruby_ui_mididev_restore(void);
 bool picoruby_ui_mididev_save(void);
 bool picoruby_ui_mididev_take_wanted(char *key, int len);

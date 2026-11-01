@@ -1632,24 +1632,6 @@ mrb_ui_mididev_get(mrb_state *mrb, mrb_value self)
     return a;
 }
 
-/* UI._mididev_selected(out) -> index or -1 */
-static mrb_value
-mrb_ui_mididev_selected(mrb_state *mrb, mrb_value self)
-{
-    mrb_value out;
-    mrb_get_args(mrb, "o", &out);
-    return mrb_fixnum_value(picoruby_ui_mididev_selected(mrb_test(out)));
-}
-
-/* UI._mididev_select(out, index, save) */
-static mrb_value
-mrb_ui_mididev_select(mrb_state *mrb, mrb_value self)
-{
-    mrb_value out, index, save;
-    mrb_get_args(mrb, "ooo", &out, &index, &save);
-    picoruby_ui_mididev_select(mrb_test(out), val_to_i(index), mrb_test(save));
-    return mrb_nil_value();
-}
 
 /* UI._mididev_restore -> patches routed */
 static mrb_value
@@ -1880,8 +1862,6 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_mididev_activate,       mrb_ui_mididev_activate,       MRB_ARGS_REQ(2));
     DEF(_mididev_count,          mrb_ui_mididev_count,          MRB_ARGS_NONE());
     DEF(_mididev_get,            mrb_ui_mididev_get,            MRB_ARGS_REQ(1));
-    DEF(_mididev_selected,       mrb_ui_mididev_selected,       MRB_ARGS_REQ(1));
-    DEF(_mididev_select,         mrb_ui_mididev_select,         MRB_ARGS_REQ(3));
     DEF(_mididev_restore,        mrb_ui_mididev_restore,        MRB_ARGS_NONE());
     DEF(_mididev_save,           mrb_ui_mididev_save,           MRB_ARGS_NONE());
     DEF(_mididev_take_wanted,    mrb_ui_mididev_take_wanted,    MRB_ARGS_NONE());

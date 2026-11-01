@@ -909,7 +909,7 @@ enum {
 };
 
 typedef enum {
-    UI_MIDIDEV_EVENT_SELECT_IN = 0,
+    UI_MIDIDEV_EVENT_SELECT_IN = 0,   // No longer sent (the Prog IN / OUT became Script)
     UI_MIDIDEV_EVENT_SELECT_OUT,
     UI_MIDIDEV_EVENT_PATCH,
     UI_MIDIDEV_EVENT_UNPATCH,
@@ -943,10 +943,11 @@ int  ui_mididev_find_bit(midi_tmask_t bit);      // index, or -1
 midi_tmask_t ui_mididev_connected_mask(void);    // Transports that are up
 uint32_t ui_mididev_serial(void);                // Bumped on every change
 
-// The program's IN / OUT (Prog column / row). index -1 for none. save: also
-// make it what a script starts with (NVS).
-int  ui_mididev_selected(bool out);
-void ui_mididev_select(bool out, int index, bool save);
+// The script as a device, "Script": picoruby-midi's virtual port. Sending to
+// it is output from it (along its routes, the script's midi_out); routes into
+// it are the script's midi_in. Registered by UIManager::init, first in the list.
+void         ui_mididev_script_init(void);
+midi_tmask_t ui_mididev_script_bit(void);   // 0 if there is none
 
 // What a patch passes is a route selection (midi_route.h): MIDI_ROUTE_SEL_ALL
 // for everything, else any of channels 0..15 (bits 0..15) and the clock

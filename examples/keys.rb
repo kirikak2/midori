@@ -3,13 +3,14 @@
 # 画面の鍵盤（UI::Keys、docs/KEYS.md）を弾く。鍵盤は picoruby-midi の
 # トランスポートでもあるので、MIDI.route の送信元にも宛先にもなる。
 #
-#   - タッチで弾いた音: MIDI Devices 画面で選んだ OUT へ C 側から直接
-#   - 選んだ IN（外部の鍵盤など）で弾いた音: 画面の鍵盤を光らせる
+#   - タッチで弾いた音: スクリプトの出力（MIDI Devices 画面の Script）へ C 側から直接。
+#     Script から何もパッチされていなければ AMY / SAM2695 / PC のどれかへつなぐ
+#   - 外部の鍵盤（USB-MIDI Host）で弾いた音: 画面の鍵盤を光らせる
 #     （光る鍵盤のように「いま何が押されているか」を表示）
 #   - C メジャーペンタトニックの鍵だけ青く塗っておく（スケール表示）
 #
-# IN / OUT は MIDI Devices 画面の Prog(input) 列 / Prog(output) 行でいつでも選び直せる。
-# 外部の鍵盤の音も鳴らしたいときは、同じ画面で IN → 音源をパッチする。
+# 行き先・光らせる元は MIDI Devices 画面で Script の行 / Keys の列を張り替えれば変わる。
+# 外部の鍵盤の音も鳴らしたいときは、同じ画面で鍵盤 → 音源をパッチする。
 #
 # Pads 画面の Oct- / Oct+ で音域を動かす。
 
@@ -18,8 +19,7 @@ require 'ui'
 
 md = UI::MIDIDevices
 
-# 未選択ならここで決める（画面で選び直せる）
-md.midi_in  ||= MIDIDevices.usb_midi_host
+# Script から何もパッチされていなければここでつなぐ（画面で張り替えられる）
 md.midi_out ||= MIDIDevices.amy || MIDIDevices.sam2695 || MIDIDevices.usb_midi_device
 unless md.midi_out
   puts "No MIDI output available"
@@ -28,7 +28,7 @@ end
 
 keys = UI::Keys.new(octaves: 2, low: 48,      # C3〜C5（25 鍵）
                     velocity: :position,      # 鍵の奥ほど弱く、手前ほど強く
-                    device: md.midi_out,
+                    device: md.output,        # Script: そのパッチの先で鳴る
                     light: :orange)           # 外から来たノートの色
 keys.channel_color(9, :red)   # ch 10（ドラム）は赤く光らせる
 
@@ -38,21 +38,8 @@ pentatonic = [0, 2, 4, 7, 9]
   keys.set_color(n, UI.rgb(40, 80, 200)) if pentatonic.include?(n % 12)
 end
 
-# IN → 画面の鍵盤（光らせる）。IN を選び直したら張り直す
-lit_by = nil
-follow_in = Proc.new do
-  MIDI.unroute(lit_by, keys) if lit_by
-  lit_by = md.midi_in
-  MIDI.route(lit_by, keys) if lit_by
-end
-follow_in.call
-
-md.on_change do |e|
-  case e[:kind]
-  when :select_in  then follow_in.call
-  when :select_out then keys.device = md.midi_out
-  end
-end
+# 外部の鍵盤 → 画面の鍵盤（光らせる）
+MIDI.route(MIDIDevices.usb_midi_host, keys) if MIDIDevices.usb_midi_host
 
 UI.pad(1, label: "Oct-", color: :blue) { keys.octave_down; UI.log("low = #{keys.low}") }
 UI.pad(2, label: "Oct+", color: :blue) { keys.octave_up;   UI.log("low = #{keys.low}") }

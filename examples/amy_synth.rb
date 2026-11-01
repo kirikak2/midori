@@ -33,9 +33,10 @@ raise "AMY is not available on this board" unless MIDIDevices.amy
 
 syn = AMY.add_synth(channel: 0, voices: 6)   # the initial voice
 
-# MIDI (pads, XYPad, CC knobs) goes to the OUT chosen on the MIDI Devices
-# screen, which starts out as AMY. Picking another synth there sends the
-# playing to it; the knobs that set AMY parameters directly stay on AMY.
+# MIDI (pads, XYPad, CC knobs) goes out of the script -- the Script device
+# on the MIDI Devices screen -- which starts out patched to AMY. Patching
+# Script to another synth there sends the playing to it too; the knobs that
+# set AMY parameters directly stay on AMY.
 md = UI::MIDIDevices
 md.midi_out = syn.transport
 
@@ -316,7 +317,7 @@ xy = UI::XYPad.new(
   y_cc: CC_CUTOFF,
   y_range: 0..127,
   velocity: 100,
-  device: md.output      # follows the OUT picked on the screen
+  device: md.output      # Script: follows its patches on the screen
 )
 
 # ---- Octave (knob 12, bank A) -------------------------------------------------
@@ -336,19 +337,16 @@ UI.knob(12, bank: 1, label: "Octave", color: :red, min: -2, max: 2,
 end
 
 # ---- MIDI IN (optional: a USB-MIDI keyboard, ...) ---------------------------
-# The IN is the one chosen on the MIDI Devices screen; picking another there
-# moves the route (follow_in) and the md.input handler with it.
-# Routed to AMY in C; mapped CCs (74 cutoff, 71 reso, 10 pan, 5 glide) work
-# from the keyboard's knobs too. CC 73 / 72 (attack / release on many
-# keyboards) set the amp envelope from Ruby.
-md.midi_in ||= MIDIDevices.usb_midi_host
-routed_from = nil
-follow_in = Proc.new do
-  MIDI.unroute(routed_from, syn.transport) if routed_from
-  routed_from = md.midi_in
-  MIDI.route(routed_from, syn.transport) if routed_from
+# The keyboard plays AMY along a patch of its own (forwarded in C); mapped CCs
+# (74 cutoff, 71 reso, 10 pan, 5 glide) work from its knobs too. It is also
+# patched to Script, so CC 73 / 72 (attack / release on many keyboards) reach
+# md.input and set the amp envelope from Ruby -- as does any other device
+# patched to Script on the screen.
+kb = MIDIDevices.usb_midi_host
+if kb
+  md.patch(kb, syn.transport)
+  md.midi_in ||= kb
 end
-follow_in.call
 
 md.input.on(:control_change) do |m|
   case m.cc
@@ -357,7 +355,6 @@ md.input.on(:control_change) do |m|
   end
 end
 
-md.on_change { |e| follow_in.call if e[:kind] == :select_in }
 
 UI.knobs
 puts "AMY Synth ready. Render load is printed every 5 s."

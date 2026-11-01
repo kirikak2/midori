@@ -1,23 +1,22 @@
 # midi_devices.rb
 #
-# UI::MIDIDevices（docs/UI_MIDI_DEVICES.md）の例。MIDI Devices 画面で選んだ
-# IN / OUT を使うスクリプト。どの機器で弾き、どの音源を鳴らすかは画面の
-# Prog(input) 列 / Prog(output) 行でいつでも変えられ、スクリプトは書き換えなくてよい。
+# UI::MIDIDevices（docs/UI_MIDI_DEVICES.md）の例。スクリプト自身は MIDI Devices 画面の
+# Script という機器で、どの機器で弾き、どの音源を鳴らすかは画面で Script の列 / 行を
+# パッチして決める（何台でも）。スクリプトは書き換えなくてよい。
 #
-#   - UI::MIDIDevices.input: 選んだ IN に追従する入力。選び直しても
-#     ハンドラはそのまま
-#   - UI::MIDIDevices.output: 選んだ OUT に追従する出力。選び直しても
-#     そのまま使える（midi_out はその時点の機器なので、保持せず毎回聞き直す）
+#   - UI::MIDIDevices.input: Script へパッチされた機器から届く入力
+#   - UI::MIDIDevices.output: Script そのもの。送ったものは Script のパッチの先へ出ていく
 #
-# 弾いた音を 3 度上にハモらせて OUT へ送る。IN と OUT の間を画面でパッチ
-# しておけば、元の音は C から直接、ハモりだけがこのスクリプトから届く。
+# 弾いた音を 3 度上にハモらせて送る。鍵盤と音源の間も画面でパッチしておけば、
+# 元の音は C から直接、ハモりだけがこのスクリプトから届く。
 
 require 'midi'
 require 'ui'
 
 md = UI::MIDIDevices
 
-# 最初の選択（画面で選び直せる）。保存済みの選択があればそちらが優先
+# Script に何もパッチされていなければここでつなぐ（画面で張り替えられる）。
+# 保存済みのパッチがあればそちらが優先
 md.midi_in ||= MIDIDevices.usb_midi_host || MIDIDevices.usb_midi_device
 md.midi_out ||= MIDIDevices.amy || MIDIDevices.sam2695
 
@@ -32,8 +31,8 @@ end
 
 md.on_change do |e|
   case e[:kind]
-  when :select_in  then UI.log("IN: #{e[:device] ? e[:device].info : '-'}")
-  when :select_out then UI.log("OUT: #{e[:device] ? e[:device].info : '-'}")
+  when :patch      then UI.log("patch: #{e[:from].info} > #{e[:to].info}")
+  when :unpatch    then UI.log("unpatch: #{e[:from].info} > #{e[:to].info}")
   when :connect    then UI.log("connected: #{e[:device].info}")
   when :disconnect then UI.log("disconnected: #{e[:device].info}")
   end
