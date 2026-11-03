@@ -1350,6 +1350,12 @@ usb を上書きし、`src/hcd_dwc.c` の IDF 5.x 分岐でポートリセット
   （同じ機器が 2 台なら後ろにスロット番号）、名前は製品名。保存済みパッチは機器ごと。旧 `usb_host` のパッチは最初につないだ機器に移す。
   `main_task_base.rb` は `:usb_host` を `register_builtin` しない。`ui_mididev_save` は今つながっていない機器のパッチも残す
 - スロットが別の機器に渡ったら、そのビットのルートと filter は外す（前の機器のものなので）
+- Ruby: `USB_MIDI_HOST.instance(slot = 0)`（引数なしは従来どおり 1 台目）、`USB_MIDI_HOST.find("J-6")` /
+  `find(vendor_id:, product_id:)`、`USB_MIDI_HOST.devices`、`MIDIDevices.usb_midi_host("J-6")` / `MIDIDevices.usb_midi_hosts`。
+  `MIDI::Device.new(...)` の呼び方は同じ。スロットはつないだ順なので、複数台なら名前で選ぶ。`transport_id` はスロットのビット
+  （まだ機器が来ていないスロットは 0）。C のバインディングは `_get_status` などに省略可能なスロット引数を足した（mruby / mruby/c）
+- `MIDI.route` の Ruby 側（`_start_source`）は送信元が固定の 3 ビット以外だと入力タスクを起こさなかったので、Ruby から 2 台目以降に
+  張ったルートが流れなかった。`MIDI._route_start(bit)` → `MIDI_route_start_source()` に任せるようにした（自分で送る送信元には何もしない）
 - 1 台の機器が MIDI Streaming インターフェースを複数持つ（IN と OUT が別）ことがあるので、IN と OUT が揃うまで全部見て、要るものをクレームする
 - `usb_host_interface_claim()` はホスト側の記録だけで機器には何も送らない。デスクトップのホストに合わせ、最初の転送の前に
   クレームした各インターフェースへ `SET_INTERFACE`、MIDI IN へ `CLEAR_FEATURE(ENDPOINT_HALT)` を送る（`reset_midi_interfaces`。

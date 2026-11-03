@@ -72,6 +72,13 @@ else
   puts "USB-MIDI Host not available on this board"
 end
 
+# USB ハブで複数つないだとき（最大 4 台、2026-11-04）は製品名で選ぶ。
+# usb_midi_host（引数なし）は 1 台目（つないだ順）
+j6 = MIDIDevices.usb_midi_host("J-6")          # = USB_MIDI_HOST.find("J-6")、無ければ nil
+j6 = USB_MIDI_HOST.find(vendor_id: 0x0582, product_id: 0x02a0)   # VID / PID でも
+MIDI.route(j6, MIDIDevices.amy) if j6
+MIDIDevices.usb_midi_hosts.each { |d| puts d.device_info[:product] }   # 今つながっているもの
+
 # USB-MIDI Device を使う場合（本機を PC 等のホストへ MIDI 出力）
 usb_dev = MIDIDevices.usb_midi_device
 if usb_dev

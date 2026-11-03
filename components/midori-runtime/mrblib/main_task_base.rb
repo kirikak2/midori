@@ -24,13 +24,22 @@ module MIDIDevices
     $midi_sam2695
   end
 
-  def self.usb_midi_host
+  # The first device on the USB host port; with a product name, the one
+  # plugged in by that name (several can be, through a hub), or nil:
+  #   MIDI::Device.new(MIDIDevices.usb_midi_host("J-6"))
+  def self.usb_midi_host(product = nil)
     # Lazy initialization
     if $midi_usb_midi_host.nil? && !$midi_usb_midi_host_init_attempted
       $midi_usb_midi_host_init_attempted = true
       init_usb_midi_host
     end
-    $midi_usb_midi_host
+    return $midi_usb_midi_host unless product
+    $midi_usb_midi_host ? USB_MIDI_HOST.find(product) : nil
+  end
+
+  # Every device plugged in on the USB host port now
+  def self.usb_midi_hosts
+    usb_midi_host ? USB_MIDI_HOST.devices : []
   end
 
   def self.usb_midi_device
