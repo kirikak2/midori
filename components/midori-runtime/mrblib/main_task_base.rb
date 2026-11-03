@@ -211,14 +211,13 @@ end
 # The board's MIDI devices on the MIDI Devices screen (docs/UI_MIDI_DEVICES.md),
 # then the patches saved there. Every mode does this at start: the supervisor
 # clears the routes between scripts (picoruby_esp32_midi_cleanup). The built-in
-# transports have fixed registry bits (USB host 0x01, UART 0x02, USB device
-# 0x04); AMY gets one when it starts, so it is listed on standby (bit 0) and
-# started only when a saved patch or the screen needs it.
+# transports have fixed registry bits (UART 0x02, USB device 0x04); AMY gets
+# one when it starts, so it is listed on standby (bit 0) and started only when
+# a saved patch or the screen needs it. The devices on the USB host port (bit
+# 0x01 for the first, more through a hub) list themselves as they are plugged
+# in, each under its VID / PID (ui_midi_devices.cpp).
 def setup_midi_devices
   md = UI::MIDIDevices
-  if BoardConfig::HAS_USB_MIDI_HOST
-    md.register_builtin(:usb_host, "USB Host", 0x01, color: :green) { MIDIDevices.usb_midi_host }
-  end
   if BoardConfig::HAS_SAM2695
     md.register_builtin(:uart, "SAM2695", 0x02, color: :orange) { MIDIDevices.sam2695 }
   end

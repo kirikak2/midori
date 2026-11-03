@@ -1295,6 +1295,8 @@ MIDIデバイスの電源ON/USB接続のタイミングに依存する問題。
 
 **現状の対処法**:
 - **運用で回避**: MIDIデバイスはUSB接続後に電源を入れる
+- 2026-11-04 に Tab5 で同じ症状（IN 転送が一度も完了しない）が出たときは、電源を入れる順序に関係なく、
+  **J-6 の再起動で直った**（機器側の状態だった）。この課題も機器側の状態だった可能性がある
 
 **将来の検討事項**:
 - ESP-IDF内部APIを使用したUSBポートリセットの実装
@@ -1316,6 +1318,48 @@ Low = **Quick Charge 有効**のままにしている。充電対応の USB ホ�
 **対処**: `platform_m5stack.cpp` で起動時に P5 を High にして QC を止める（充電は 5V で続く）。
 Tab5 の USB-C はどのモードでもデータ用なので常に止めている。
 `M5.Power.setUsbOutput()` は Tab5 では何もしない（CoreS3 専用）。
+
+### USB ハブ越しの FS 機器（P4 の HS ホスト / 2026-11-04）
+
+**症状**: Tab5 の USB-A に USB 2.0 ハブを挟むと `HUB: Connected device is FS, transaction translator (TT) is not supported`
+でハブの先の MIDI 機器（FS）がつながらない。P4 のホストポートは HS なのでハブが HS で上がり、ESP-IDF の USB Host は
+スプリットトランザクション（TT）を持たない。
+
+**対処**: ホストを FS/LS 専用で動かす（`usb_host_config_t.fsls_only = true`、`usb_host_driver.c`）。HS 機器も FS で動く。
+`fsls_only` は esp-usb の usb 1.6.0 にしかなく、さらに IDF 6.x の HAL が要る（IDF 5.5 では `ESP_ERR_NOT_SUPPORTED`）ので、
+esp-usb の `host/usb`（1.6.0 = コミット a2a5fdd、`test/` 除く）を [components/usb/](components/usb/) に置いて IDF 内蔵の
+usb を上書きし、`src/hcd_dwc.c` の IDF 5.x 分岐でポートリセットのたびに `HCFG.FSLSSupp` を立てるようにした
+（`MIDoRI:` のコメント。リカバリでコアがソフトリセットされるので毎回）。esp-usb を更新するときはこの差分を当て直す。
+1.6.0 の後の master の修正（686ce96 まで: P4 の切断時のアサーション、割り込み IN の短パケットのバイト数など）も `src/` と
+`private_include/` に当ててある。もう 1 つの MIDoRI パッチは `src/enum.c` の LANGID: 上流は 0x409（英語）が無い機器の文字列を
+読まない（製品名が空になる。Roland などで `LANGID 0x409 not found`）ので、LANGID 表の先頭で読む。
+`idf_component.yml` は置かない（あると Component Manager が依存を解き直し、tinyusb や M5GFX まで上がる）。
+`components/usb` を足した・外したときは `idf.py reconfigure` が要る。FS 固定は menuconfig の `USB_MIDI_HOST_FSLS_ONLY`
+（既定 y）。外すとハブ越しの FS 機器は再び `TT is not supported` で弾かれる。ハブは `CONFIG_USB_HOST_HUBS_SUPPORTED` /
+`CONFIG_USB_HOST_HUB_MULTI_LEVEL`（各ボードの `sdkconfig.defaults.*`）。Tab5 の実機でハブ越しの J-6 を確認（2026-11-04）
+
+**複数台**（2026-11-04、Tab5 の実機でハブ越しの 2 台が製品名の別デバイスとして出ること、J-6 からの受信を確認）: ハブ越しの MIDI 機器は最大 `USB_MIDI_HOST_MAX_DEVICES`（4）台で、
+機器ごとに別デバイス（MIDI Devices の別の行・列、別のルート）。
+- picoruby-usb_midi_host: 機器ごとに**スロット**（RX リング・TX キュー・情報）。スロット 0 は従来のビット 0x01（スロットなしの
+  `USB_MIDI_HOST_*` / `USB_MIDI_HOST.instance` / `MIDIDevices.usb_midi_host` / `MIDI::Input` / Tempo の USB-H）、スロット 1〜 は最初に使うときに
+  登録表の動的ビットを取る（`USB_MIDI_HOST_dev_*`）。同じ VID / PID の機器は前のスロットに戻る（`USB_MIDI_HOST_pick_slot`）。
+  ドライバは列挙中・使用中の機器ごとにエントリを持ち、`NEW_DEV` は保留キュー、`DEV_GONE` は `dev_hdl` で照合、MIDI でない機器は閉じる
+- picoruby-midi: スロット 1〜 は `MIDI_Input_add_packet_source()` で入力タスクが読む（USB Device と同じく、ルート・filter・watch がある間だけ）。
+  外部クロックの BPM（`parser_for`）はスロット 0 だけ
+- MIDI Devices: UI タスク（`ui_mididev_tick` → `sync_usb_host`）が接続中のスロットを組み込みとして載せる。キーは `u<VID><PID>`
+  （同じ機器が 2 台なら後ろにスロット番号）、名前は製品名。保存済みパッチは機器ごと。旧 `usb_host` のパッチは最初につないだ機器に移す。
+  `main_task_base.rb` は `:usb_host` を `register_builtin` しない。`ui_mididev_save` は今つながっていない機器のパッチも残す
+- スロットが別の機器に渡ったら、そのビットのルートと filter は外す（前の機器のものなので）
+- 1 台の機器が MIDI Streaming インターフェースを複数持つ（IN と OUT が別）ことがあるので、IN と OUT が揃うまで全部見て、要るものをクレームする
+- `usb_host_interface_claim()` はホスト側の記録だけで機器には何も送らない。デスクトップのホストに合わせ、最初の転送の前に
+  クレームした各インターフェースへ `SET_INTERFACE`、MIDI IN へ `CLEAR_FEATURE(ENDPOINT_HALT)` を送る（`reset_midi_interfaces`。
+  2026-11-04 に IN 転送が一度も完了しない件の対策として入れたが、原因は J-6 側だった（下記）。害はないので残している）
+- **IN が来ないときは、まず機器を疑う**（2026-11-04）: J-6 で IN 転送が一度も完了しない（デバイス詳細の `IN xfer 0`、
+  抜くと status 1 で返る）状態が、ESP-IDF 内蔵の USB Host・FS 固定なしでも同じで、**J-6 の再起動で直った**。
+  ホストは転送を出し続けていて、機器が NAK を返し続けていた。`IN xfer` が 0 のままなら、MIDoRI 側より先に機器の再起動と、
+  PC の MIDI モニタで機器が送っているかを確かめる
+- 受信の切り分け: MIDI Devices の見出しの長押し（デバイス詳細）に `IN xfer`（IN 転送の完了数・最後の status・バイト数・入力タスクが読んだバイト数）と
+  `input task` / `routed from` を出す（`USB_MIDI_HOST_dev_stats`）。ログには接続ごとに最初の IN 転送が `First MIDI IN transfer on slot` で出る
 
 ## メモリ確保ガイドライン (ESP32-P4 + PSRAM)
 

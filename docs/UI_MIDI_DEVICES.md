@@ -239,7 +239,7 @@ md.midi_in  ||= MIDIDevices.usb_midi_host
 | キー（NVS 用） | デバイス | IN | OUT | ビット | 備考 |
 |------|---------|----|-----|-----|------|
 | `script` | このスクリプト | ○ | ○ | 起動時に決まる | 仮想ポート（上の「Script デバイス」）。UI の初期化時に C 側（`ui_midi_devices.cpp`）が一覧の先頭に登録 |
-| `usb_host` | USB-MIDI Host | ○ | ○ | 0x01 | 表示名は接続中デバイスの製品名、未接続時 "USB Host" |
+| `u<VID><PID>` | USB-MIDI Host の機器 | ○ | ○ | 1 台目 0x01、2 台目以降は起動時に決まる | ハブ越しに最大 4 台、機器ごとに 1 行。つないだときに C 側（`ui_midi_devices.cpp` の `sync_usb_host`）が製品名で登録し、その機器の保存済みパッチを張る。同じ機器 2 台は後ろにスロット番号。旧 `usb_host` のパッチは最初につないだ機器に移る（2026-11-04） |
 | `uart` | SAM2695 | ○ | ○ | 0x02 | |
 | `usb_dev` | USB-MIDI Device | ○ | ○ | 0x04 | 表示名 "PC" |
 | `amy` | AMY | — | ○ | 起動時に決まる | standby で登録 |
@@ -248,7 +248,7 @@ md.midi_in  ||= MIDIDevices.usb_midi_host
 | `tombola` | UI::Tombola | ○ | ○ | 起動時に決まる | 衝突のノートを送り、受けたノートをボールにする（docs/TOMBOLA.md）。UI の初期化時に C 側（`screen_tombola.cpp`）が登録 |
 | `xypad` | UI::XYPad | ○ | — | 起動時に決まる | Ruby の内蔵ハンドラが鳴らすメッセージをルートへも流す（docs/XYPAD.md）。UI の初期化時に C 側（`ui_common.cpp`）が登録。送るだけ（`UI_MIDIDEV_NO_OUT`） |
 
-- USB Host / UART / USB Device は起動時に工場ブロックを呼んで初期化する（スクリプトモードでも。
+- UART / USB Device は起動時に工場ブロックを呼んで初期化する（スクリプトモードでも。
   以前は初回アクセスまで遅延していた）。UART は初期化しないと接続扱いにならず受信もしないため
 - **AMY は standby**（ビット 0）で登録する。`AMY::Transport.instance` はオーディオエンジンを起動する
   （I2S・ディレイライン・Tab5 の USB パッドの付け替え）ので、保存済みパッチ・画面での

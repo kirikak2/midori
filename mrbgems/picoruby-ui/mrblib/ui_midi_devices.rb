@@ -337,6 +337,23 @@ module UI
         return if serial == $ui_mididev_serial
         $ui_mididev_serial = serial
         service
+        _note_sources
+      end
+
+      # Built-ins the firmware lists by itself (the devices on the USB host
+      # port, as they are plugged in) have no factory: give their bits a key
+      # for m.source like the others
+      def _note_sources
+        n = UI._mididev_count
+        i = 0
+        while i < n
+          e = UI._mididev_get(i)
+          i += 1
+          next unless e && e[0] != 0 && (e[1] & FLAG_BUILTIN) != 0 && e[2] != ""
+          info = $__midi_source_info__[e[0]]
+          next if info && info[0] == e[2].to_sym
+          MIDI._set_source_info(e[0], e[2].to_sym, $ui_mididev_devices[e[0]])
+        end
       end
 
       # Follow the model from every run of the MIDI filters (once)

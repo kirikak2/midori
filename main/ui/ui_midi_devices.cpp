@@ -8,6 +8,10 @@
 // -- the stable key NVS stores patches by (bits of transports registered at
 // run time, such as AMY's, change from boot to boot).
 //
+// Each MIDI device on the USB host port (several through a hub) is a built-in
+// of its own, keyed by its VID / PID ("u0582abcd"): the UI task lists it when
+// it is plugged in, so its patches are saved and come back with the device.
+//
 // The script itself is a device too, "Script" (key "script"): picoruby-midi's
 // virtual port. A script's midi_out sends to it, which is output from Script
 // along its routes; routes into it are the script's midi_in.
@@ -22,6 +26,7 @@
 #include "midi.h"
 #include "midi_route.h"
 #include "midi_transport.h"
+#include "usb_midi_host.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -691,13 +696,15 @@ bool ui_mididev_save(void)
 {
     load_saved();
     portENTER_CRITICAL(&s_mux);
-    // Saved patches with a standby end are not in the route table: keep them
+    // Saved patches with a standby end, or one not listed now (a USB device
+    // that is not plugged in), are not in the route table: keep them
     int keep = 0;
     for (int i = 0; i < s_savedCount; i++) {
         int a = find_key_locked(s_saved[i].from);
         int b = find_key_locked(s_saved[i].to);
-        bool standby = (a >= 0 && (s_devs[a].pub.flags & UI_MIDIDEV_STANDBY)) ||
-                       (b >= 0 && (s_devs[b].pub.flags & UI_MIDIDEV_STANDBY));
+        bool standby = a < 0 || b < 0 ||
+                       (s_devs[a].pub.flags & UI_MIDIDEV_STANDBY) ||
+                       (s_devs[b].pub.flags & UI_MIDIDEV_STANDBY);
         if (standby) s_saved[keep++] = s_saved[i];
     }
     s_savedCount = keep;
@@ -747,6 +754,99 @@ bool ui_mididev_take_wanted(char* key, int len)
     return found;
 }
 
+// --- USB host devices -----------------------------------------------------------------
+// The driver gives each MIDI device a slot with a transport bit of its own
+// (slot 0 is 0x01). A device keeps its slot while it is plugged in and usually
+// gets it back when it returns, but a slot can pass to another device.
+
+#if CONFIG_USB_MIDI_HOST_ENABLED
+// Saved patches of the one "USB Host" device there was before (whatever was
+// plugged in): they go to the first device that is plugged in
+static constexpr const char* LEGACY_USB_KEY = "usb_host";
+
+// "u" + VID + PID, plus the slot when an identical device on a lower slot is
+// plugged in too (so two of the same are two devices)
+static void usb_key(int slot, const usb_midi_host_device_info_t& info, char* key)
+{
+    int len = snprintf(key, UI_MIDIDEV_KEY_LEN, "u%04x%04x", info.vendor_id, info.product_id);
+    for (int s = 0; s < slot; s++) {
+        usb_midi_host_device_info_t other;
+        if (USB_MIDI_HOST_dev_info(s, &other) && other.vendor_id == info.vendor_id &&
+            other.product_id == info.product_id) {
+            snprintf(key + len, UI_MIDIDEV_KEY_LEN - len, "%d", slot);
+            return;
+        }
+    }
+}
+
+// Every route and filter from or to `bit` (the device that had it is gone)
+static void drop_routes_of(midi_tmask_t bit)
+{
+    MIDI_route_remove(bit, MIDI_TMASK_ALL);
+    MIDI_route_clear_filter(bit, MIDI_ROUTE_DST_ALL);
+    for (midi_tmask_t b = 1; b; b <<= 1) {
+        if (b == bit) continue;
+        MIDI_route_remove(b, bit);
+        MIDI_route_clear_filter(b, bit);
+    }
+}
+
+static void migrate_legacy_usb(const char* key)
+{
+    bool changed = false;
+    portENTER_CRITICAL(&s_mux);
+    for (int i = 0; i < s_savedCount; i++) {
+        SavedPatch& sp = s_saved[i];
+        if (strcmp(sp.from, LEGACY_USB_KEY) == 0) { copy_str(sp.from, key, sizeof(sp.from)); changed = true; }
+        if (strcmp(sp.to, LEGACY_USB_KEY) == 0) { copy_str(sp.to, key, sizeof(sp.to)); changed = true; }
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (changed) {
+        save_now();
+        ESP_LOGI(TAG, "patches of %s are now %s's", LEGACY_USB_KEY, key);
+    }
+}
+
+// List the devices plugged in (UI task, from ui_mididev_tick)
+static void sync_usb_host()
+{
+    if (!s_devs) return;
+    for (int slot = 0; slot < USB_MIDI_HOST_MAX_DEVICES; slot++) {
+        midi_tmask_t bit = USB_MIDI_HOST_dev_bit(slot);
+        usb_midi_host_device_info_t info;
+        if (!bit || !USB_MIDI_HOST_dev_info(slot, &info)) continue;
+        char key[UI_MIDIDEV_KEY_LEN];
+        usb_key(slot, info, key);
+
+        portENTER_CRITICAL(&s_mux);
+        int i = find_key_locked(key);
+        midi_tmask_t old = i >= 0 ? s_devs[i].pub.bit : 0;
+        int holder = find_bit_locked(bit);
+        portEXIT_CRITICAL(&s_mux);
+        if (i >= 0 && old == bit) continue;   // Listed already
+
+        // The slot had another device: that one's row goes, with its routes
+        if (holder >= 0 && holder != i) {
+            drop_routes_of(bit);
+            ui_mididev_unregister(bit);
+        }
+        // This device had another slot: the routes there were its
+        if (old) drop_routes_of(old);
+
+        char name[UI_MIDIDEV_NAME_LEN];
+        copy_str(name, info.product[0] ? info.product : "USB MIDI", sizeof(name));
+        migrate_legacy_usb(key);
+        if (ui_mididev_register(key, name, bit, UI_COLOR_GREEN, true) < 0) {
+            ESP_LOGW(TAG, "device list full: %s not listed", name);
+            continue;
+        }
+        ESP_LOGI(TAG, "USB device %s (%s) is 0x%04X", key, name, (unsigned)bit);
+        route_saved(key);
+        ui_filter_restore(key);
+    }
+}
+#endif
+
 // --- Housekeeping ----------------------------------------------------------------------
 
 void ui_mididev_tick(void)
@@ -755,6 +855,9 @@ void ui_mididev_tick(void)
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     if (now - s_lastTickMs < TICK_MS) return;
     s_lastTickMs = now;
+#if CONFIG_USB_MIDI_HOST_ENABLED
+    sync_usb_host();
+#endif
 
     midi_tmask_t bits[UI_MIDIDEV_MAX];
     int n = 0;

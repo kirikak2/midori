@@ -22,6 +22,7 @@
 #include "sdkconfig.h"
 #include "screen_midi_devices.h"
 #include "ui_strip.h"
+#include "midi.h"
 #include "midi_route.h"
 #include "midi_transport.h"
 #include "usb_midi_host.h"
@@ -216,16 +217,18 @@ bool ScreenMidiDevices::isScript(const ui_mididev_t& d) const
     return d.bit != 0 && d.bit == ui_mididev_script_bit();
 }
 
+// The USB host slot a device is on (-1: not a USB host device)
+static int usb_host_slot(midi_tmask_t bit)
+{
+    for (int slot = 0; bit && slot < USB_MIDI_HOST_MAX_DEVICES; slot++) {
+        if (USB_MIDI_HOST_dev_bit(slot) == bit) return slot;
+    }
+    return -1;
+}
+
 void ScreenMidiDevices::displayName(const ui_mididev_t& d, char* buf, int len) const
 {
-    // The USB host port is named after what is plugged in
-    if (strcmp(d.key, "usb_host") == 0 && isUp(d)) {
-        usb_midi_host_device_info_t info;
-        if (USB_MIDI_HOST_get_device_info(&info) && info.product[0]) {
-            snprintf(buf, len, "%s", info.product);
-            return;
-        }
-    }
+    // A USB host device is listed under its product name (ui_midi_devices.cpp)
     snprintf(buf, len, "%s", d.name);
 }
 
@@ -779,13 +782,26 @@ void ScreenMidiDevices::drawDetail()
              (d.bit && (d.bit & MIDI_route_sources())) ? "yes" : "no",
              (d.flags & UI_MIDIDEV_NO_OUT) ? "no" : "yes");
 
-    if (strcmp(d.key, "usb_host") == 0) {
+    int usbSlot = usb_host_slot(d.bit);
+    if (usbSlot >= 0) {
         usb_midi_host_device_info_t info;
-        if (USB_MIDI_HOST_get_device_info(&info)) {
+        if (USB_MIDI_HOST_dev_info(usbSlot, &info)) {
             snprintf(lines[n++], sizeof(lines[0]), "%.28s / %.28s", info.manufacturer, info.product);
+            snprintf(lines[n++], sizeof(lines[0]), "USB slot %d  VID %04X PID %04X",
+                     usbSlot, info.vendor_id, info.product_id);
             snprintf(lines[n++], sizeof(lines[0]), "EP in 0x%02X out 0x%02X",
                      info.midi_in_ep, info.midi_out_ep);
         }
+        // Where MIDI IN stops, if it does: the transfers, the RX buffer, the input task
+        usb_midi_host_stats_t st;
+        if (USB_MIDI_HOST_dev_stats(usbSlot, &st)) {
+            snprintf(lines[n++], sizeof(lines[0]), "IN xfer %lu  st %d  %lu bytes  read %lu",
+                     (unsigned long)st.in_done, st.last_status,
+                     (unsigned long)st.in_bytes, (unsigned long)st.read_bytes);
+        }
+        snprintf(lines[n++], sizeof(lines[0]), "input task %s  routed from %s",
+                 MIDI_Input_is_running() ? "running" : "stopped",
+                 MIDI_route_from(d.bit) ? "yes" : "no");
     }
 #if CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE
     if (strcmp(d.key, "usb_dev") == 0) {
