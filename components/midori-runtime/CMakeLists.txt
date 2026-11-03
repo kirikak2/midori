@@ -401,6 +401,22 @@ if(CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE)
   )
 endif()
 
+# picoruby-usb_midi_host: Full Speed only on the host port (for hubs; see
+# USB_MIDI_HOST_FSLS_ONLY in main/Kconfig.projbuild). The gem's default is 1.
+# Only esp-usb's USB Host Library (components/usb, see CLAUDE.md) has it:
+# without that directory the build uses ESP-IDF's own, and runs at the speed
+# the device has.
+if(CONFIG_USB_MIDI_HOST_ENABLED)
+  if(NOT EXISTS ${CMAKE_SOURCE_DIR}/components/usb/CMakeLists.txt)
+    message(STATUS "USB host: ESP-IDF's USB Host Library (no Full-Speed-only mode)")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE USB_MIDI_HOST_FSLS_ONLY=-1)
+  elseif(CONFIG_USB_MIDI_HOST_FSLS_ONLY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE USB_MIDI_HOST_FSLS_ONLY=1)
+  else()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE USB_MIDI_HOST_FSLS_ONLY=0)
+  endif()
+endif()
+
 # Configure picoruby-amy for this board. Like picoruby-usb_midi_device, the
 # gem knows no board: pins and the scheduling knobs come in as defines (see
 # mrbgems/picoruby-amy/include/amy_gem_config.h). Without them the gem's

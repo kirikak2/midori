@@ -112,6 +112,18 @@ menu "USB MIDI Host Configuration"
             is available in this build. Tab5 always has one on USB-A; the
             single-port ESP32-S3 boards only have one in USB host mode.
 
+    config USB_MIDI_HOST_FSLS_ONLY
+        bool "USB host: run the host port at Full Speed only"
+        depends on USB_MIDI_HOST_ENABLED
+        default y
+        help
+            Brings everything on the USB-MIDI host port up at Full Speed
+            (usb_host_config_t.fsls_only), so Full-Speed MIDI devices work
+            behind a USB 2.0 hub: the host stack has no split transactions
+            (transaction translator) for them on a High-Speed hub. Has no
+            effect on the Full-Speed-only ESP32-S3. Turn it off to talk to
+            High-Speed devices at High Speed (then without hubs).
+
     config USB_MIDI_CONSOLE_ON_CDC
         bool
         default y if USB_MIDI_USB_MODE_MIDI_DEVICE
