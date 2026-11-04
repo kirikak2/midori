@@ -507,6 +507,31 @@ def run_script(script_path)
   end
 end
 
+# Handlers registered from irb (UI.pad, UI::Sequencer#on_pattern, MIDI.on ...)
+# run while irb waits for input: Editor::Line calls its idle_handler about
+# every millisecond when nothing has been typed, on this task, between lines,
+# so the blocks see the VM just as they would under a script's UI.process
+# loop. UI.process (which runs the MIDI filters too) every 10 idle calls
+# keeps it near the 10 ms of UI mode. While an expression is being evaluated
+# the editor is not idle, and its events wait until it returns.
+IRB_IDLE_EVERY = 10
+
+def irb_run_events_while_idle(shell)
+  editor = shell.instance_variable_get(:@editor)
+  return unless editor && editor.respond_to?(:idle_handler=)
+  idle = 0
+  editor.idle_handler = lambda do
+    idle += 1
+    next if idle < IRB_IDLE_EVERY
+    idle = 0
+    begin
+      UI.process
+    rescue => e
+      puts "\nirb: event handler error: #{e.message}"
+    end
+  end
+end
+
 # Interactive Ruby session on the serial console (USB CDC in midi_device
 # mode). See docs/IRB.md.
 #
@@ -537,6 +562,7 @@ def run_irb_session
     # cursor-position timeout on terminals that do not answer, such as
     # idf.py monitor.
     shell = Shell.new(clean: true)
+    irb_run_events_while_idle(shell)
     puts "PicoRuby irb - #{BoardConfig::BOARD_NAME}"
     puts "quit / exit / Ctrl-D to leave, Ctrl-C to abort an expression"
     puts ""

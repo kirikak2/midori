@@ -566,6 +566,9 @@ R2P2 と同じ PicoModem プロトコル（RBTP）で、ブラウザ側は upstr
   コンソールタスクは stdin を読まない
 - 端末モードは cooked のまま（Ctrl-C / Ctrl-Z がシグナルとして届くため）
 - irb は `stop_requested?` を見ないので、UI の Stop は 5 秒タイムアウト後の強制停止
+- irb で登録したハンドラ（`UI.pad` / `UI::Sequencer#on_pattern` / `MIDI.on` など）は、入力待ちの間に
+  `Editor::Line#idle_handler` から呼ぶ `UI.process`（約 10 ms 周期、`irb_run_events_while_idle`）で動く。
+  式の評価中は止まる（2026-11-05）
 
 ### スクリプトロードとESP32リスタート
 

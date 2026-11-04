@@ -137,8 +137,14 @@ SD の再マウント）を済ませてから `Shell.new(clean: true).start(:irb
   `ScriptManager#stop_requested?` を見ない。UI の Stop や別スクリプト選択では
   `stop_picoruby_task()` の 5 秒タイムアウト後に強制削除される（その後 VM は
   `cleanup_vm()` で作り直されるので状態は残らない）
-- **irb 中は UI が更新されない**: `UI.process` を回すループがないため、
-  M5Stack のパッドイベントは処理されない（画面描画と Stop ボタンは C 側なので動く）
+- **イベントは入力待ちの間に処理される**（2026-11-05）: `run_irb_session` が
+  `Editor::Line#idle_handler`（入力が無いとき約 1 ms ごと）に `UI.process` を差し込み、
+  10 回に 1 回（約 10 ms 周期）呼ぶ（`irb_run_events_while_idle`）。irb で登録した
+  `UI.pad` / `UI.knob` / `UI::Sequencer#on_step` / `on_pattern` / `on_edit` / `MIDI.on` などは
+  自分で `UI.process` を呼ばなくても動く。ハンドラは PicoRuby タスク上で行と行の間に呼ばれる
+  （スクリプトの `UI.process` ループと同じ）。**式の評価中は入力待ちにならない**ので、
+  その間のイベントは評価が終わってから処理される（`on_step` はキューが半分埋まると間引かれる）。
+  ハンドラの `puts` はプロンプトの行に割り込んで表示される
 - **irb 中は PicoModem が使えない**: どちらもコンソールを占有する。ファイル転送は
   UI モード（`> ` プロンプト）で行う
 - **セッションをまたいだ状態は残らない**: 終了すると VM ごと破棄される
