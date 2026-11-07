@@ -46,6 +46,9 @@ module BoardConfig
   # AMY software synthesizer on the board's speaker (picoruby-amy)
   HAS_AMY = @HAS_AMY@
 
+  # BLE-MIDI device / host (picoruby-ble_midi_device / _host, NimBLE)
+  HAS_BLE_MIDI = @HAS_BLE_MIDI@
+
   # Primary I2C bus for accessories (e.g. DFRobot rotary encoders).
   # PRIMARY_I2C_UNIT names the underlying hardware bus, which varies by board.
   # A board without a dedicated I2C connector puts this on the SAM2695 UART

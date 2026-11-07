@@ -138,13 +138,25 @@ if [ -f sdkconfig.defaults ]; then
     PREV_TARGET="$(sed -n 's/^CONFIG_IDF_TARGET="\(.*\)"/\1/p' sdkconfig.defaults | tail -1)"
 fi
 
-# Compose board defaults + USB mode defaults
+# Bluetooth LE (BLE-MIDI) on the boards with a radio of their own. The
+# ESP32-P4 boards have none (their ESP32-C6 is not supported yet; see
+# docs/BLE_MIDI.md).
+BLE_FILE=""
+if [ "$TARGET" = "esp32s3" ]; then
+    BLE_FILE="sdkconfig.defaults.ble"
+fi
+
+# Compose board defaults + USB mode defaults (+ BLE)
 {
     cat "$BOARD_FILE"
     echo ""
     cat "$MODE_FILE"
+    if [ -n "$BLE_FILE" ]; then
+        echo ""
+        cat "$BLE_FILE"
+    fi
 } > sdkconfig.defaults
-echo "Applied $BOARD_FILE + $MODE_FILE"
+echo "Applied $BOARD_FILE + $MODE_FILE${BLE_FILE:+ + $BLE_FILE}"
 
 # Remove sdkconfig and build directory
 rm -f sdkconfig

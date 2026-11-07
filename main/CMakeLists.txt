@@ -55,6 +55,7 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/seq_engine.c"
         "ui/ui_sequencer.cpp"
         "ui/screen_sequencer.cpp"
+        "ui/screen_bluetooth.cpp"
         "ui/screen_home.cpp"
         "ui/ui_layout.cpp"
         "ui/ui_widgets.cpp"

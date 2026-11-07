@@ -124,6 +124,18 @@ menu "USB MIDI Host Configuration"
             effect on the Full-Speed-only ESP32-S3. Turn it off to talk to
             High-Speed devices at High Speed (then without hubs).
 
+    config USB_MIDI_BLE_MIDI
+        bool "BLE-MIDI (device and host)"
+        depends on BT_NIMBLE_ENABLED
+        default y
+        help
+            Build picoruby-ble_midi_device (the board as a BLE-MIDI
+            instrument a Mac / iPad / PC connects to) and
+            picoruby-ble_midi_host (the board connects to BLE-MIDI
+            keyboards and adapters), on picoruby-ble's NimBLE port.
+            Needs NimBLE: switch_board.sh adds sdkconfig.defaults.ble on
+            the ESP32-S3 boards. See docs/BLE_MIDI.md.
+
     config USB_MIDI_CONSOLE_ON_CDC
         bool
         default y if USB_MIDI_USB_MODE_MIDI_DEVICE

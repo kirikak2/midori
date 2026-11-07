@@ -79,6 +79,7 @@ module UI
   SCREEN_HOME      = 10
   SCREEN_KEYS      = 11
   SCREEN_SEQUENCER = 12
+  SCREEN_BLUETOOTH = 13   # BLE-MIDI builds only (docs/BLE_MIDI.md)
 
   # === Navigation (docs/UI_NAVIGATION.md) ===
   #
@@ -92,13 +93,13 @@ module UI
     pads: SCREEN_PADS, knobs: SCREEN_KNOBS, xypad: SCREEN_XYPAD,
     tombola: SCREEN_TOMBOLA, keys: SCREEN_KEYS, sequencer: SCREEN_SEQUENCER, layout: SCREEN_LAYOUT,
     midi_devices: SCREEN_MIDI_DEVICES, midi_info: SCREEN_MIDI_INFO, scripts: SCREEN_SCRIPTS,
-    logs: SCREEN_LOGS, settings: SCREEN_SETTINGS
+    logs: SCREEN_LOGS, settings: SCREEN_SETTINGS, bluetooth: SCREEN_BLUETOOTH
   }
 
   # Index -> Symbol. Screens 0 and 2 read back as :tempo and :midi_devices,
   # their current names.
   SCREEN_NAMES = [:tempo, :pads, :midi_devices, :logs, :scripts, :settings,
-                  :tombola, :knobs, :xypad, :layout, :home, :keys, :sequencer]
+                  :tombola, :knobs, :xypad, :layout, :home, :keys, :sequencer, :bluetooth]
 
   # Internal: Symbol / SCREEN_* -> index, or nil
   def self.screen_index(screen)
@@ -183,6 +184,7 @@ module UI
   def self.xypad;     show(:xypad);     end
   def self.keys;      show(:keys);      end
   def self.sequencer; show(:sequencer); end
+  def self.bluetooth; show(:bluetooth); end
   def self.tombola;   show(:tombola);   end
   def self.midi_info; show(:midi_info); end
   def self.midi_devices; show(:midi_devices); end

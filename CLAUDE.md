@@ -141,7 +141,9 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
   `midori` ブランチ = master + 2 本のパッチだったが、picoruby-gpio の `mrb_int` 修正と
   picoruby-machine の ESP32 HAL を 1 回だけ初期化する修正はどちらも upstream に取り込まれた）。
   更新は `git submodule update --remote components/midori-runtime/picoruby`。
-  また独自パッチが必要になったら fork にブランチを切って `.gitmodules` を戻す
+  また独自パッチが必要になったら fork にブランチを切って `.gitmodules` を戻す。
+  **2026-11-07 から BLE-MIDI のためにローカルブランチ `midori-ble`**（master + PR #427 の picoruby-ble ESP32 ポート +
+  共有 NimBLE オーナー）。まだ push しておらず `.gitmodules` も master のまま（docs/BLE_MIDI.md §9.1）
 - ビルド設定の名前は upstream に合わせている（`build_config/{xtensa,riscv}-esp-picoruby.rb`、
   libmruby は `picoruby/build/esp32-picoruby/`）。`main_task.rb` をコンパイルする mrbc は
   クロスビルドが自分用に作る `picoruby/build/mrbc/default/bin/mrbc`
@@ -180,6 +182,8 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-midi-mml` | MML パーサ + プレイヤ |
 | `mrbgems/picoruby-usb_midi_host` | USB-MIDI Host トランスポート |
 | `mrbgems/picoruby-usb_midi_device` | USB-MIDI Device トランスポート（TinyUSB） |
+| `mrbgems/picoruby-ble_midi_device` | BLE-MIDI Device（Peripheral）トランスポート（NimBLE） |
+| `mrbgems/picoruby-ble_midi_host` | BLE-MIDI Host（Central）トランスポート（NimBLE） |
 | `mrbgems/picoruby-uart_midi` | UART MIDI トランスポート |
 | `mrbgems/picoruby-sam2695` | SAM2695 ラッパ（uart_midi 上の薄い層） |
 | `mrbgems/picoruby-ui` | M5Stack UI |
@@ -1267,6 +1271,29 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   全画面合成で描き、タッチはどこにも渡さない（ロック中に置いた指は離すまで無視）。`screen->update()` も呼ばない
 - **電源投入時からロック状態**（`m_loading = true` で始まる）。各モードの先頭で `SDLoader.start`、読み込み後に
   `SDLoader.finish`。VM が途中で終わっても `scriptCleanup()` が解除する
+
+## BLE-MIDI（picoruby-ble_midi_device / _host / 2026-11-07）
+
+詳細は [docs/BLE_MIDI.md](docs/BLE_MIDI.md)。CoreS3（BLE あり）と Tab5（BLE なし）のビルドとホストテスト、CoreS3 の実機で確認（2026-11-07）。
+
+- ESP32-S3 のボードだけ（`switch_board.sh` が `sdkconfig.defaults.ble` をつなぐ。menuconfig `USB_MIDI_BLE_MIDI`）。
+  P4 は無線が無く、C6（ESP-Hosted）は未対応
+- **MIDI は Ruby を通さない**: NimBLE のコールバックで BLE-MIDI を復号して USB-MIDI パケットのリングへ、送信は
+  gem のタスクが 1 ms まとめて notify / write。どちらも picoruby-midi の登録表の動的ビット + パケットソース
+  （`MIDI.route` / filter / クリーンアップがそのまま効く）。コーデックは picoruby-midi の `ble_midi_codec.c`
+  （ホストテスト `make -C mrbgems/picoruby-midi/host_test`）
+- NimBLE は picoruby-ble の ESP32 ポートの `nimble_owner` を**共有オーナー**にして使う（`picoruby_nimble_acquire` /
+  `release`、クライアントごとの `setup` / `configure` / `on_sync` / `on_reset`）。Ruby の `BLE` クラスは**排他**
+  （BLE-MIDI が動いている間の `BLE.new` は失敗する。先に `BLE_MIDI_DEVICE.enable = false` / `BLE_MIDI_HOST.enable = false`）
+- 両 gem の `ports/esp32` はいつでもコンパイルされ、`BLE_MIDI_*_ENABLED` が無ければスタブ。picoruby-ble は
+  `USE_BLE` のときだけ libmruby に入る。BLE の有無が変わると CMake が gem セットのスタンプで rake を走らせる
+- 設定は `components/midori-runtime/ble_midi_settings.c`（NVS `ble_midi`: `dev_on` / `host_on`、既定 on）。
+  app_main が起動し、スクリプト終了時に `ble_midi_settings_restore()` が戻す。Host の既知の機器も同じ名前空間（`known`）
+- Ruby: `MIDIDevices.ble_midi_device` / `ble_midi_host(name)`、`BLE_MIDI_HOST.scan` / `connect("WIDI")` / `find` /
+  `known` / `forget`。画面: Bluetooth（`UI_SCREEN_BLUETOOTH` = 13、`:bluetooth`）、MIDI Devices の `BLE` と機器、
+  Tempo の BLE、設定画面の BLE-MIDI 欄。サンプル [examples/ble_midi.rb](examples/ble_midi.rb)
+- クリーンアップの All Notes Off は BLE-MIDI Device には送らない（USB Device と同じく相手が PC / iPad）
+- 登録表（16 ビット）は ESP32-S3 で最大 15 使う（BLE Host は 2 台まで）。広げる話は docs/BLE_MIDI.md §12
 
 ## 既知の課題
 

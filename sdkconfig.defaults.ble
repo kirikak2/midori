@@ -1,0 +1,42 @@
+# Bluetooth LE (NimBLE) for BLE-MIDI -- picoruby-ble_midi_device /
+# picoruby-ble_midi_host on picoruby-ble's shared NimBLE owner. See
+# docs/BLE_MIDI.md. switch_board.sh appends this on the ESP32-S3 boards
+# (the ESP32-P4 boards have no radio of their own).
+#
+# Based on R2P2-ESP32's sdkconfigs/bt_nimble (picoruby/R2P2-ESP32#135).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+# CONFIG_BT_BLUEDROID_ENABLED is not set
+CONFIG_BT_CONTROLLER_ENABLED=y
+
+# Peripheral (BLE-MIDI device) and central (BLE-MIDI host) at once
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+# 1 central (device side) + 2 peripherals (host side, BLE_MIDI_HOST_MAX_DEVICES)
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+
+# Pairing (Just Works) and bonds kept in NVS
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
+CONFIG_BT_NIMBLE_SM_LEGACY=y
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_MAX_BONDS=8
+
+# picoruby-ble's access callbacks marshal mruby values on the NimBLE host
+# task; the 4096-byte default stack is too tight
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+
+# Host allocations in PSRAM (internal RAM is tight next to the UI strip
+# buffer and the controller)
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# Wi-Fi is not used: no coexistence. With SW_COEXIST on but Wi-Fi never
+# initialised, the BT controller trips a ROM-side coex lock on ESP32-S3
+# (R2P2-ESP32#135).
+# CONFIG_SW_COEXIST_ENABLE is not set
+
+# Quieter NimBLE logs (the console may be the USB CDC)
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
