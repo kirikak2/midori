@@ -30,8 +30,9 @@ bool ble_midi_settings_host(void);
 void ble_midi_settings_set_device(bool on);
 void ble_midi_settings_set_host(bool on);
 
-/* Back to the saved settings (after a script; also releases the BLE class's
- * hold on the NimBLE host, which a script may have left) */
+/* Back to the saved settings (after a script; also lets go of what the
+ * script's BLE class left on the shared NimBLE host: its advertising, scan,
+ * link and GATT services) */
 void ble_midi_settings_restore(void);
 
 #ifdef __cplusplus

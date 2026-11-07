@@ -1274,7 +1274,8 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
 
 ## BLE-MIDI（picoruby-ble_midi_device / _host / 2026-11-07）
 
-詳細は [docs/BLE_MIDI.md](docs/BLE_MIDI.md)。CoreS3（BLE あり）と Tab5（BLE なし）のビルドとホストテスト、CoreS3 の実機で確認（2026-11-07）。
+詳細は [docs/BLE_MIDI.md](docs/BLE_MIDI.md)。段階 0〜3 は CoreS3 の実機で確認（2026-11-07）。段階 4（受信のタイムスタンプ補正・
+`BLE` クラスとの共存）はビルドとホストテストのみで**実機未確認**。
 
 - ESP32-S3 のボードだけ（`switch_board.sh` が `sdkconfig.defaults.ble` をつなぐ。menuconfig `USB_MIDI_BLE_MIDI`）。
   P4 は無線が無く、C6（ESP-Hosted）は未対応
@@ -1283,8 +1284,14 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   （`MIDI.route` / filter / クリーンアップがそのまま効く）。コーデックは picoruby-midi の `ble_midi_codec.c`
   （ホストテスト `make -C mrbgems/picoruby-midi/host_test`）
 - NimBLE は picoruby-ble の ESP32 ポートの `nimble_owner` を**共有オーナー**にして使う（`picoruby_nimble_acquire` /
-  `release`、クライアントごとの `setup` / `configure` / `on_sync` / `on_reset`）。Ruby の `BLE` クラスは**排他**
-  （BLE-MIDI が動いている間の `BLE.new` は失敗する。先に `BLE_MIDI_DEVICE.enable = false` / `BLE_MIDI_HOST.enable = false`）
+  `release`、クライアントごとの `setup` / `configure` / `on_sync` / `on_reset`）。Ruby の `BLE` クラスも共有のクライアントで
+  **優先度が上**（段階 4。それまでは排他）。1 つずつしか動かない広告（`PROC_ADV`）とスキャン / 接続の開始（`PROC_CENTRAL`）は
+  `picoruby_nimble_claim` / `unclaim` で取り合い、BLE クラスが使う間は BLE-MIDI の広告・スキャン・再接続が待つ。
+  サービスのある `BLE.new` はホストを立ち上げ直す（BLE-MIDI の接続が一度切れる）。プロファイルの 0x1800 / 0x1801 は
+  BLE-MIDI Device が NimBLE の GAP / GATT を登録しているときは外す。docs/BLE_MIDI.md §3.2
+- **受信は送り手のタイムスタンプの間隔で流す**（`ble_midi_sync_release()` + picoruby-midi の `midi_timed_ring`。
+  時刻に esp_timer で `MIDI_Input_kick()` して入力タスクを起こす）。遅延は既定で接続間隔 + 4 ms、
+  `BLE_MIDI_DEVICE.rx_latency =` / `BLE_MIDI_HOST.rx_latency =`（ms、`:auto`、0 = 補正なし）。docs/BLE_MIDI.md §8.1
 - 両 gem の `ports/esp32` はいつでもコンパイルされ、`BLE_MIDI_*_ENABLED` が無ければスタブ。picoruby-ble は
   `USE_BLE` のときだけ libmruby に入る。BLE の有無が変わると CMake が gem セットのスタンプで rake を走らせる
 - 設定は `components/midori-runtime/ble_midi_settings.c`（NVS `ble_midi`: `dev_on` / `host_on`、既定 on）。
@@ -1294,6 +1301,7 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   Tempo の BLE、設定画面の BLE-MIDI 欄。サンプル [examples/ble_midi.rb](examples/ble_midi.rb)
 - クリーンアップの All Notes Off は BLE-MIDI Device には送らない（USB Device と同じく相手が PC / iPad）
 - 登録表（16 ビット）は ESP32-S3 で最大 15 使う（BLE Host は 2 台まで）。広げる話は docs/BLE_MIDI.md §12
+- NimBLE の接続は 4 本（Device 1 + Host 2 + `BLE` クラス 1、`sdkconfig.defaults.ble`）
 
 ## 既知の課題
 

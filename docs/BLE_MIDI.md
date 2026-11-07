@@ -1,6 +1,7 @@
 # BLE-MIDI（picoruby-ble_midi_host / picoruby-ble_midi_device）
 
-2026-11-07 起草・実装（段階 0〜3）。CoreS3（BLE あり）と Tab5（BLE なし）のビルドとホストテスト、**CoreS3 の実機で動作を確認**（2026-11-07）。
+2026-11-07 起草・実装（段階 0〜4）。段階 0〜3 は CoreS3 の実機で動作を確認（2026-11-07）。
+段階 4（受信のタイムスタンプ補正・Ruby の `BLE` との共存）は CoreS3 / Tab5 のビルドとホストテストのみで**実機未確認**。
 
 Bluetooth LE MIDI（BLE-MIDI）を MIDoRI のトランスポートとして追加する。USB-MIDI と同じ名前の付け方で 2 つの gem に分ける。
 
@@ -22,7 +23,7 @@ BLE のスタックは picoruby-ble の ESP32 ポート（NimBLE）を使う。u
 | 1 コーデック・共有オーナー・BLE-MIDI Device | 済。コーデックはホストテスト済み |
 | 2 BLE-MIDI Host | 済。**登録表の 32 ビット化は見送り**（§12） |
 | 3 画面（Bluetooth 画面・MIDI Devices・Tempo の BLE・設定画面） | 済 |
-| 4 タイムスタンプ補正・Ruby の `BLE` との共存 | 未 |
+| 4 タイムスタンプ補正・Ruby の `BLE` との共存 | 済（実機未確認）。補正は §8.1、共存は §3.2。ペアリングは見直しのみ（§5.2） |
 | 5 Tab5（ESP-Hosted + C6） | 未 |
 
 設計からの変更点:
@@ -127,8 +128,13 @@ typedef struct picoruby_nimble_client {
     void (*on_sync)(void);            /* ホストとコントローラの同期後（起動時・リセットからの復帰時） */
     void (*on_reset)(int reason);     /* コントローラのリセット、またはオーナーがホストを止めた
                                        * （PICORUBY_NIMBLE_REASON_STOPPED）。接続はすべて失われている */
-    bool exclusive;                   /* ホストを独り占めする（BLE クラス） */
+    bool exclusive;                   /* ホストを独り占めする（今は誰も使わない） */
+    int  priority;                    /* 手続きの取り合いで上の者が勝つ（BLE クラス 1、BLE-MIDI 0） */
+    void (*yield)(int proc);          /* 手続きを取り上げられた。すぐ止める */
+    void (*proc_free)(int proc);      /* 断られた / 取り上げられた手続きが空いた */
+    bool provides_gap;                /* setup が NimBLE の GAP / GATT サービスを登録する */
     bool held, set_up;                /* オーナーが使う */
+    uint8_t waiting;
     struct picoruby_nimble_client *next;
 } picoruby_nimble_client_t;
 
@@ -140,6 +146,12 @@ void picoruby_nimble_release(picoruby_nimble_client_t *client);
 /* 自分以外のクライアントがホストを使っているか（NULL: BLE クラス以外） */
 bool picoruby_nimble_shared(const picoruby_nimble_client_t *self);
 bool picoruby_nimble_synced(void);
+
+/* 1 つずつしか動かない手続き（§3.2）: PICORUBY_NIMBLE_PROC_ADV / _CENTRAL */
+bool picoruby_nimble_claim(picoruby_nimble_client_t *client, int proc);   /* NULL: BLE クラス */
+void picoruby_nimble_unclaim(picoruby_nimble_client_t *client, int proc);
+bool picoruby_nimble_holds(const picoruby_nimble_client_t *client, int proc);
+bool picoruby_nimble_gap_provided(void);
 ```
 
 - 既存の `picoruby_nimble_start(setup)` / `stop()` は「picoruby-ble 自身をクライアントとして acquire / release する」
@@ -150,24 +162,38 @@ bool picoruby_nimble_synced(void);
 - SM（P6）は `setup` の中でクライアントが上書きしてよい。BLE-MIDI が `sm_bonding = 1` にした後に
   picoruby-ble の setup が 0 に戻さないよう、owner の既定値の設定は `setup` 群より前で 1 回だけ行う
 
-### 3.2 Ruby の `BLE` との共存（段階 1）
+### 3.2 Ruby の `BLE` との共存（段階 4）
 
-**排他**にした。BLE-MIDI がホストを使っている間（`picoruby_nimble_shared(NULL)` が真）は `BLE_init()` が -1 を
-返し、`BLE.new` は「BLE init failed」の例外になる（逆に `BLE` が使っている間は BLE-MIDI の acquire が -2）。
-Ruby の `BLE` を使うスクリプトは先に BLE-MIDI を切る:
+段階 1〜3 は**排他**だった（BLE-MIDI がホストを使っている間の `BLE.new` は失敗）。段階 4 で**共有**にした
+（2026-11-07、実機未確認）。BLE クラスも普通のクライアント（`exclusive = false`）で、走っているスクリプトの
+ものなので**優先度が上**（1。BLE-MIDI は 0）。
 
-```ruby
-BLE_MIDI_DEVICE.enable = false   # 止まるまで待つ（最大 3 秒）
-BLE_MIDI_HOST.enable = false
-ble = MyPeripheral.new           # ここで NimBLE を独り占めできる
-```
-
-スクリプトが終わると、クリーンアップ（`ble_midi_settings_restore()`）が `BLE` の分のホストを放し
-（`picoruby_nimble_stop()`。VM ごと捨てられたときも同じ）、保存済みの設定で BLE-MIDI を戻す。
-
-本当に共存させるには、`BLE_init()` の「止めて立ち上げ直す」を「acquire（必要なら立ち上げ直し）」に変え、
-Central / Observer のスキャン（NimBLE は同時に 1 つしか discovery できない）と `con_handle` の 1 接続前提も
-解く必要がある（段階 4）。
+- **GATT**: `BLE.new` のプロファイルにサービスがあれば、ホストを立ち上げ直して足す（`picoruby_nimble_start(setup)`、
+  サービスがなければ `NULL` で再起動しない）。BLE-MIDI の接続はそこで切れる（Device は広告し直し、Host は自動で
+  再接続する）。スクリプトが終わると（`picoruby_nimble_stop()`）、他のクライアントが残っていればもう一度
+  立ち上げ直してサービスを外す
+- **GAP / GATT サービス（0x1800 / 0x1801）**: BLE-MIDI Device は NimBLE の `ble_svc_gap` / `ble_svc_gatt` を登録する
+  （`provides_gap`）。プロファイルにも 0x1800 / 0x1801 があると二重になるので、そのときは BLE クラスの側を外して
+  登録する（`ble.c` の `register_services`）。デバイス名は BLE-MIDI Device のもの（`BLE_MIDI_DEVICE.name`）になる
+- **1 つずつしか動かない手続き**は取り合いにする（`picoruby_nimble_claim` / `unclaim`）
+  - `PROC_ADV`（広告）: レガシー広告はホストに 1 セットだけ。BLE クラスのペリフェラル / ブロードキャスタが広告する間、
+    BLE-MIDI Device の広告は止まる（状態は `:starting`）。BLE クラスが止める・接続されると Device が広告を再開する
+  - `PROC_CENTRAL`（スキャンと接続の開始）: NimBLE はスキャン中に接続を始められず、スキャンも接続の開始も
+    1 つずつ。BLE クラスのスキャン / 接続が BLE-MIDI Host のスキャン（ユーザのスキャン・再接続のスキャン）と
+    接続の開始を止める。止められた接続は BLE クラスが手放した後にやり直す
+  - 取り上げは要求した側のタスクで `yield` を呼ぶ（`ble_gap_adv_stop` / `ble_gap_disc_cancel` /
+    `ble_gap_conn_cancel` は同期的）。空いたら待っていた側に `proc_free`（各 gem のタスクを起こす）。
+    状態はスピンロックで持ち、オーナーの再帰ミューテックスは取らない（GAP のイベントはホストタスクから来るので、
+    `host_stop()` が待つホストタスクを止めないため）。ホストの停止・コントローラのリセットで全部空く
+- **接続**: GAP のイベントは手続きを始めたクライアントのコールバックに届くので混ざらない。BLE クラスの
+  `con_handle`（1 本）は自分の接続だけ。ホストが他のクライアントのために立ち上げ直されたときは、BLE クラスに
+  切断イベント（理由 0x16）を合成し、同期後に広告・スキャンを再開する（`picoruby_ble_on_reset` / `on_sync`）。
+  その間の VM とイベントキューはそのまま（`host_start()` は BLE クラスがいないときだけ消す）
+- **スクリプトの終了**: `ble_midi_settings_restore()` → `picoruby_nimble_stop()` が BLE クラスの広告・スキャン・
+  接続を止め（`picoruby_ble_teardown`）、ホストの持ち分を放す。VM ごと捨てられたときも同じ
+- 制限: 同時に広告できるのは 1 つだけ（拡張広告は使っていない。`CONFIG_BT_NIMBLE_EXT_ADV` にするとレガシーの
+  API が無くなり PR #427 も BLE-MIDI も書き換えになる）。BLE クラスのペリフェラルが広告している間、Mac / iPad から
+  BLE-MIDI Device は見えない
 
 ---
 
@@ -254,6 +280,15 @@ macOS / iOS の Bluetooth MIDI は暗号化を求めることがある（機器�
 `sm_sc = 1`）、ボンド情報は NimBLE の NVS ストア（`CONFIG_BT_NIMBLE_NVS_PERSIST=y`、`ble_store_config_init()`）。
 キャラクタリスティックのパーミッションに暗号化を要求するかは `BLE_MIDI_DEVICE_REQUIRE_ENCRYPTION`（既定 0）。
 実機（macOS の Audio MIDI 設定、iPadOS の GarageBand / AUM、Windows の MIDI Services）で詰める。
+
+段階 4 の見直し（2026-11-07）: 段階 1〜3 の実装で次が揃っていて、CoreS3 の実機で接続できたので、それ以上は足していない。
+
+- 相手がボンドを失って再ペアリングしてきたら、こちらの古いボンドを消してやり直す（`BLE_GAP_EVENT_REPEAT_PAIRING`、両 gem）
+- Host: 相手が暗号化を求めてきたら（Insufficient Authentication / Encryption）ペアリングを始めて購読し直す
+- ボンドは両方の役割で 1 つのストア（`CONFIG_BT_NIMBLE_MAX_BONDS=8`、溢れたら古いものから `ble_store_util_status_rr`）。
+  Host の `forget` は自分のボンドも消す
+- 残っていること: こちらがボンドを失った（NVS を消した）のに Mac / iPad が覚えているときは、相手の側で
+  「このデバイスを削除」が要る（こちらからはどうにもできない）。Device のボンドだけを消す API は持っていない
 
 ### 5.3 C API
 
@@ -364,16 +399,43 @@ Ruby VM、クリーンアップ）。NimBLE の API はスレッドセーフだ�
 
 - Peripheral: GATT の書き込みアクセスコールバック、Central: `BLE_GAP_EVENT_NOTIFY_RX`。どちらも
   **NimBLE のホストタスク上**で、mbuf を平らにしてコーデックで復号し、USB-MIDI パケットを接続ごとの
-  RX リング（スピンロック、USB host のスロットと同じ形）へ積むだけ
+  RX リング（picoruby-midi の `midi_timed_ring`、§8.1）へ、渡してよい時刻つきで積むだけ
 - 入力タスクがパケットソースとして読む（`MIDI_Input_add_packet_source(bit)`）。ルート・filter・listener・
   `MIDI.on` は USB と同じに効く
-- **タイムスタンプは段階 1 では使わない**（届いた時点で流す）。BLE は接続間隔ごとにまとめて届くので、
-  最大で接続間隔ぶんのジッタが乗る。補正（送り手の 13 bit 時刻と自分の時計の差を推定し、一定の遅延を
-  足して並べ直す）は段階 4。復号はタイムスタンプを返すが、今はリングに載せていない
+- **タイムスタンプで間隔を戻す**（段階 4、§8.1）。段階 1〜3 は届いた時点で流していた
 - 外部クロックの BPM: picoruby-midi に `MIDI_Input_track_clock(bit)` を足し、パケットソースにもパーサを
   付けて `MIDI_Input_get_external_bpm_from(bit)` で測れるようにした。Tempo 画面の送信元 `BLE` は
   BLE-MIDI Device、次に Host のスロットの順で、BPM が出ている最初のもの（`ui_manager.cpp` の
-  `ble_external_bpm`）。表示中・Sync 中はそれらを watch する。クロックはジッタが効くので、タイムスタンプ補正までは目安程度
+  `ble_external_bpm`）。表示中・Sync 中はそれらを watch する。パーサは入力タスクが読んだ時刻で測るので、
+  §8.1 の補正が効いていれば F8 の間隔も送り手のものに戻る
+
+### 8.1 受信のタイムスタンプ補正（段階 4 / 2026-11-07、実機未確認）
+
+BLE は接続間隔のあいだに送られたものを次の接続イベントでまとめて届けるので、届く時刻は送られた時刻より
+0〜接続間隔（再送があればもっと）遅れ、その遅れがメッセージごとに違う。送り手の 13 bit のタイムスタンプ
+（ms）を自分の時計に写し、**送られた間隔のまま、一定の遅延（budget）だけ後に**流す:
+
+    渡す時刻 = 送り手の時刻 + offset + budget
+
+- **offset**（自分の時計 − 送り手の時計）は**見た中で一番小さい遅れ**（接続イベントの直前に送られたもの）。
+  送り手の時計が速ければ遅れが小さくなるのですぐ追従し、遅ければ `BLE_MIDI_SYNC_RELAX_MS`（500 ms）ごとに
+  1 ms ずつ offset を上げて追う（2000 ppm まで）。13 bit の折り返しは「今そうであるはずの送り手の時刻」に
+  一番近い 8192 ms の候補を選んで外す。5 秒メッセージが来なければ最初からやり直す
+- 渡す時刻は**後戻りしない**（順序を保つ）、**届いた時刻より前にしない**（遅れすぎたものはすぐ流して `rx_late` に数える）、
+  **届いてから budget より後にしない**。なのでタイムスタンプを入れない送り手でも、遅延が budget 増えるだけで
+  順序は崩れない
+- **budget** の既定は自動 = 接続間隔 + 4 ms（10〜60 ms。15 ms 間隔なら 19 ms）。`BLE_MIDI_DEVICE.rx_latency =` /
+  `BLE_MIDI_HOST.rx_latency =`（ms、`:auto`、`0` = 補正なし）でスクリプトの間だけ変えられる（終了時に自動へ戻す）。
+  ビルド時の既定は `BLE_MIDI_DEVICE_RX_LATENCY_US` / `BLE_MIDI_HOST_RX_LATENCY_US`（-1 = 自動）。
+  補正は遅延とジッタの引き換え: 鍵盤を弾くだけなら `0` の方が速い
+- 計算は picoruby-midi の `ble_midi_sync_release()`（OS 非依存、`ble_midi_codec.h`。ホストテストで間隔の再現・
+  折り返し・遅れ・タイムスタンプなし・時計のずれを確かめている）
+- **時刻どおりに流す仕組み**: picoruby-midi の `midi_timed_ring`（ESP32、`include/midi_timed_ring.h`）。
+  パケットに時刻を付けて積み、読む側には時刻を過ぎたものだけ見せる。次のパケットの時刻に esp_timer を
+  仕掛け、その時刻に `MIDI_Input_kick()` で入力タスクを起こす（入力タスクのポーリングは 1 tick = 10 ms なので、
+  起こさないと 10 ms 刻みになる）。`MIDI_Input_kick()` は入力タスクの待ちをセマフォにしたもの
+  （タスクは止まったり作り直されたりするので、タスク通知ではなくプロセスに 1 つのセマフォ）
+- `info` に `rx_late` と `rx_latency_ms`（今使っている budget）を足した
 
 ---
 
@@ -521,7 +583,7 @@ AMY が登録されない（スタブ）ので最大 15 に収まる。広げる
 | 1 | コーデック（picoruby-midi、ホストテスト）+ 共有オーナー + **picoruby-ble_midi_device**。macOS の Audio MIDI 設定 / iPad から見えて、送受信できる。`MIDI.route` で USB 機器 ⇄ BLE | ホストテスト・実機 |
 | 2 | 登録表の 32 ビット化（§12）+ **picoruby-ble_midi_host**（スキャン・接続・複数台・既知の機器・自動再接続）、Ruby API | 実機（WIDI、BLE-MIDI 鍵盤） |
 | 3 | 画面: Bluetooth 画面、MIDI Devices の行・列と詳細、Tempo の BLE、NVS の設定 | 実機 |
-| 4 | 受信のタイムスタンプ補正、ペアリング・暗号化の詰め、Ruby の `BLE` との共存 | 実機 |
+| 4 | 受信のタイムスタンプ補正（§8.1）、ペアリング・暗号化の詰め（§5.2）、Ruby の `BLE` との共存（§3.2） | 実機（未） |
 | 5 | Tab5（ESP-Hosted + C6） | 実機 |
 
 ---
@@ -537,7 +599,11 @@ AMY が登録されない（スタブ）ので最大 15 に収まる。広げる
 - **Central と Peripheral の同時動作**: S3 のコントローラで「Peripheral として接続中に広告しつつ Central として接続」
   が問題なく動くか（NimBLE・コントローラとも対応のはずだが、接続間隔のスケジューリングで MIDI の遅れが増えないか）
 - **受信のジッタ**: 段階 1〜3 は接続間隔（7.5〜15 ms、受けてもらえなければ 30 ms 以上）ぶんのジッタが乗る。
-  クロックの同期源にするには段階 4 が要る
+  段階 4 で補正したが（§8.1）、実機での効き（macOS / iOS の送るタイムスタンプが実際に送った時刻か、
+  F8 の間隔がどこまで揃うか）はこれから
+- **共存の実機確認**（§3.2）: BLE クラスのペリフェラルの広告で BLE-MIDI Device の広告が止まり、止めると戻るか。
+  BLE クラスの `BLE.new`（サービスあり）でホストが立ち上げ直されたとき、Mac / iPad が BLE-MIDI Device に
+  自動でつなぎ直すか（つなぎ直さないなら、その間は手でつなぐ）。接続は 4 本まで（`CONFIG_BT_NIMBLE_MAX_CONNECTIONS`）
 - **NimBLE のホストタスクのコア**: 既定は Core 0。S3 の Core 0 は USB host のクラスドライバ・app_main（UI）が
   いる。BLE の TX / RX 処理が UI 描画に止められないよう、ホストタスクと TX タスクの優先度を UI より上にする
 - **Wi-Fi との共存**: 今は Wi-Fi を使っていないので `SW_COEXIST` を切る。picoruby-network（shell の依存）を

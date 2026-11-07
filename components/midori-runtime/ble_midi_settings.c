@@ -85,12 +85,15 @@ void ble_midi_settings_set_host(bool on)
 void ble_midi_settings_restore(void)
 {
     load();
-    /* A script's BLE class holds the host exclusively and never lets go
-     * (its VM is gone now) */
+    /* A script's BLE class never lets go of its share of the host (its VM
+     * is gone now): its advertising, scan, link and services */
     picoruby_nimble_stop();
     /* both are no-ops when nothing changed */
     BLE_MIDI_DEVICE_enable(s_device);
     BLE_MIDI_HOST_enable(s_host);
+    /* a script's rx_latency= lasts until it ends */
+    BLE_MIDI_DEVICE_set_rx_latency(-1);
+    BLE_MIDI_HOST_set_rx_latency(-1);
 }
 
 #else

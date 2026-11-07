@@ -15,7 +15,8 @@ CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
 CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
 # 1 central (device side) + 2 peripherals (host side, BLE_MIDI_HOST_MAX_DEVICES)
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+# + 1 for a script's BLE class, which shares the host (docs/BLE_MIDI.md §3.2)
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=4
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
 
 # Pairing (Just Works) and bonds kept in NVS

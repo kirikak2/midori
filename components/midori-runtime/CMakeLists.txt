@@ -95,6 +95,7 @@ idf_component_register(
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ble_midi_host/ports/esp32/ble_midi_host.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-uart_midi/ports/esp32/uart_midi.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/ports/esp32/midi.c
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/ports/esp32/midi_timed_ring.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ui/ports/esp32/ui.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-amy/ports/esp32/amy_port.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-filesystem-fat/ports/esp32/sd_disk.c
