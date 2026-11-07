@@ -138,13 +138,32 @@ if [ -f sdkconfig.defaults ]; then
     PREV_TARGET="$(sed -n 's/^CONFIG_IDF_TARGET="\(.*\)"/\1/p' sdkconfig.defaults | tail -1)"
 fi
 
-# Compose board defaults + USB mode defaults
+# Bluetooth LE (BLE-MIDI): the NimBLE host settings, then where the
+# controller is -- the ESP32-S3's own radio, or the Tab5's ESP32-C6 over
+# ESP-Hosted. CrowPanel's C6 is not supported yet (docs/BLE_MIDI.md §10).
+BLE_FILE=""
+BLE_CTRL_FILE=""
+if [ "$TARGET" = "esp32s3" ]; then
+    BLE_FILE="sdkconfig.defaults.ble"
+    BLE_CTRL_FILE="sdkconfig.defaults.ble.esp32s3"
+elif [ "$BOARD" = "m5stack_tab5" ]; then
+    BLE_FILE="sdkconfig.defaults.ble"
+    BLE_CTRL_FILE="sdkconfig.defaults.ble.m5stack_tab5"
+fi
+
+# Compose board defaults + USB mode defaults (+ BLE)
 {
     cat "$BOARD_FILE"
     echo ""
     cat "$MODE_FILE"
+    if [ -n "$BLE_FILE" ]; then
+        echo ""
+        cat "$BLE_FILE"
+        echo ""
+        cat "$BLE_CTRL_FILE"
+    fi
 } > sdkconfig.defaults
-echo "Applied $BOARD_FILE + $MODE_FILE"
+echo "Applied $BOARD_FILE + $MODE_FILE${BLE_FILE:+ + $BLE_FILE + $BLE_CTRL_FILE}"
 
 # Remove sdkconfig and build directory
 rm -f sdkconfig

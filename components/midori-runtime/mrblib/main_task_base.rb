@@ -51,6 +51,29 @@ module MIDIDevices
     $midi_usb_midi_device
   end
 
+  # The board as a BLE-MIDI instrument: a Mac / iPad / PC connects to it
+  # (docs/BLE_MIDI.md). nil on a board without BLE.
+  def self.ble_midi_device
+    return nil unless BoardConfig::HAS_BLE_MIDI
+    require 'ble_midi_device'
+    BLE_MIDI_DEVICE.instance
+  end
+
+  # A BLE-MIDI peripheral the board is connected to (keyboard, adapter): the
+  # first slot, or the one connected by that name (or nil):
+  #   MIDI::Device.new(MIDIDevices.ble_midi_host("WIDI"))
+  # To connect one: BLE_MIDI_HOST.connect("WIDI") (or the Bluetooth screen)
+  def self.ble_midi_host(name = nil)
+    return nil unless BoardConfig::HAS_BLE_MIDI
+    require 'ble_midi_host'
+    name ? BLE_MIDI_HOST.find(name) : BLE_MIDI_HOST.instance(0)
+  end
+
+  # Every BLE-MIDI peripheral connected now
+  def self.ble_midi_hosts
+    BoardConfig::HAS_BLE_MIDI ? BLE_MIDI_HOST.devices : []
+  end
+
   # AMY software synthesizer on the board's speaker (Tab5 / CrowPanel).
   # A MIDI transport like the others: MIDI::Device.new(MIDIDevices.amy).
   def self.amy
@@ -235,6 +258,14 @@ def setup_midi_devices
   end
   if BoardConfig::HAS_AMY
     md.register_builtin(:amy, "AMY", 0, color: :magenta) { MIDIDevices.amy }
+  end
+  # BLE-MIDI device: its bit comes from the registry at start-up (app_main).
+  # The peripherals the BLE-MIDI host connects to list themselves, like the
+  # USB host's (ui_midi_devices.cpp).
+  if BoardConfig::HAS_BLE_MIDI
+    ble = MIDIDevices.ble_midi_device
+    bit = ble ? ble.transport_id : 0
+    md.register_builtin(:ble_dev, "BLE", bit, color: :blue) { MIDIDevices.ble_midi_device } if bit != 0
   end
   # (The on-screen keys list themselves when their model is made.)
   # /sd/plugins: after the built-ins, before the saved patches are routed

@@ -141,7 +141,9 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
   `midori` ブランチ = master + 2 本のパッチだったが、picoruby-gpio の `mrb_int` 修正と
   picoruby-machine の ESP32 HAL を 1 回だけ初期化する修正はどちらも upstream に取り込まれた）。
   更新は `git submodule update --remote components/midori-runtime/picoruby`。
-  また独自パッチが必要になったら fork にブランチを切って `.gitmodules` を戻す
+  また独自パッチが必要になったら fork にブランチを切って `.gitmodules` を戻す。
+  **2026-11-07 から BLE-MIDI のためにローカルブランチ `midori-ble`**（master + PR #427 の picoruby-ble ESP32 ポート +
+  共有 NimBLE オーナー）。まだ push しておらず `.gitmodules` も master のまま（docs/BLE_MIDI.md §9.1）
 - ビルド設定の名前は upstream に合わせている（`build_config/{xtensa,riscv}-esp-picoruby.rb`、
   libmruby は `picoruby/build/esp32-picoruby/`）。`main_task.rb` をコンパイルする mrbc は
   クロスビルドが自分用に作る `picoruby/build/mrbc/default/bin/mrbc`
@@ -180,6 +182,8 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-midi-mml` | MML パーサ + プレイヤ |
 | `mrbgems/picoruby-usb_midi_host` | USB-MIDI Host トランスポート |
 | `mrbgems/picoruby-usb_midi_device` | USB-MIDI Device トランスポート（TinyUSB） |
+| `mrbgems/picoruby-ble_midi_device` | BLE-MIDI Device（Peripheral）トランスポート（NimBLE） |
+| `mrbgems/picoruby-ble_midi_host` | BLE-MIDI Host（Central）トランスポート（NimBLE） |
 | `mrbgems/picoruby-uart_midi` | UART MIDI トランスポート |
 | `mrbgems/picoruby-sam2695` | SAM2695 ラッパ（uart_midi 上の薄い層） |
 | `mrbgems/picoruby-ui` | M5Stack UI |
@@ -1267,6 +1271,47 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   全画面合成で描き、タッチはどこにも渡さない（ロック中に置いた指は離すまで無視）。`screen->update()` も呼ばない
 - **電源投入時からロック状態**（`m_loading = true` で始まる）。各モードの先頭で `SDLoader.start`、読み込み後に
   `SDLoader.finish`。VM が途中で終わっても `scriptCleanup()` が解除する
+
+## BLE-MIDI（picoruby-ble_midi_device / _host / 2026-11-07）
+
+詳細は [docs/BLE_MIDI.md](docs/BLE_MIDI.md)。段階 0〜3 は CoreS3 の実機で確認（2026-11-07）。段階 4（受信のタイムスタンプ補正・
+`BLE` クラスとの共存）と段階 5（Tab5）も実機で確認（2026-11-07）。
+
+- ESP32-S3 のボードと Tab5（`switch_board.sh` が `sdkconfig.defaults.ble` + `.ble.esp32s3` / `.ble.m5stack_tab5` をつなぐ。
+  menuconfig `USB_MIDI_BLE_MIDI`）。**Tab5 は ESP32-C6 を ESP-Hosted（SDIO、Hosted-HCI）経由のコントローラに使う**
+  （段階 5、2026-11-07、Tab5 の実機で確認。出荷時の C6 は ESP-Hosted 1.4.1 で BT 入り）。esp_hosted 1.4.0 + esp_wifi_remote 0.8.5 は M5Stack の
+  Tab5 ファームと同じ版で、`main/idf_component.yml` の `$CONFIG{USB_MIDI_BOARD_M5STACK_TAB5}` の rule で Tab5 にだけ入れる
+  （他の P4 では ESP-Hosted が EV ボードのピンで勝手に上がる）。マニフェストを変えると Component Manager が解き直すので
+  tinyusb / M5GFX は版を固定した。`ble_transport_ll_deinit()` の空実装と起動ログは `main/platform/board_ble.c`。
+  C6 は SDMMC スロット 1 で SD カードとホストを共有する（picoruby-filesystem-fat はホストごとの deinit をやめた）。
+  4 bit バスの D1 は `CONFIG_ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS` で指定する（`..._SDIO_PIN_D1` は導出値で効かない。
+  P4 の既定 15 = C6 のリセットピンのままだと起動のたびに esp_hosted が abort した）。C6 とのリンクが失敗すると
+  esp_hosted 1.4.0 は `ESP_ERROR_CHECK` で止まる（BLE だけ外すには esp_hosted に手が要る）。
+  CrowPanel の C6 は未対応。docs/BLE_MIDI.md §10.1
+- **MIDI は Ruby を通さない**: NimBLE のコールバックで BLE-MIDI を復号して USB-MIDI パケットのリングへ、送信は
+  gem のタスクが 1 ms まとめて notify / write。どちらも picoruby-midi の登録表の動的ビット + パケットソース
+  （`MIDI.route` / filter / クリーンアップがそのまま効く）。コーデックは picoruby-midi の `ble_midi_codec.c`
+  （ホストテスト `make -C mrbgems/picoruby-midi/host_test`）
+- NimBLE は picoruby-ble の ESP32 ポートの `nimble_owner` を**共有オーナー**にして使う（`picoruby_nimble_acquire` /
+  `release`、クライアントごとの `setup` / `configure` / `on_sync` / `on_reset`）。Ruby の `BLE` クラスも共有のクライアントで
+  **優先度が上**（段階 4。それまでは排他）。1 つずつしか動かない広告（`PROC_ADV`）とスキャン / 接続の開始（`PROC_CENTRAL`）は
+  `picoruby_nimble_claim` / `unclaim` で取り合い、BLE クラスが使う間は BLE-MIDI の広告・スキャン・再接続が待つ。
+  サービスのある `BLE.new` はホストを立ち上げ直す（BLE-MIDI の接続が一度切れる）。プロファイルの 0x1800 / 0x1801 は
+  BLE-MIDI Device が NimBLE の GAP / GATT を登録しているときは外す。docs/BLE_MIDI.md §3.2
+- **受信は送り手のタイムスタンプの間隔で流す**（`ble_midi_sync_release()` + picoruby-midi の `midi_timed_ring`。
+  時刻に esp_timer で `MIDI_Input_kick()` して入力タスクを起こす）。遅延は既定で接続間隔 + 4 ms、
+  `BLE_MIDI_DEVICE.rx_latency =` / `BLE_MIDI_HOST.rx_latency =`（ms、`:auto`、0 = 補正なし）。docs/BLE_MIDI.md §8.1
+- 両 gem の `ports/esp32` はいつでもコンパイルされ、`BLE_MIDI_*_ENABLED` が無ければスタブ。picoruby-ble は
+  `USE_BLE` のときだけ libmruby に入る。BLE の有無が変わると CMake が gem セットのスタンプで rake を走らせる
+- 設定は `components/midori-runtime/ble_midi_settings.c`（NVS `ble_midi`: `dev_on` / `host_on`、既定 on）。
+  app_main が起動し、スクリプト終了時に `ble_midi_settings_restore()` が戻す。Host の既知の機器も同じ名前空間（`known`）
+- Ruby: `MIDIDevices.ble_midi_device` / `ble_midi_host(name)`、`BLE_MIDI_HOST.scan` / `connect("WIDI")` / `find` /
+  `known` / `forget`。画面: Bluetooth（`UI_SCREEN_BLUETOOTH` = 13、`:bluetooth`）、MIDI Devices の `BLE` と機器、
+  Tempo の BLE、設定画面の BLE-MIDI 欄。サンプル [examples/ble_midi.rb](examples/ble_midi.rb)
+- クリーンアップの All Notes Off は BLE-MIDI Device には送らない（USB Device と同じく相手が PC / iPad）
+- 登録表（16 ビット）は ESP32-S3 で最大 15、Tab5 は AMY もあるので最大 16 ちょうど（BLE Host は 2 台まで）。
+  広げる話は docs/BLE_MIDI.md §12
+- NimBLE の接続は 4 本（Device 1 + Host 2 + `BLE` クラス 1、`sdkconfig.defaults.ble`）
 
 ## 既知の課題
 

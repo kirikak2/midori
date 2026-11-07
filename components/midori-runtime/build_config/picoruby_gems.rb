@@ -61,6 +61,14 @@ conf.gem "#{midori_gems}/picoruby-sam2695"
 conf.gem "#{midori_gems}/picoruby-midi"
 conf.gem "#{midori_gems}/picoruby-midi-mml"
 
+# BLE-MIDI. Their ESP32 ports are compiled by CMake and are stubs without
+# NimBLE, so the gems are always in. picoruby-ble (the BLE class and the
+# NimBLE owner the BLE-MIDI ports use) only with NimBLE: CMake passes
+# USE_BLE=1 when CONFIG_USB_MIDI_BLE_MIDI is on (docs/BLE_MIDI.md).
+conf.gem "#{midori_gems}/picoruby-ble_midi_device"
+conf.gem "#{midori_gems}/picoruby-ble_midi_host"
+conf.gem core: 'picoruby-ble' if ENV['USE_BLE']
+
 # UI (M5Stack) — midori-specific gem, lives outside the picoruby submodule.
 conf.gem "#{midori_gems}/picoruby-ui"
 

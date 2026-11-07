@@ -2,12 +2,15 @@
 #include "screen_settings.h"
 #include "ui_strip.h"
 #include "board_audio.h"
+#include "ble_midi_settings.h"
+#include "ble_midi_device.h"
+#include "ble_midi_host.h"
+#include "esp_timer.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
 #include "esp_log.h"
 
-static const char* TAG = "SCREEN_SETTINGS";
 
 // Global instance
 static ScreenSettings s_screenSettings;
@@ -71,9 +74,36 @@ void ScreenSettings::leave()
     board_audio_save();
 }
 
+// One number for what the BLE-MIDI section shows (redrawn when it changes)
+static uint32_t ble_status_key()
+{
+    ble_midi_device_stats_t ds;
+    BLE_MIDI_DEVICE_stats(&ds);
+    uint32_t k = (uint32_t)ds.state;
+    k = k * 3 + (BLE_MIDI_DEVICE_is_enabled() ? 1 : 0);
+    k = k * 3 + (BLE_MIDI_HOST_is_enabled() ? 1 : 0);
+    for (int s = 0; s < BLE_MIDI_HOST_MAX_DEVICES; s++) {
+        k = k * 3 + (BLE_MIDI_HOST_dev_connected(s) ? 1 : 0);
+    }
+    return k;
+}
+
 void ScreenSettings::update()
 {
     if (!m_isActive) return;
+
+    // BLE-MIDI state, twice a second
+    static int64_t s_lastBleUs = 0;
+    static uint32_t s_lastBleKey = 0xFFFFFFFFu;
+    int64_t now = esp_timer_get_time();
+    if (ble_midi_settings_available() && now - s_lastBleUs > 500000) {
+        s_lastBleUs = now;
+        uint32_t key = ble_status_key();
+        if (key != s_lastBleKey) {
+            s_lastBleKey = key;
+            m_needsRedraw = true;
+        }
+    }
 
     // Plugging headphones in mutes the speaker: show it on the speaker row
     bool hp = board_audio_headphone_inserted();
@@ -114,22 +144,41 @@ void ScreenSettings::drawBleMidiSection()
     ui_gfx().setCursor(x + 6 * SECTION_TEXT_SIZE, y + 6 * SECTION_TEXT_SIZE);
     ui_gfx().print("BLE-MIDI");
 
-    // Draw status
+    int lx = x + 12 * SECTION_TEXT_SIZE;
+    int ly = y + 24 * SECTION_TEXT_SIZE;
+    int pitch = 14 * SECTION_TEXT_SIZE;
+    if (!ble_midi_settings_available()) {
+        ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
+        ui_gfx().setCursor(lx, ly);
+        ui_gfx().print("Not available on this board");
+        return;
+    }
+
+    // Device role
+    static const char* const STATES[] = { "off", "starting", "advertising", "linked", "connected", "error" };
+    ble_midi_device_stats_t ds;
+    BLE_MIDI_DEVICE_stats(&ds);
+    int st = (int)ds.state;
+    char line[64];
+    snprintf(line, sizeof(line), "Device \"%s\": %s", BLE_MIDI_DEVICE_name(),
+             (st >= 0 && st < 6) ? STATES[st] : "error");
+    ui_gfx().setTextColor(ds.state == BLE_MIDI_DEVICE_CONNECTED ? UI_COLOR_CYAN : UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setCursor(lx, ly);
+    ui_gfx().print(line);
+
+    // Host role
+    int linked = 0;
+    for (int s = 0; s < BLE_MIDI_HOST_MAX_DEVICES; s++) {
+        if (BLE_MIDI_HOST_dev_connected(s)) linked++;
+    }
+    snprintf(line, sizeof(line), "Host: %s, %d connected", BLE_MIDI_HOST_is_enabled() ? "on" : "off", linked);
+    ui_gfx().setTextColor(linked ? UI_COLOR_CYAN : UI_COLOR_WHITE, UI_COLOR_BLACK);
+    ui_gfx().setCursor(lx, ly + pitch);
+    ui_gfx().print(line);
+
     ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
-    ui_gfx().setCursor(x + 12 * SECTION_TEXT_SIZE, y + 24 * SECTION_TEXT_SIZE);
-    ui_gfx().print("Status: Not implemented");
-
-    // Draw placeholder device list area
-    int listY = y + 40 * SECTION_TEXT_SIZE;
-    int listH = h - 50 * SECTION_TEXT_SIZE;
-    ui_gfx().fillRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_DARKGRAY);
-    ui_gfx().drawRect(x + 6 * SECTION_TEXT_SIZE, listY, w - 12 * SECTION_TEXT_SIZE, listH, UI_COLOR_GRAY);
-
-    // Placeholder message
-    ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_DARKGRAY);
-    int msgWidth = strlen("(BLE scanning not available)") * 6 * SECTION_TEXT_SIZE;
-    ui_gfx().setCursor(x + (w - msgWidth) / 2, listY + listH / 2 - 4 * SECTION_TEXT_SIZE);
-    ui_gfx().print("(BLE scanning not available)");
+    ui_gfx().setCursor(lx, ly + 2 * pitch);
+    ui_gfx().print("Tap here (or Bluetooth) to pair and scan");
 }
 
 bool ScreenSettings::sliderVisible(int id) const
@@ -261,7 +310,13 @@ void ScreenSettings::onTouch(int touchId, int x, int y, bool pressed)
     if (pressed) {
         if (m_dragSlider >= 0) return;  // one finger per slider drag
         int id = hitTestSlider(x, y);
-        if (id < 0) return;
+        if (id < 0) {
+            // The BLE-MIDI section opens the Bluetooth screen
+            if (ble_midi_settings_available() && y >= SECTION_START_Y && y < SECTION_START_Y + BLE_SECTION_HEIGHT) {
+                UIManager::getInstance().requestScreen(UI_SCREEN_BLUETOOTH, -1);
+            }
+            return;
+        }
         m_dragSlider = id;
         m_dragTouchId = touchId;
         handleSliderTouch(id, x);
@@ -283,8 +338,9 @@ void ScreenSettings::onTouchMove(int touchId, int x, int y)
 
 void ScreenSettings::onNavCenter()
 {
-    // Scan for BLE devices (placeholder)
-    ESP_LOGI(TAG, "BLE scan requested (not implemented)");
+    if (ble_midi_settings_available()) {
+        UIManager::getInstance().requestScreen(UI_SCREEN_BLUETOOTH, -1);
+    }
 }
 
 const char* ScreenSettings::getTitle()
@@ -294,7 +350,7 @@ const char* ScreenSettings::getTitle()
 
 const char* ScreenSettings::getNavCenterLabel()
 {
-    return "Scan";
+    return ble_midi_settings_available() ? "Bluetooth" : nullptr;
 }
 
 void ScreenSettings::setBacklight(uint8_t level)
