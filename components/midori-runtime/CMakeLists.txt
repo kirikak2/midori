@@ -45,11 +45,12 @@ if(IDF_TARGET STREQUAL "esp32p4")
   set(AMY_REQUIRES amy)
 endif()
 
-# Bluetooth LE (BLE-MIDI): the ESP32-S3 boards have a radio. Same early-pass
+# Bluetooth LE (BLE-MIDI): the ESP32-S3 boards have a radio, the Tab5 has an
+# ESP32-C6 for one (NimBLE host on the P4, ESP-Hosted). Same early-pass
 # reason as above for keying the requirement off IDF_TARGET; whether NimBLE
 # is actually on is CONFIG_USB_MIDI_BLE_MIDI below.
 set(BT_REQUIRES "")
-if(IDF_TARGET STREQUAL "esp32s3")
+if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32p4")
   set(BT_REQUIRES bt)
 endif()
 
@@ -265,7 +266,7 @@ set(PRIMARY_I2C_SDA_PIN -1)
 set(PRIMARY_I2C_SCL_PIN -1)
 set(PRIMARY_I2C_UNIT "")
 
-# BLE-MIDI (sdkconfig.defaults.ble on the ESP32-S3 boards)
+# BLE-MIDI (sdkconfig.defaults.ble on the ESP32-S3 boards and the Tab5)
 if(CONFIG_USB_MIDI_BLE_MIDI)
   set(HAS_BLE_MIDI true)
 else()

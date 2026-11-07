@@ -134,7 +134,8 @@ menu "USB MIDI Host Configuration"
             picoruby-ble_midi_host (the board connects to BLE-MIDI
             keyboards and adapters), on picoruby-ble's NimBLE port.
             Needs NimBLE: switch_board.sh adds sdkconfig.defaults.ble on
-            the ESP32-S3 boards. See docs/BLE_MIDI.md.
+            the ESP32-S3 boards (their own radio) and the Tab5 (its
+            ESP32-C6 over ESP-Hosted). See docs/BLE_MIDI.md.
 
     config USB_MIDI_CONSOLE_ON_CDC
         bool

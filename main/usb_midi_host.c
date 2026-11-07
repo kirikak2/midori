@@ -25,6 +25,7 @@
 #include "platform.h"
 #include "picoruby-esp32.h"
 #include "picoruby_supervisor.h"
+#include "board_ble.h"
 #include "board_audio.h"
 #include "console_input.h"
 #include "ble_midi_settings.h"
@@ -72,6 +73,7 @@ void app_main(void)
      * starts the NimBLE host in the background. Before the supervisor, so
      * the transport bits exist when the first script lists the devices. */
     ble_midi_settings_start();
+    board_ble_report();     /* Tab5: did the ESP32-C6 come up (log only) */
 
     /* Console input task. In USB-MIDI-Device mode it must be started after
      * USB_MIDI_DEVICE_start() so it can hook the gem's CDC receive

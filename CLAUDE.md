@@ -1275,10 +1275,19 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
 ## BLE-MIDI（picoruby-ble_midi_device / _host / 2026-11-07）
 
 詳細は [docs/BLE_MIDI.md](docs/BLE_MIDI.md)。段階 0〜3 は CoreS3 の実機で確認（2026-11-07）。段階 4（受信のタイムスタンプ補正・
-`BLE` クラスとの共存）はビルドとホストテストのみで**実機未確認**。
+`BLE` クラスとの共存）はビルドとホストテストのみで**実機未確認**。段階 5（Tab5）は Tab5 の実機で確認（2026-11-07）。
 
-- ESP32-S3 のボードだけ（`switch_board.sh` が `sdkconfig.defaults.ble` をつなぐ。menuconfig `USB_MIDI_BLE_MIDI`）。
-  P4 は無線が無く、C6（ESP-Hosted）は未対応
+- ESP32-S3 のボードと Tab5（`switch_board.sh` が `sdkconfig.defaults.ble` + `.ble.esp32s3` / `.ble.m5stack_tab5` をつなぐ。
+  menuconfig `USB_MIDI_BLE_MIDI`）。**Tab5 は ESP32-C6 を ESP-Hosted（SDIO、Hosted-HCI）経由のコントローラに使う**
+  （段階 5、2026-11-07、Tab5 の実機で確認。出荷時の C6 は ESP-Hosted 1.4.1 で BT 入り）。esp_hosted 1.4.0 + esp_wifi_remote 0.8.5 は M5Stack の
+  Tab5 ファームと同じ版で、`main/idf_component.yml` の `$CONFIG{USB_MIDI_BOARD_M5STACK_TAB5}` の rule で Tab5 にだけ入れる
+  （他の P4 では ESP-Hosted が EV ボードのピンで勝手に上がる）。マニフェストを変えると Component Manager が解き直すので
+  tinyusb / M5GFX は版を固定した。`ble_transport_ll_deinit()` の空実装と起動ログは `main/platform/board_ble.c`。
+  C6 は SDMMC スロット 1 で SD カードとホストを共有する（picoruby-filesystem-fat はホストごとの deinit をやめた）。
+  4 bit バスの D1 は `CONFIG_ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS` で指定する（`..._SDIO_PIN_D1` は導出値で効かない。
+  P4 の既定 15 = C6 のリセットピンのままだと起動のたびに esp_hosted が abort した）。C6 とのリンクが失敗すると
+  esp_hosted 1.4.0 は `ESP_ERROR_CHECK` で止まる（BLE だけ外すには esp_hosted に手が要る）。
+  CrowPanel の C6 は未対応。docs/BLE_MIDI.md §10.1
 - **MIDI は Ruby を通さない**: NimBLE のコールバックで BLE-MIDI を復号して USB-MIDI パケットのリングへ、送信は
   gem のタスクが 1 ms まとめて notify / write。どちらも picoruby-midi の登録表の動的ビット + パケットソース
   （`MIDI.route` / filter / クリーンアップがそのまま効く）。コーデックは picoruby-midi の `ble_midi_codec.c`
@@ -1300,7 +1309,8 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   `known` / `forget`。画面: Bluetooth（`UI_SCREEN_BLUETOOTH` = 13、`:bluetooth`）、MIDI Devices の `BLE` と機器、
   Tempo の BLE、設定画面の BLE-MIDI 欄。サンプル [examples/ble_midi.rb](examples/ble_midi.rb)
 - クリーンアップの All Notes Off は BLE-MIDI Device には送らない（USB Device と同じく相手が PC / iPad）
-- 登録表（16 ビット）は ESP32-S3 で最大 15 使う（BLE Host は 2 台まで）。広げる話は docs/BLE_MIDI.md §12
+- 登録表（16 ビット）は ESP32-S3 で最大 15、Tab5 は AMY もあるので最大 16 ちょうど（BLE Host は 2 台まで）。
+  広げる話は docs/BLE_MIDI.md §12
 - NimBLE の接続は 4 本（Device 1 + Host 2 + `BLE` クラス 1、`sdkconfig.defaults.ble`）
 
 ## 既知の課題

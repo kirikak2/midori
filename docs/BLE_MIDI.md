@@ -2,6 +2,7 @@
 
 2026-11-07 起草・実装（段階 0〜4）。段階 0〜3 は CoreS3 の実機で動作を確認（2026-11-07）。
 段階 4（受信のタイムスタンプ補正・Ruby の `BLE` との共存）は CoreS3 / Tab5 のビルドとホストテストのみで**実機未確認**。
+段階 5（Tab5: ESP32-C6 を ESP-Hosted 経由のコントローラに）は **Tab5 の実機で動作を確認**（2026-11-07、§10.1）。CoreS3 / CrowPanel はビルドのみ。
 
 Bluetooth LE MIDI（BLE-MIDI）を MIDoRI のトランスポートとして追加する。USB-MIDI と同じ名前の付け方で 2 つの gem に分ける。
 
@@ -24,7 +25,7 @@ BLE のスタックは picoruby-ble の ESP32 ポート（NimBLE）を使う。u
 | 2 BLE-MIDI Host | 済。**登録表の 32 ビット化は見送り**（§12） |
 | 3 画面（Bluetooth 画面・MIDI Devices・Tempo の BLE・設定画面） | 済 |
 | 4 タイムスタンプ補正・Ruby の `BLE` との共存 | 済（実機未確認）。補正は §8.1、共存は §3.2。ペアリングは見直しのみ（§5.2） |
-| 5 Tab5（ESP-Hosted + C6） | 未 |
+| 5 Tab5（ESP-Hosted + C6） | 済。Tab5 の実機で確認（§10.1） |
 
 設計からの変更点:
 
@@ -516,14 +517,53 @@ picoruby サブモジュールは upstream の master を直接参照してい�
 | M5Stack Tab5 | ESP32-P4（無線なし）+ ESP32-C6（SDIO） | C6 経由 | 5 |
 | CrowPanel Advanced 7" | ESP32-P4 + ESP32-C6 | C6 経由（SDIO のピンは基板リビジョン依存、docs/CROWPANEL.md） | 5 以降 |
 
-P4 では NimBLE のホストを P4 で動かし、コントローラは C6 にある（ESP-Hosted の Hosted HCI / VHCI）。必要なもの:
+P4 では NimBLE のホストを P4 で動かし、コントローラは C6 にある（ESP-Hosted の Hosted-HCI / VHCI）。
 
-- `esp_hosted` コンポーネント（+ Wi-Fi を使わないなら `esp_wifi_remote` は不要か要確認）と、C6 側の
-  スレーブファームウェアで BT が有効なこと（Tab5 の出荷時ファームで有効か要確認。無効なら C6 の書き換えが要る）
-- `nimble_port_init()` の前に `esp_hosted_connect_to_slave()` / `esp_hosted_bt_controller_init()` /
-  `_enable()` を呼ぶ。共有オーナーに「コントローラ起動前のフック」が要る（§3 の API に
-  `picoruby_nimble_set_controller_hooks()` を足すか、ボード側から呼ぶ）
+### 10.1 Tab5（段階 5 / 2026-11-07、Tab5 の実機で確認）
+
+実機: 出荷時の C6 は **ESP-Hosted 1.4.1 で BT コントローラ入り**（起動ログ `BOARD_BLE: BLE through ESP32-C6, ESP-Hosted
+firmware 1.4.1`）。C6 の書き換えは要らない。BLE-MIDI Device の広告・Host の準備完了を確認。
+
+- **4 bit バスの D1 は `CONFIG_ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS`**（`CONFIG_ESP_HOSTED_SDIO_PIN_D1` はそこから導出される
+  表に出ない値で、sdkconfig.defaults に書いても効かない）。P4 の既定の 15 は C6 のリセットピンで、そのままだと
+  カードの初期化までは通り、直後の `sdmmc_io_read_byte(CCCR_FN_ENABLE)` が失敗して esp_hosted が `abort()` し、
+  起動のたびに落ちた（2026-11-07）。起動ログの `sdio_wrapper: GPIOs: CLK[12] CMD[13] D0[11] D1[10] ...` で確かめる
+
+- **esp_hosted 1.4.0 + esp_wifi_remote 0.8.5**（`main/idf_component.yml`）。M5Stack の Tab5 のファームウェア
+  （m5stack/M5Tab5-UserDemo）が C6 の出荷時ファームと組み合わせている版。ホストとスレーブ（C6）の版は合わせるのが
+  ESP-Hosted の前提なので、新しい 2.x / 3.x には上げていない（上げるなら C6 の書き換えも要る。ESP-Hosted の
+  co-processor OTA でホストから書ける）。esp_hosted 1.4.0 の C6 用スレーブの既定は `CONFIG_BT_CONTROLLER_ONLY=y`
+  （BT コントローラ入り）。**出荷時の C6 ファームに BT が入っているかは実機で確かめる**（起動ログ、下記）
+- **Tab5 だけ**に入れる: `rules: if: "$CONFIG{USB_MIDI_BOARD_M5STACK_TAB5} == True"`（Component Manager は
+  Kconfig を見て 2 回解く）。esp_wifi_remote を入れると P4 では ESP-Hosted が**既定で有効**になり、P4 EV ボードの
+  ピン（リセット GPIO 54 = Tab5 の Port A など）で C6 を探しに行くので、他の P4 ボード（CrowPanel）には入れない
+- **マニフェストを変えると Component Manager が解き直し、固定していないものを最新にする**（tinyusb 0.19 → 0.21、
+  M5GFX 0.2.24 → 0.2.36 になった）。`main/idf_component.yml` で tinyusb と M5GFX をロックの版に固定した
+- 設定: `sdkconfig.defaults.ble`（NimBLE ホスト、共通）+ `sdkconfig.defaults.ble.m5stack_tab5`
+  （`CONFIG_BT_CONTROLLER_DISABLED`、`CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE` / `_NIMBLE_HCI_VHCI`、
+  `CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED`、`CONFIG_SLAVE_IDF_TARGET_ESP32C6`、SDIO の設定は M5Tab5-UserDemo の sdkconfig
+  から: 4 bit・40 MHz、CLK 12 / CMD 13 / D0 11 / D1 10 / D2 9 / D3 8、リセット 15（Low アクティブ）、SDMMC スロット 1）。
+  ESP32-S3 は `sdkconfig.defaults.ble.esp32s3`（コントローラ有効・coexist なし）。`switch_board.sh` がつなぐ
+- 起動の流れ: esp_hosted 1.4.0 はコンストラクタ（app_main の前）で SDIO のタスクを作るだけ。C6 の電源は
+  IO エキスパンダ 0x44 の P0（WLAN_PWR_EN）で、M5GFX が `platform_init()` で入れる。最初の `nimble_port_init()`
+  （共有オーナー、BLE-MIDI の gem のタスク上）が `ble_transport_ll_init()` → C6 をリセットしてリンクが上がるまで待つ。
+  なので picoruby-ble・BLE-MIDI のコードは S3 と同じ（コントローラの初期化を呼ばない）
+- `ble_transport_ll_deinit()` は esp_hosted 1.4.0 に無い（`nimble_port_deinit()` がリンクで要求する）ので
+  `main/platform/board_ble.c` に空で置いた。共有オーナーはサービスが変わるたびにホストを止めて起こし直すが、
+  SDIO のリンクは上げたまま（次の init は「Transport is already up」、ホストの HCI Reset で C6 のコントローラを戻す）
+- 起動ログ: `board_ble_report()`（`board_ble.c`）が BLE が上がったら `BOARD_BLE: BLE through ESP32-C6, ESP-Hosted
+  firmware x.y.z`、20 秒上がらなければ「C6 のファームに BT コントローラが無いのでは」と警告する
+- **SD カードと SDMMC ホストを共有する**: C6 は SDMMC スロット 1、SD カードはスロット 0。IDF 5.5 の
+  `sdmmc_host_init()` は初期化済みなら何もせず OK を返し、`sdmmc_host_deinit_slot()` は使っているスロットを数える。
+  picoruby-filesystem-fat が失敗時に `sdmmc_host_deinit()`（ホストごと）を呼んでいたので、C6 のリンクごと落とさないよう
+  スロットだけ外すようにした（IDF 5.4 未満は従来どおり）
+- 注意: C6 がまったく応答しないと、esp_hosted 1.4.0 は 1 秒ごとに約 1000 回待ってから `ESP_ERROR_CHECK` で止まる
+  （BLE-MIDI の gem のタスクの中なので UI は動くが、十数分後に再起動する）。BT の無い C6 ファームなら、SDIO の
+  リンクは上がって HCI に応答がなく、ホストの同期待ち（2 秒）で失敗して BLE-MIDI が `:error` になると見ている（未確認）
+- Tab5（midi_device、BLE あり）の大きさ: イメージ 3.32 MB（アプリ領域 3.94 MB）、DIRAM 229 KB / 576 KB（40%）
 - Tab5 の USB パッドの事情（docs/AMY_SYNTH.md）とは無関係（SDIO なので）
+- CrowPanel は未対応のまま（C6 の SDIO のピンが基板リビジョン依存、docs/CROWPANEL.md）。足すなら
+  `sdkconfig.defaults.ble.crowpanel` と `main/idf_component.yml` の rule
 
 ESP32-S3 は USB コネクタの役割（host / serial / midi_device）にかかわらず BLE を使える。
 `host` モードの CoreS3 なら「USB で機器、BLE で iPad」が同時にできる。
@@ -563,8 +603,10 @@ BLE-MIDI のバッファ（リング・スロット・送信バッファ）は�
 
 合わせて最大 13。BLE-MIDI Device 1 + Host 2 で **16 ちょうど**になる。
 
-**実装では広げるのを見送った**（2026-11-07）。BLE を持つのは今は ESP32-S3 のボードだけで、そこでは
-AMY が登録されない（スタブ）ので最大 15 に収まる。広げるときの注意:
+**実装では広げるのを見送った**（2026-11-07）。ESP32-S3 のボードでは AMY が登録されない（スタブ）ので最大 15。
+**Tab5（段階 5）は AMY があるので最大 16 ちょうど**で、空きが無い（ハブ越しの USB 機器 4 台 + BLE Host 2 台 +
+内蔵すべてを同時に使ったとき）。溢れた分は登録できずトランスポートにならない（ログ「registry full」）。
+Tab5 の実機で余裕が要るとわかったら広げる。広げるときの注意:
 
 - 32 ビットにすると `MIDI_ROUTE_DST_RUBY`（= `1 << 登録表の大きさ`）が `uint32_t` から溢れる。
   現実的なのは **24 ビット**（`midi_tmask_t` を `uint32_t`、DST_RUBY = 1 << 24、DST_VIRTUAL = 1 << 25）
@@ -584,7 +626,7 @@ AMY が登録されない（スタブ）ので最大 15 に収まる。広げる
 | 2 | 登録表の 32 ビット化（§12）+ **picoruby-ble_midi_host**（スキャン・接続・複数台・既知の機器・自動再接続）、Ruby API | 実機（WIDI、BLE-MIDI 鍵盤） |
 | 3 | 画面: Bluetooth 画面、MIDI Devices の行・列と詳細、Tempo の BLE、NVS の設定 | 実機 |
 | 4 | 受信のタイムスタンプ補正（§8.1）、ペアリング・暗号化の詰め（§5.2）、Ruby の `BLE` との共存（§3.2） | 実機（未） |
-| 5 | Tab5（ESP-Hosted + C6） | 実機 |
+| 5 | Tab5（ESP-Hosted + C6、§10.1） | 実機（Tab5 で確認） |
 
 ---
 

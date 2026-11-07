@@ -6,3 +6,24 @@ dependencies:
   # TinyUSB device stack for Tab5 (ESP32-P4) CDC + MIDI composite device
   espressif/esp_tinyusb:
     version: ">=0.14.0"
+  # Pinned to what dependencies.lock had: changing this file makes the
+  # Component Manager solve again and take the newest of the unpinned ones
+  # (tinyusb 0.21, M5GFX 0.2.36 when the ESP-Hosted lines were added).
+  espressif/tinyusb:
+    version: "0.19.0~3"
+  m5stack/m5gfx:
+    version: "0.2.24"
+  # BLE-MIDI on Tab5: the ESP32-C6 is the Bluetooth controller, reached over
+  # SDIO with ESP-Hosted (Hosted-HCI; docs/BLE_MIDI.md §10). The versions
+  # M5Stack's Tab5 firmware uses with the C6's factory firmware. esp_wifi_remote
+  # is what switches ESP-Hosted on (CONFIG_ESP_HOSTED_ENABLED); Wi-Fi is unused.
+  # Tab5 only: on another ESP32-P4 board ESP-Hosted would come up with the
+  # P4 EV board's pins (reset on GPIO 54 and so on).
+  espressif/esp_hosted:
+    version: "1.4.0"
+    rules:
+      - if: "$CONFIG{USB_MIDI_BOARD_M5STACK_TAB5} == True"
+  espressif/esp_wifi_remote:
+    version: "0.8.5"
+    rules:
+      - if: "$CONFIG{USB_MIDI_BOARD_M5STACK_TAB5} == True"

@@ -1,0 +1,7 @@
+# BLE controller on the ESP32-S3 itself (after sdkconfig.defaults.ble)
+CONFIG_BT_CONTROLLER_ENABLED=y
+
+# Wi-Fi is not used: no coexistence. With SW_COEXIST on but Wi-Fi never
+# initialised, the BT controller trips a ROM-side coex lock on ESP32-S3
+# (R2P2-ESP32#135).
+# CONFIG_SW_COEXIST_ENABLE is not set
