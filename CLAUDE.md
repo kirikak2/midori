@@ -1275,7 +1275,7 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
 ## BLE-MIDI（picoruby-ble_midi_device / _host / 2026-11-07）
 
 詳細は [docs/BLE_MIDI.md](docs/BLE_MIDI.md)。段階 0〜3 は CoreS3 の実機で確認（2026-11-07）。段階 4（受信のタイムスタンプ補正・
-`BLE` クラスとの共存）はビルドとホストテストのみで**実機未確認**。段階 5（Tab5）は Tab5 の実機で確認（2026-11-07）。
+`BLE` クラスとの共存）と段階 5（Tab5）も実機で確認（2026-11-07）。
 
 - ESP32-S3 のボードと Tab5（`switch_board.sh` が `sdkconfig.defaults.ble` + `.ble.esp32s3` / `.ble.m5stack_tab5` をつなぐ。
   menuconfig `USB_MIDI_BLE_MIDI`）。**Tab5 は ESP32-C6 を ESP-Hosted（SDIO、Hosted-HCI）経由のコントローラに使う**
