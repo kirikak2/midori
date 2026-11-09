@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install — MIDoRI</title>
+<meta name="description" content="Flash MIDoRI onto your board from a browser on your computer. No toolchain to install.">
+<link rel="alternate" hreflang="ja" href="../ja/install/">
+<link rel="icon" href="../assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</head>
+<body data-root="../">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="../"><img class="logo-mark" src="../assets/icon.svg" alt="">MIDoRI</a>
+    <nav class="nav">
+      <a href="../#scenes" class="hide-sm">What it does</a>
+      <a href="../#boards" class="hide-sm">Boards</a>
+      <a href="./" aria-current="page">Install</a>
+      <a href="https://github.com/kirikak2/midori" class="hide-sm">GitHub</a>
+      <a href="../ja/install/" class="lang" hreflang="ja">日本語</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="page-head">
+    <h1>Install guide</h1>
+    <p>All you need is Chrome or Edge on a computer: the browser writes MIDoRI onto the board.
+      No toolchain, no command line. It takes about ten minutes.</p>
+  </div>
+
+  <div class="note" id="browser-unsupported" hidden>
+    <p><b>This browser can't flash the board.</b> Open this page again in Google Chrome or Microsoft Edge on a computer.
+      Safari, Firefox and phone or tablet browsers can't talk to USB devices directly (Web Serial).</p>
+  </div>
+
+  <section style="padding-top:32px">
+    <h2>What you need</h2>
+    <div class="grid grid-2" style="margin-top:18px">
+      <div class="card">
+        <h3>A supported board</h3>
+        <p>M5Stack CoreS3 / CoreS3 SE, M5Stack Tab5, Elecrow CrowPanel Advanced 7" (ESP32-P4) or Freenove ESP32-S3.</p>
+      </div>
+      <div class="card">
+        <h3>A USB-C cable</h3>
+        <p><b>One that carries data</b>: with a charge-only cable the board never shows up. If something doesn't work, try another cable first.</p>
+      </div>
+      <div class="card">
+        <h3>A computer and browser</h3>
+        <p>Windows, macOS, Linux or ChromeOS, with Google Chrome or Microsoft Edge.</p>
+      </div>
+      <div class="card">
+        <h3>A microSD card (optional)</h3>
+        <p>For the example scripts and plugins. 32 GB or smaller, formatted FAT32.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0" id="install"
+    data-text-download="Download the image"
+    data-text-choose="Pick your board and how to use USB.">
+
+    <div class="note" id="no-release" hidden>
+      <p><b>No release has been published yet.</b> Once one is out you can install it from here.
+        Until then, build from source (see the <a href="https://github.com/kirikak2/midori#readme">README</a>).</p>
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <h3>Pick your board</h3>
+        <div class="choices" role="radiogroup" aria-label="Board">
+          <div class="choice">
+            <input type="radio" name="board" id="b-m5stack" value="m5stack" data-default-mode="host">
+            <label for="b-m5stack"><b>M5Stack CoreS3</b><span>CoreS3 / CoreS3 SE. 320×240 touch screen</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="board" id="b-tab5" value="m5stack_tab5" data-default-mode="midi_device">
+            <label for="b-tab5"><b>M5Stack Tab5</b><span>1280×720 screen and a speaker: the built-in synth (AMY) makes sound</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="board" id="b-crowpanel" value="crowpanel" data-default-mode="host">
+            <label for="b-crowpanel"><b>Elecrow CrowPanel 7"</b><span>Advanced 7" (ESP32-P4). 1024×600 screen</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="board" id="b-freenove" value="freenove" data-default-mode="host">
+            <label for="b-freenove"><b>Freenove ESP32-S3</b><span>No screen. Driven from a serial console; for experienced users</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>Choose how to use USB</h3>
+        <p>What the board's USB port is for decides which firmware you install. You can reinstall later to change it.</p>
+        <div class="choices" role="radiogroup" aria-label="USB mode">
+          <div class="choice">
+            <input type="radio" name="mode" id="m-host" value="host">
+            <label for="m-host"><b>Plug in MIDI gear (host)</b><span>Connect USB MIDI keyboards and synths straight to MIDoRI.</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="mode" id="m-device" value="midi_device">
+            <label for="m-device"><b>Plug into a computer (midi_device)</b><span>MIDoRI shows up as a USB MIDI device on a computer or iPad, ready for your DAW.</span></label>
+          </div>
+        </div>
+        <div class="note info" data-board-only="m5stack_tab5">
+          <p>The Tab5's USB-A port always takes MIDI gear, so with USB-C going to your computer you can still plug gear into USB-A. This is the only combination published for the Tab5.</p>
+        </div>
+        <div class="note info" data-board-only="m5stack freenove">
+          <p>This board has a single USB circuit, so it either takes MIDI gear or plugs into a computer, not both at once.</p>
+        </div>
+        <div class="note info" data-board-only="crowpanel">
+          <p>Either way, MIDI goes through the USB-C port labeled "USB 2.0". The "UART" port is for flashing only.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>Connect the board</h3>
+        <p data-board-only="none" class="show">Pick your board first.</p>
+
+        <div data-board-only="m5stack">
+          <p>Connect the USB-C port on the board to your computer.</p>
+          <p><b>Reinstalling MIDoRI</b> (the second time onward): MIDoRI uses the USB port for MIDI, so the computer won't find it as is.
+            Put the board in <b>download mode</b> first: <b>hold the reset button on the side for about 3 seconds</b> and let go when the green LED inside lights up.
+            Coming from the factory firmware, you don't need this.</p>
+        </div>
+        <div data-board-only="m5stack_tab5">
+          <p>Connect the board's <b>USB-C</b> port (not USB-A) to your computer.</p>
+          <p><b>Reinstalling MIDoRI</b> (the second time onward): MIDoRI uses USB-C for MIDI, so the computer won't find it as is.
+            Put the board in <b>download mode</b> first: <b>hold the reset button</b> and let go when the green LED starts blinking.</p>
+        </div>
+        <div data-board-only="crowpanel">
+          <p>Connect the USB-C port labeled "<b>UART</b>" to your computer. No buttons needed.</p>
+          <p>If Windows doesn't find the board, install WCH's CH343 driver (the port is a CH343 USB-to-serial chip).</p>
+        </div>
+        <div data-board-only="freenove">
+          <p>Connect the USB-C port labeled "<b>COM</b>" to your computer. Usually no buttons needed.</p>
+          <p>If flashing doesn't start, hold <kbd>BOOT</kbd>, press and release <kbd>RESET</kbd>, then release <kbd>BOOT</kbd>, and try again.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>Install</h3>
+        <div class="install-box">
+          <esp-web-install-button id="install-button" hidden>
+            <button slot="activate" class="btn btn-primary">Install MIDoRI</button>
+            <span slot="unsupported">This browser isn't supported (use Chrome or Edge).</span>
+            <span slot="not-allowed">Open this page over a secure (https) connection.</span>
+          </esp-web-install-button>
+          <div class="meta" id="install-meta"></div>
+        </div>
+        <ol>
+          <li>Press the button and the browser lists the serial ports. Choose the board and press "Connect"
+            (it shows up as <span data-board-only="m5stack m5stack_tab5">"USB JTAG/serial debug unit" or similar</span><span data-board-only="crowpanel freenove">"USB Single Serial" or similar</span>).</li>
+          <li>Press "Install MIDoRI", <b>tick "Erase device"</b> and go on (always the first time; saved settings are cleared).</li>
+          <li>Flashing takes a few minutes. Keep the cable plugged in until it's done.</li>
+          <li data-board-only="m5stack m5stack_tab5">If you used download mode, <b>press the reset button once</b> afterwards to start MIDoRI.</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <h3>Prepare a microSD card (optional)</h3>
+        <p>The example scripts, and plugins with MIDI filters (chords, arpeggios…) and screen layouts, come ready to copy onto a card.</p>
+        <ol>
+          <li>Download the <a data-sd-link href="https://github.com/kirikak2/midori/releases/latest">SD card files (zip)</a> and unzip them.</li>
+          <li>Copy everything into the <b>top level (root)</b> of a FAT32 microSD card, the <code>plugins</code> folder included.</li>
+          <li>Insert the card and power the board off and on.</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <h3>Try it</h3>
+        <div data-board-only="m5stack m5stack_tab5 crowpanel">
+          <p>MIDoRI starts on the Home screen. Its tiles take you to each screen:</p>
+          <ul>
+            <li><b>MIDI Devices</b>: tap cells to connect your devices (keyboard → synth, for example)</li>
+            <li><b>Keys / Pads / Knobs / XYPad</b>: play from the screen</li>
+            <li><b>Tempo / Sequencer</b>: set the tempo, build patterns and play them</li>
+            <li><b>Scripts</b>: run a script from the SD card</li>
+          </ul>
+        </div>
+        <div data-board-only="freenove">
+          <p>With no screen, run scripts from the serial console (115200 bps) with <code>load /sd/name.rb</code>.
+            See the <a href="https://github.com/kirikak2/midori#readme">README</a> for more.</p>
+        </div>
+        <p>To write your own Ruby scripts, start from the <a href="https://github.com/kirikak2/midori/tree/main/examples">examples</a>
+          and the <a href="https://github.com/kirikak2/midori/tree/main/docs">documentation</a>.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <h2>Troubleshooting</h2>
+    <details>
+      <summary>The board isn't in the list of ports</summary>
+      <ul>
+        <li>Make sure the cable carries data (many are charge-only).</li>
+        <li>Try another USB port on the computer, or plug in directly instead of through a hub.</li>
+        <li>When reinstalling MIDoRI, put the board in download mode first (step 3).</li>
+        <li>On Windows, if the CrowPanel or Freenove doesn't appear, install the CH343 driver.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>"Failed to connect", or flashing stops part way</summary>
+      <ul>
+        <li>Put the board in download mode and try again.</li>
+        <li>Close other apps using the port (Arduino IDE, a serial monitor…).</li>
+        <li>Reload the browser tab and start over.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>The screen stays dark after installing</summary>
+      <ul>
+        <li>Press the reset button once (after download mode the board doesn't restart by itself).</li>
+        <li>Install again with "Erase device" ticked.</li>
+        <li>Check that the board you picked matches the one in your hands.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>Going back to the original firmware</summary>
+      <p>M5Stack products can be restored with M5Stack's flashing tool (M5Burner); Elecrow and Freenove products with the firmware their makers publish.
+        Flashing anything else over MIDoRI replaces it on any of the boards.</p>
+    </details>
+    <details>
+      <summary>Flashing from the command line (for developers)</summary>
+      <p>Download the merged <code>.bin</code> for your board and mode from the release page and write it at 0x0 with esptool:</p>
+      <pre><code>pip install esptool
+python -m esptool --chip esp32s3 write_flash 0x0 midori-v1.0.0-m5stack-host.bin   # --chip esp32p4 for Tab5 / CrowPanel</code></pre>
+      <p>To build from source, see the <a href="https://github.com/kirikak2/midori#readme">README</a>.</p>
+    </details>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span>MIDoRI — MIDI on Ruby Interpreter · MIT License</span>
+    <span><a href="https://github.com/kirikak2/midori">GitHub</a> · <a href="https://github.com/kirikak2/midori/releases">Releases</a> · <a href="https://github.com/kirikak2/midori/issues">Report a problem</a></span>
+  </div>
+</footer>
+
+<script src="../assets/install.js"></script>
+</body>
+</html>

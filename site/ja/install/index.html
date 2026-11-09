@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>インストール — MIDoRI</title>
+<meta name="description" content="パソコンのブラウザだけで MIDoRI をボードに書き込む手順。開発環境のインストールは要りません。">
+<link rel="alternate" hreflang="en" href="../../install/">
+<link rel="icon" href="../../assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../assets/style.css">
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</head>
+<body data-root="../../">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="../"><img class="logo-mark" src="../../assets/icon.svg" alt="">MIDoRI</a>
+    <nav class="nav">
+      <a href="../#scenes" class="hide-sm">できること</a>
+      <a href="../#boards" class="hide-sm">対応ボード</a>
+      <a href="./" aria-current="page">インストール</a>
+      <a href="https://github.com/kirikak2/midori" class="hide-sm">GitHub</a>
+      <a href="../../install/" class="lang" hreflang="en">EN</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="page-head">
+    <h1>インストールガイド</h1>
+    <p>パソコンのブラウザ（Chrome または Edge）だけで、MIDoRI をボードに書き込めます。
+      開発環境やコマンドの操作は要りません。所要時間は 10 分ほどです。</p>
+  </div>
+
+  <div class="note" id="browser-unsupported" hidden>
+    <p><b>このブラウザでは書き込めません。</b>パソコンの Google Chrome か Microsoft Edge で、このページを開き直してください。
+      Safari・Firefox と、スマートフォン・タブレットのブラウザは USB 機器に直接つなぐ機能（Web Serial）を持っていません。</p>
+  </div>
+
+  <section style="padding-top:32px">
+    <h2>準備するもの</h2>
+    <div class="grid grid-2" style="margin-top:18px">
+      <div class="card">
+        <h3>対応ボード</h3>
+        <p>M5Stack CoreS3 / CoreS3 SE、M5Stack Tab5、Elecrow CrowPanel Advanced 7 インチ（ESP32-P4）、Freenove ESP32-S3 のいずれか。</p>
+      </div>
+      <div class="card">
+        <h3>USB-C ケーブル</h3>
+        <p><b>データ通信ができるもの</b>。充電専用のケーブルではボードが見つかりません。うまくいかないときは、まずケーブルを替えてみてください。</p>
+      </div>
+      <div class="card">
+        <h3>パソコンとブラウザ</h3>
+        <p>Windows / macOS / Linux / ChromeOS のパソコンで、Google Chrome か Microsoft Edge。</p>
+      </div>
+      <div class="card">
+        <h3>microSD カード（なくても可）</h3>
+        <p>サンプルのスクリプトやプラグインを使うときに。32 GB 以下で、FAT32 でフォーマットしたもの。</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0" id="install"
+    data-text-download="イメージをダウンロード"
+    data-text-choose="ボードと USB の使い方を選んでください。">
+
+    <div class="note" id="no-release" hidden>
+      <p><b>まだリリースが公開されていません。</b>リリースが出ると、ここから書き込めるようになります。
+        それまではソースからビルドしてください（<a href="https://github.com/kirikak2/midori#readme">README</a>）。</p>
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <h3>ボードを選ぶ</h3>
+        <div class="choices" role="radiogroup" aria-label="ボード">
+          <div class="choice">
+            <input type="radio" name="board" id="b-m5stack" value="m5stack" data-default-mode="host">
+            <label for="b-m5stack"><b>M5Stack CoreS3</b><span>CoreS3 / CoreS3 SE。320×240 のタッチ画面</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="board" id="b-tab5" value="m5stack_tab5" data-default-mode="midi_device">
+            <label for="b-tab5"><b>M5Stack Tab5</b><span>1280×720 の画面とスピーカー。内蔵シンセ（AMY）で音が出る</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="board" id="b-crowpanel" value="crowpanel" data-default-mode="host">
+            <label for="b-crowpanel"><b>Elecrow CrowPanel 7"</b><span>Advanced 7 インチ（ESP32-P4）。1024×600 の画面</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="board" id="b-freenove" value="freenove" data-default-mode="host">
+            <label for="b-freenove"><b>Freenove ESP32-S3</b><span>画面なし。シリアルコンソールで操作する上級者向け</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>USB の使い方を選ぶ</h3>
+        <p>ボードの USB ポートを何に使うかで、書き込むファームウェアが変わります。あとから入れ直して変えることもできます。</p>
+        <div class="choices" role="radiogroup" aria-label="USB の使い方">
+          <div class="choice">
+            <input type="radio" name="mode" id="m-host" value="host">
+            <label for="m-host"><b>MIDI 機器をつなぐ（host）</b><span>USB の MIDI キーボードやシンセを、MIDoRI に直接つなぎます。</span></label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="mode" id="m-device" value="midi_device">
+            <label for="m-device"><b>パソコンにつなぐ（midi_device）</b><span>MIDoRI がパソコンや iPad から USB MIDI 機器として見えます（DAW から使えます）。</span></label>
+          </div>
+        </div>
+        <div class="note info" data-board-only="m5stack_tab5">
+          <p>Tab5 は USB-A ポートがいつも「MIDI 機器をつなぐ」側なので、USB-C をパソコン用にしても MIDI 機器は USB-A につなげます。Tab5 はこの組み合わせだけを配布しています。</p>
+        </div>
+        <div class="note info" data-board-only="m5stack freenove">
+          <p>このボードは USB ポートの回路が 1 つなので、MIDI 機器をつなぐ使い方とパソコンにつなぐ使い方は同時にはできません。</p>
+        </div>
+        <div class="note info" data-board-only="crowpanel">
+          <p>どちらの使い方でも、MIDI に使うのは「USB 2.0」と書かれた USB-C ポートです。「UART」のポートは書き込み専用です。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>パソコンとつなぐ</h3>
+        <p data-board-only="none" class="show">まずボードを選んでください。</p>
+
+        <div data-board-only="m5stack">
+          <p>本体の USB-C ポートとパソコンをケーブルでつなぎます。</p>
+          <p><b>MIDoRI を入れ直すとき（2 回目以降）</b>は、MIDoRI が USB ポートを MIDI に使っているため、そのままでは見つかりません。
+            先に<b>ダウンロードモード</b>にしてください: 本体側面の<b>リセットボタンを約 3 秒長押し</b>し、内部の緑色の LED が点いたら離します。
+            工場出荷時のファームウェアからなら、この操作は要りません。</p>
+        </div>
+        <div data-board-only="m5stack_tab5">
+          <p>本体の <b>USB-C</b> ポート（USB-A ではない方）とパソコンをケーブルでつなぎます。</p>
+          <p><b>MIDoRI を入れ直すとき（2 回目以降）</b>は、MIDoRI が USB-C を MIDI に使っているため、そのままでは見つかりません。
+            先に<b>ダウンロードモード</b>にしてください: <b>リセットボタンを長押し</b>し、緑色の LED が点滅し始めたら離します。</p>
+        </div>
+        <div data-board-only="crowpanel">
+          <p>「<b>UART</b>」と書かれた USB-C ポートとパソコンをケーブルでつなぎます。ボタンの操作は要りません。</p>
+          <p>Windows でボードが見つからないときは、WCH の CH343 ドライバを入れてください（このポートは CH343 という USB シリアル変換チップです）。</p>
+        </div>
+        <div data-board-only="freenove">
+          <p>「<b>COM</b>」と書かれた USB-C ポートとパソコンをケーブルでつなぎます。ふつうはボタンの操作は要りません。</p>
+          <p>書き込みが始まらないときは、<kbd>BOOT</kbd> ボタンを押したまま <kbd>RESET</kbd> を押して離し、続けて <kbd>BOOT</kbd> を離してからやり直してください。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>書き込む</h3>
+        <div class="install-box">
+          <esp-web-install-button id="install-button" hidden>
+            <button slot="activate" class="btn btn-primary">MIDoRI を書き込む</button>
+            <span slot="unsupported">このブラウザは対応していません（Chrome か Edge を使ってください）。</span>
+            <span slot="not-allowed">安全な接続（https）でページを開いてください。</span>
+          </esp-web-install-button>
+          <div class="meta" id="install-meta"></div>
+        </div>
+        <ol>
+          <li>ボタンを押すと、ブラウザがポートの一覧を出します。ボードを選んで「接続」を押します
+            （<span data-board-only="m5stack m5stack_tab5">「USB JTAG/serial debug unit」など</span><span data-board-only="crowpanel freenove">「USB Single Serial」など</span>の名前で出ます）。</li>
+          <li>「Install MIDoRI」を押し、<b>「Erase device」にチェックを入れて</b>次へ進みます（初回は必ず。保存済みの設定が消えます）。</li>
+          <li>書き込みには数分かかります。終わるまでケーブルを抜かないでください。</li>
+          <li data-board-only="m5stack m5stack_tab5">ダウンロードモードで書き込んだときは、終わったら<b>リセットボタンを 1 回押して</b>起動してください。</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <h3>microSD カードを用意する（なくても可）</h3>
+        <p>サンプルのスクリプトと、コード・アルペジオなどの MIDI フィルタやパネルを入れたプラグインを、そのまま SD カードに入れられる形で配布しています。</p>
+        <ol>
+          <li><a data-sd-link href="https://github.com/kirikak2/midori/releases/latest">SD カード用のファイル（zip）</a>をダウンロードして展開します。</li>
+          <li>FAT32 でフォーマットした microSD カードの<b>いちばん上（ルート）</b>に、展開した中身をすべてコピーします（<code>plugins</code> フォルダごと）。</li>
+          <li>カードをボードに差して、電源を入れ直します。</li>
+        </ol>
+      </div>
+
+      <div class="step">
+        <h3>使ってみる</h3>
+        <div data-board-only="m5stack m5stack_tab5 crowpanel">
+          <p>起動すると Home 画面が出ます。タイルから各画面へ移動します。</p>
+          <ul>
+            <li><b>MIDI Devices</b> … つないだ機器どうしを、マス目をタップして結ぶ（キーボード → シンセ など）</li>
+            <li><b>Keys / Pads / Knobs / XYPad</b> … 画面で演奏する</li>
+            <li><b>Tempo / Sequencer</b> … テンポを決めて、パターンを組んで再生する</li>
+            <li><b>Scripts</b> … SD カードのスクリプトを選んで動かす</li>
+          </ul>
+        </div>
+        <div data-board-only="freenove">
+          <p>画面がないので、シリアルコンソール（115200 bps）から <code>load /sd/ファイル名.rb</code> でスクリプトを動かします。
+            詳しくは <a href="https://github.com/kirikak2/midori#readme">README</a> を見てください。</p>
+        </div>
+        <p>自分で Ruby のスクリプトを書くときは、<a href="https://github.com/kirikak2/midori/tree/main/examples">サンプル</a>と
+          <a href="https://github.com/kirikak2/midori/tree/main/docs">ドキュメント</a>が出発点になります。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <h2>うまくいかないとき</h2>
+    <details>
+      <summary>ポートの一覧にボードが出てこない</summary>
+      <ul>
+        <li>データ通信ができるケーブルか確かめてください（充電専用のものが多く出回っています）。</li>
+        <li>パソコンの別の USB ポートにつなぐか、USB ハブを外して直接つないでみてください。</li>
+        <li>MIDoRI を入れ直すときは、先にダウンロードモードにする必要があります（手順 3）。</li>
+        <li>Windows で CrowPanel / Freenove が出ないときは、CH343 のドライバを入れてください。</li>
+      </ul>
+    </details>
+    <details>
+      <summary>「Failed to connect」と出る・途中で止まる</summary>
+      <ul>
+        <li>ダウンロードモードにしてから、もう一度試してください。</li>
+        <li>Arduino IDE やシリアルモニタなど、同じポートを使っているアプリを閉じてください。</li>
+        <li>ブラウザのタブを再読み込みしてからやり直してください。</li>
+      </ul>
+    </details>
+    <details>
+      <summary>書き込んだのに画面が真っ暗</summary>
+      <ul>
+        <li>リセットボタンを 1 回押してください（ダウンロードモードで書き込んだときは自動では起動しません）。</li>
+        <li>「Erase device」にチェックを入れて、もう一度書き込んでください。</li>
+        <li>選んだボードが手元のボードと合っているか確かめてください。</li>
+      </ul>
+    </details>
+    <details>
+      <summary>元のファームウェアに戻したい</summary>
+      <p>M5Stack の製品は M5Stack の書き込みツール（M5Burner）で、Elecrow / Freenove の製品は各社の配布するファームウェアで元に戻せます。
+        MIDoRI を消すだけでよければ、どのボードも各社のツールで書き込み直せば上書きされます。</p>
+    </details>
+    <details>
+      <summary>コマンドで書き込みたい（開発者向け）</summary>
+      <p>リリースのページから、ボードとモードに合った <code>.bin</code>（全体を 1 つにまとめたイメージ）をダウンロードし、esptool で 0x0 に書き込みます。</p>
+      <pre><code>pip install esptool
+python -m esptool --chip esp32s3 write_flash 0x0 midori-v1.0.0-m5stack-host.bin   # Tab5 / CrowPanel は --chip esp32p4</code></pre>
+      <p>ソースからのビルドは <a href="https://github.com/kirikak2/midori#readme">README</a> を見てください。</p>
+    </details>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span>MIDoRI — MIDI on Ruby Interpreter · MIT License</span>
+    <span><a href="https://github.com/kirikak2/midori">GitHub</a> · <a href="https://github.com/kirikak2/midori/releases">リリース</a> · <a href="https://github.com/kirikak2/midori/issues">不具合の報告</a></span>
+  </div>
+</footer>
+
+<script src="../../assets/install.js"></script>
+</body>
+</html>
