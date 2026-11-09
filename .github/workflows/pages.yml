@@ -1,0 +1,56 @@
+# Publishes site/ to GitHub Pages, with the images of the latest release
+# under firmware/ for the web installer (release assets are served without
+# CORS headers, so the browser cannot fetch them from the release itself).
+#
+# One-time setup: Settings -> Pages -> Source: "GitHub Actions".
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'tools/release/make_manifests.py', '.github/workflows/pages.yml']
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/firmware
+          if tag=$(gh release view --json tagName -q .tagName 2>/dev/null); then
+            gh release download "$tag" --pattern '*.bin' --dir site/firmware
+            python3 tools/release/make_manifests.py site/firmware "$tag"
+          else
+            echo "No release yet: the installer will say so."
+            echo '{"version": null, "images": []}' > site/firmware/index.json
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -4,3 +4,6 @@ build/
 build-mruby/
 sdkconfig
 sdkconfig.defaults
+version.txt
+dist/
+site/firmware/

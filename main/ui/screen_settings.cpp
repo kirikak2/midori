@@ -6,6 +6,7 @@
 #include "ble_midi_device.h"
 #include "ble_midi_host.h"
 #include "esp_timer.h"
+#include "esp_app_desc.h"
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
@@ -47,8 +48,6 @@ static constexpr int SLIDER_ROW_PITCH = 28;
 static constexpr int VERSION_GAP = 35;
 #endif
 
-// Firmware version
-static const char* FIRMWARE_VERSION = "v1.0.0";
 
 ScreenSettings::ScreenSettings()
     : m_isActive(false)
@@ -266,7 +265,9 @@ void ScreenSettings::drawVersionInfo()
     ui_gfx().setTextColor(UI_COLOR_GRAY, UI_COLOR_BLACK);
     ui_gfx().setCursor(BACKLIGHT_LABEL_X, y + VERSION_GAP);
     ui_gfx().print("Version: ");
-    ui_gfx().print(FIRMWARE_VERSION);
+    // PROJECT_VER: the release tag in CI builds (version.txt), otherwise
+    // `git describe` of the tree it was built from.
+    ui_gfx().print(esp_app_get_description()->version);
 }
 
 int ScreenSettings::hitTestSlider(int x, int y) const

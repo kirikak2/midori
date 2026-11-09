@@ -1,0 +1,76 @@
+# Builds the firmware for every release target. Called by release.yml (with
+# the tag as the version) and run on its own for pushes and pull requests, so
+# a broken board is noticed before the tag is cut.
+name: Firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Version string baked into the firmware (the tag)
+        type: string
+        required: true
+
+concurrency:
+  group: firmware-${{ github.ref }}-${{ inputs.version || 'ci' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.board }} / ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { board: freenove,     mode: host }
+          - { board: freenove,     mode: midi_device }
+          - { board: m5stack,      mode: host }
+          - { board: m5stack,      mode: midi_device }
+          - { board: m5stack_tab5, mode: midi_device }
+          - { board: crowpanel,    mode: host }
+          - { board: crowpanel,    mode: midi_device }
+    steps:
+      - name: Install Ruby (PicoRuby is built with rake)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ruby rake
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Check out submodules
+        run: |
+          git config --global --add safe.directory '*'
+          git submodule update --init --recursive --depth 1 --jobs 8
+
+      - name: Build
+        shell: bash
+        env:
+          MIDORI_VERSION: ${{ inputs.version }}
+        run: |
+          . "$IDF_PATH/export.sh"
+          tools/release/build.sh "${{ matrix.board }}" "${{ matrix.mode }}" dist
+
+      # The card's contents do not depend on the board: package them once,
+      # with the host mrbc this build made.
+      - name: microSD card contents
+        if: matrix.board == 'm5stack' && matrix.mode == 'host'
+        shell: bash
+        env:
+          MIDORI_VERSION: ${{ inputs.version }}
+        run: tools/release/sd_card.sh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}-${{ matrix.mode }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ inputs.version && 7 || 14 }}
