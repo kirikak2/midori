@@ -51,8 +51,8 @@ jobs:
           gh release create "$TAG" dist/* "${flags[@]}"
 
   # A release published with GITHUB_TOKEN does not trigger other workflows,
-  # so the site is rebuilt from here.
+  # so the site is rebuilt from here. A pre-release only reaches the site
+  # while there is no stable release (pages.yml picks the release).
   pages:
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
     uses: ./.github/workflows/pages.yml

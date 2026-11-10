@@ -65,7 +65,9 @@ git push origin v1.0.0
 ```
 
 - バージョンは SemVer。`v1.1.0-rc.1` のように `-` を含むタグは **pre-release** になり、
-  Pages（Web インストーラ）は更新しない（安定版だけを配る）
+  Pages（Web インストーラ）は最新の安定版を配る。安定版がまだ 1 つも無い間だけ、
+  最新の pre-release を配る（1.0.0 の前に RC を Web インストーラで試せるように）
+- 特定のリリースを配り直すときは Actions → Pages → Run workflow で `tag` を指定する
 - 失敗したら Release とタグを消して打ち直す:
   `gh release delete v1.0.0 --cleanup-tag`
 

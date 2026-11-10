@@ -10,6 +10,11 @@ on:
     branches: [main]
     paths: ['site/**', 'tools/release/make_manifests.py', '.github/workflows/pages.yml']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to serve (empty = the latest stable one, or the newest pre-release while there is none)
+        type: string
+        required: false
   workflow_call:
 
 permissions:
@@ -27,12 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch the latest release
+      # The installer serves the latest stable release. Until there is one,
+      # it serves the newest pre-release, so a release candidate can be tried
+      # from the site. `gh release view` alone skips pre-releases.
+      - name: Fetch the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
         run: |
           mkdir -p site/firmware
-          if tag=$(gh release view --json tagName -q .tagName 2>/dev/null); then
+          tag="$TAG"
+          if [ -z "$tag" ]; then
+            tag=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          fi
+          if [ -z "$tag" ]; then
+            tag=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+                    --jq '[.[] | select(.draft | not)][0].tag_name // empty' 2>/dev/null || true)
+          fi
+          if [ -n "$tag" ]; then
+            echo "Serving $tag"
             gh release download "$tag" --pattern '*.bin' --dir site/firmware
             python3 tools/release/make_manifests.py site/firmware "$tag"
           else
