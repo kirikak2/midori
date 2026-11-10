@@ -102,6 +102,16 @@ The following devices have been confirmed to work when connected to Midori's USB
 - Novation Launch Control XL mk2
 - Ableton Push3 Standard
 
+## Installing
+
+No toolchain needed: flash a release from Chrome or Edge with the
+[web installer](https://kirikak2.github.io/midori/install/)
+([日本語](https://kirikak2.github.io/midori/ja/install/)). Release images
+(merged `.bin` for `esptool write_flash 0x0`, the parts with `flash_args`,
+and the microSD card contents) are on the
+[releases page](https://github.com/kirikak2/midori/releases).
+Making a release is described in [docs/RELEASE.md](docs/RELEASE.md).
+
 ## Building
 
 ### Requirements
@@ -481,4 +491,5 @@ for details.
 
 ## License
 
-MIT License
+MIT License (see [LICENSE](LICENSE)). The submodules and components keep
+their own licenses.
