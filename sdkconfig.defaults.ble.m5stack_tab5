@@ -1,0 +1,32 @@
+# BLE controller on the Tab5's ESP32-C6, over ESP-Hosted (SDIO). After
+# sdkconfig.defaults.ble. The P4 runs only the NimBLE host; HCI goes to the
+# C6 through esp_hosted's VHCI driver (Hosted-HCI). docs/BLE_MIDI.md §10.
+#
+# esp_hosted 1.4.0 / esp_wifi_remote 0.8.5 (main/idf_component.yml): the
+# versions M5Stack's Tab5 firmware (M5Tab5-UserDemo) pairs with the C6's
+# factory co-processor firmware. The SDIO settings are from its sdkconfig.
+CONFIG_BT_CONTROLLER_DISABLED=y
+# CONFIG_BT_NIMBLE_TRANSPORT_UART is not set
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
+
+# ESP-Hosted is switched on through esp_wifi_remote (Wi-Fi itself unused)
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+
+# SDIO to the C6 (SDMMC slot 1; the SD card is on slot 0)
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=15
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=40000
+CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE=y
+CONFIG_ESP_HOSTED_SDIO_PIN_CMD=13
+CONFIG_ESP_HOSTED_SDIO_PIN_CLK=12
+CONFIG_ESP_HOSTED_SDIO_PIN_D0=11
+# D1 for the 4-bit bus is this one (ESP_HOSTED_SDIO_PIN_D1 is derived from
+# it). Left at the P4 default it is 15 -- the reset pin -- and the C6 does not
+# answer past card init (2026-11-07).
+CONFIG_ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS=10
+CONFIG_ESP_HOSTED_SDIO_PIN_D2=9
+CONFIG_ESP_HOSTED_SDIO_PIN_D3=8

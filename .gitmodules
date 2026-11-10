@@ -29,3 +29,9 @@
 [submodule "mrbgems/picoruby-filesystem-fat"]
 	path = mrbgems/picoruby-filesystem-fat
 	url = https://github.com/kirikak2/picoruby-filesystem-fat.git
+[submodule "mrbgems/picoruby-ble_midi_device"]
+	path = mrbgems/picoruby-ble_midi_device
+	url = https://github.com/kirikak2/picoruby-ble_midi_device.git
+[submodule "mrbgems/picoruby-ble_midi_host"]
+	path = mrbgems/picoruby-ble_midi_host
+	url = https://github.com/kirikak2/picoruby-ble_midi_host.git

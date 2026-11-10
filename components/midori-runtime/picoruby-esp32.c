@@ -16,6 +16,8 @@
 #include "midi_route.h"      // MIDI_route_clear (picoruby-midi)
 #include "amy_gem.h"         // AMY_GEM_reset (picoruby-amy)
 #include "ui.h"              // picoruby_ui_cleanup (picoruby-ui)
+#include "ble_midi_device.h"  // BLE_MIDI_DEVICE_transport_bit (picoruby-ble_midi_device)
+#include "ble_midi_settings.h"
 
 static const char *TAG = "PICORUBY";
 
@@ -139,7 +141,9 @@ picoruby_esp32_midi_cleanup(void)
   // never been part of the cleanup (the host PC on the other end is not
   // ours to silence). That is the USB host and UART built-ins plus any
   // transport gem that registered itself (e.g. the AMY synth).
-  const midi_tmask_t mask = (midi_tmask_t)~MIDI_TRANSPORT_USB_DEVICE;
+  // The BLE-MIDI device is the same kind of port (a Mac / iPad on the
+  // other end).
+  const midi_tmask_t mask = (midi_tmask_t)~(MIDI_TRANSPORT_USB_DEVICE | BLE_MIDI_DEVICE_transport_bit());
 
   // Send cleanup messages to all MIDI channels (0-15)
   for (uint8_t ch = 0; ch < 16; ch++) {
@@ -168,6 +172,10 @@ picoruby_esp32_midi_cleanup(void)
   // Menu customisation (UI.menu) and layouts (UI.layout) belong to the
   // script too. Their callbacks lived in its VM, so the pages would be dead.
   picoruby_ui_cleanup();
+
+  // BLE-MIDI: back to the saved settings (a script may have switched a role
+  // off, or held the NimBLE host with the BLE class)
+  ble_midi_settings_restore();
 
   ESP_LOGI(TAG, "MIDI cleanup completed");
 }

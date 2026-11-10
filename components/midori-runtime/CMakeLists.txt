@@ -45,11 +45,21 @@ if(IDF_TARGET STREQUAL "esp32p4")
   set(AMY_REQUIRES amy)
 endif()
 
+# Bluetooth LE (BLE-MIDI): the ESP32-S3 boards have a radio, the Tab5 has an
+# ESP32-C6 for one (NimBLE host on the P4, ESP-Hosted). Same early-pass
+# reason as above for keying the requirement off IDF_TARGET; whether NimBLE
+# is actually on is CONFIG_USB_MIDI_BLE_MIDI below.
+set(BT_REQUIRES "")
+if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32p4")
+  set(BT_REQUIRES bt)
+endif()
+
 idf_component_register(
   SRCS
     ${COMPONENT_DIR}/picoruby-esp32.c
     ${COMPONENT_DIR}/picoruby_supervisor.c
     ${COMPONENT_DIR}/console_input.c
+    ${COMPONENT_DIR}/ble_midi_settings.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-require/ports/esp32/platform.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-esp32/ports/esp32.c
     ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-machine/ports/esp32/machine.c
@@ -82,8 +92,11 @@ idf_component_register(
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_host/ports/esp32/usb_host_driver.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_device/ports/esp32/usb_midi_device.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_device/ports/esp32/usb_descriptors.c
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ble_midi_device/ports/esp32/ble_midi_device.c
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ble_midi_host/ports/esp32/ble_midi_host.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-uart_midi/ports/esp32/uart_midi.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/ports/esp32/midi.c
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/ports/esp32/midi_timed_ring.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ui/ports/esp32/ui.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-amy/ports/esp32/amy_port.c
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-filesystem-fat/ports/esp32/sd_disk.c
@@ -99,6 +112,9 @@ idf_component_register(
     ${COMPONENT_DIR}/picoruby/build/prism/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_host/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-usb_midi_device/include
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ble_midi_device/include
+    ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ble_midi_host/include
+    ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-ble/ports/esp32
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-uart_midi/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-midi/include
     ${CMAKE_SOURCE_DIR}/mrbgems/picoruby-ui/include
@@ -127,6 +143,7 @@ idf_component_register(
     esp_tinyusb
     esp_driver_i2s
     ${AMY_REQUIRES}
+    ${BT_REQUIRES}
 )
 
 add_definitions(
@@ -139,11 +156,49 @@ add_definitions(
 set(PICORUBY_DIR ${COMPONENT_DIR}/picoruby)
 set(LIBMRUBY_FILE ${PICORUBY_DIR}/build/${LIBMRUBY_PATH}/lib/libmruby.a)
 
+# BLE-MIDI: picoruby-ble's ESP32 port (NimBLE, its shared host owner) is
+# compiled here like the other ports, and libmruby gets the picoruby-ble gem
+# (USE_BLE, see build_config/picoruby_gems.rb). The BLE-MIDI gems' ports are
+# always compiled (above) and are stubs unless enabled here.
+set(PICORUBY_ENV MRUBY_CONFIG=${MRUBY_CONFIG_STRING} CONFIG_IDF_TARGET=${CONFIG_IDF_TARGET})
+if(CONFIG_USB_MIDI_BLE_MIDI)
+  set(BLE_PORT_DIR ${COMPONENT_DIR}/picoruby/mrbgems/picoruby-ble/ports/esp32)
+  target_sources(${COMPONENT_LIB} PRIVATE
+    ${BLE_PORT_DIR}/ble.c
+    ${BLE_PORT_DIR}/ble_peripheral.c
+    ${BLE_PORT_DIR}/ble_central.c
+    ${BLE_PORT_DIR}/nimble_owner.c
+    ${BLE_PORT_DIR}/pump_mruby.c
+  )
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    BLE_MIDI_DEVICE_ENABLED=1
+    BLE_MIDI_HOST_ENABLED=1
+  )
+  list(APPEND PICORUBY_ENV USE_BLE=1)
+  set(PICORUBY_GEMSET "ble")
+else()
+  set(PICORUBY_GEMSET "")
+endif()
+# rake only runs when libmruby.a is missing: make it run (and add or drop
+# picoruby-ble) when the gem set changes. The stamp lives in the IDF build
+# directory, not next to libmruby, so that removing picoruby/build (to pick
+# up gem changes) does not take it along.
+set(PICORUBY_GEMSET_STAMP ${CMAKE_BINARY_DIR}/midori_gemset.txt)
+set(_gemset_old "")
+if(EXISTS ${PICORUBY_GEMSET_STAMP})
+  file(READ ${PICORUBY_GEMSET_STAMP} _gemset_old)
+endif()
+if(NOT EXISTS ${PICORUBY_GEMSET_STAMP} OR NOT "${_gemset_old}" STREQUAL "${PICORUBY_GEMSET}")
+  file(WRITE ${PICORUBY_GEMSET_STAMP} "${PICORUBY_GEMSET}")
+endif()
+
 # Build PicoRuby
 add_custom_command(
   OUTPUT ${LIBMRUBY_FILE}
-  COMMAND ${CMAKE_COMMAND} -E echo "MRUBY_CONFIG=${MRUBY_CONFIG_STRING} CONFIG_IDF_TARGET=${CONFIG_IDF_TARGET} rake"
-  COMMAND ${CMAKE_COMMAND} -E env MRUBY_CONFIG=${MRUBY_CONFIG_STRING} CONFIG_IDF_TARGET=${CONFIG_IDF_TARGET} rake
+  COMMAND ${CMAKE_COMMAND} -E echo "${PICORUBY_ENV} rake"
+  COMMAND ${CMAKE_COMMAND} -E env ${PICORUBY_ENV} rake
+  COMMAND ${CMAKE_COMMAND} -E touch ${LIBMRUBY_FILE}
+  DEPENDS ${PICORUBY_GEMSET_STAMP}
   WORKING_DIRECTORY ${PICORUBY_DIR}
   COMMENT "PicoRuby build"
   VERBATIM
@@ -210,6 +265,13 @@ set(HAS_PRIMARY_I2C false)
 set(PRIMARY_I2C_SDA_PIN -1)
 set(PRIMARY_I2C_SCL_PIN -1)
 set(PRIMARY_I2C_UNIT "")
+
+# BLE-MIDI (sdkconfig.defaults.ble on the ESP32-S3 boards and the Tab5)
+if(CONFIG_USB_MIDI_BLE_MIDI)
+  set(HAS_BLE_MIDI true)
+else()
+  set(HAS_BLE_MIDI false)
+endif()
 
 # AMY software synth on the board's speaker (picoruby-amy). Off unless the
 # board block below wires up an I2S output; see docs/AMY_SYNTH.md.
@@ -398,6 +460,14 @@ if(CONFIG_USB_MIDI_USB_MODE_MIDI_DEVICE)
     USB_MIDI_DEVICE_MANUFACTURER=\"Midori\"
     USB_MIDI_DEVICE_PRODUCT=\"${USB_PRODUCT_NAME}\"
     USB_MIDI_DEVICE_SERIAL=\"${USB_SERIAL_NUMBER}\"
+  )
+endif()
+
+# picoruby-ble_midi_device: advertise under the same name as the USB device
+# (the gem's default is "PicoRuby MIDI")
+if(CONFIG_USB_MIDI_BLE_MIDI)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    BLE_MIDI_DEVICE_NAME=\"${USB_PRODUCT_NAME}\"
   )
 endif()
 

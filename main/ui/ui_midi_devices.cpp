@@ -27,6 +27,7 @@
 #include "midi_route.h"
 #include "midi_transport.h"
 #include "usb_midi_host.h"
+#include "ble_midi_host.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -847,6 +848,66 @@ static void sync_usb_host()
 }
 #endif
 
+// --- BLE-MIDI host peripherals --------------------------------------------------------
+// Like the USB host's: each peripheral in a slot with a transport bit of its
+// own; one that connects again gets its slot back unless another took it.
+
+#if !CONFIG_USB_MIDI_HOST_ENABLED
+// (the USB host's helper, for builds without it)
+static void drop_routes_of(midi_tmask_t bit)
+{
+    MIDI_route_remove(bit, MIDI_TMASK_ALL);
+    MIDI_route_clear_filter(bit, MIDI_ROUTE_DST_ALL);
+    for (midi_tmask_t b = 1; b; b <<= 1) {
+        if (b == bit) continue;
+        MIDI_route_remove(b, bit);
+        MIDI_route_clear_filter(b, bit);
+    }
+}
+#endif
+
+// "b" + the low 4 bytes of the address (the key has room for 11 characters)
+static void ble_key(const ble_midi_peer_t& p, char* key)
+{
+    snprintf(key, UI_MIDIDEV_KEY_LEN, "b%02x%02x%02x%02x", p.addr[2], p.addr[3], p.addr[4], p.addr[5]);
+}
+
+// List the peripherals the BLE-MIDI host has had (UI task, from ui_mididev_tick)
+static void sync_ble_host()
+{
+    if (!s_devs || !BLE_MIDI_HOST_available()) return;
+    for (int slot = 0; slot < BLE_MIDI_HOST_MAX_DEVICES; slot++) {
+        midi_tmask_t bit = BLE_MIDI_HOST_dev_bit(slot);
+        ble_midi_peer_t info;
+        if (!bit || BLE_MIDI_HOST_dev_info(slot, &info) != 0) continue;
+        char key[UI_MIDIDEV_KEY_LEN];
+        ble_key(info, key);
+
+        portENTER_CRITICAL(&s_mux);
+        int i = find_key_locked(key);
+        midi_tmask_t old = i >= 0 ? s_devs[i].pub.bit : 0;
+        int holder = find_bit_locked(bit);
+        portEXIT_CRITICAL(&s_mux);
+        if (i >= 0 && old == bit) continue;   // Listed already
+
+        if (holder >= 0 && holder != i) {
+            drop_routes_of(bit);
+            ui_mididev_unregister(bit);
+        }
+        if (old) drop_routes_of(old);
+
+        char name[UI_MIDIDEV_NAME_LEN];
+        copy_str(name, info.name[0] ? info.name : "BLE MIDI", sizeof(name));
+        if (ui_mididev_register(key, name, bit, UI_COLOR_BLUE, true) < 0) {
+            ESP_LOGW(TAG, "device list full: %s not listed", name);
+            continue;
+        }
+        ESP_LOGI(TAG, "BLE peripheral %s (%s) is 0x%04X", key, name, (unsigned)bit);
+        route_saved(key);
+        ui_filter_restore(key);
+    }
+}
+
 // --- Housekeeping ----------------------------------------------------------------------
 
 void ui_mididev_tick(void)
@@ -858,6 +919,7 @@ void ui_mididev_tick(void)
 #if CONFIG_USB_MIDI_HOST_ENABLED
     sync_usb_host();
 #endif
+    sync_ble_host();
 
     midi_tmask_t bits[UI_MIDIDEV_MAX];
     int n = 0;

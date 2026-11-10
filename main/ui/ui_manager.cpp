@@ -10,6 +10,8 @@
 #include "screen_xypad.h"
 #include "screen_keys.h"
 #include "screen_sequencer.h"
+#include "screen_bluetooth.h"
+#include "ble_midi_settings.h"
 #include "screen_home.h"
 #include "screen_layout.h"
 #include "ui_layout.h"
@@ -23,6 +25,8 @@ extern "C" {
 #include "midi.h"
 #include "midi_route.h"
 #include "midi_transport.h"
+#include "ble_midi_device.h"
+#include "ble_midi_host.h"
 }
 
 static const char* TAG = "UI_MANAGER";
@@ -141,6 +145,33 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_HOME] = &getScreenHome();
     m_screens[UI_SCREEN_KEYS] = &getScreenKeys();
     m_screens[UI_SCREEN_SEQUENCER] = &getScreenSequencer();
+    // Only with BLE-MIDI in the build (a missing screen is left out of Home)
+    m_screens[UI_SCREEN_BLUETOOTH] = ble_midi_settings_available() ? &getScreenBluetooth() : nullptr;
+}
+
+// The BLE transports whose clock the Tempo screen's BLE source follows: the
+// BLE-MIDI device (a Mac / iPad), then the peripherals of the BLE-MIDI host
+static int ble_clock_bits(midi_tmask_t* out, int max)
+{
+    int n = 0;
+    midi_tmask_t dev = BLE_MIDI_DEVICE_transport_bit();
+    if (dev && n < max) out[n++] = dev;
+    for (int i = 0; i < BLE_MIDI_HOST_MAX_DEVICES && n < max; i++) {
+        midi_tmask_t b = BLE_MIDI_HOST_dev_bit(i);
+        if (b) out[n++] = b;
+    }
+    return n;
+}
+
+static float ble_external_bpm()
+{
+    midi_tmask_t bits[1 + BLE_MIDI_HOST_MAX_DEVICES];
+    int n = ble_clock_bits(bits, 1 + BLE_MIDI_HOST_MAX_DEVICES);
+    for (int i = 0; i < n; i++) {
+        float bpm = MIDI_Input_get_external_bpm_from(bits[i]);
+        if (bpm > 0.0f) return bpm;
+    }
+    return 0.0f;
 }
 
 void UIManager::update()
@@ -164,8 +195,8 @@ void UIManager::update()
 
         setExternalBpmSource(MIDI_INTERFACE_USB, usbBpm);
         setExternalBpmSource(MIDI_INTERFACE_DIN, samBpm);
-        // BLE not implemented yet
-        setExternalBpmSource(MIDI_INTERFACE_BLE, 0.0f);
+        // BLE-MIDI (device, then the host's peripherals)
+        setExternalBpmSource(MIDI_INTERFACE_BLE, ble_external_bpm());
         setExternalBpmSource(MIDI_INTERFACE_USB_DEVICE, devBpm);
 
         // Auto-select source if currently selected source has no BPM
@@ -446,6 +477,7 @@ static const struct { ui_screen_index_t screen; uint8_t group; } MENU_ORDER[] = 
     { UI_SCREEN_LAYOUT,    MENU_GROUP_PERFORM },
     { UI_SCREEN_MAIN,      MENU_GROUP_STATE },
     { UI_SCREEN_MIDI_INFO, MENU_GROUP_STATE },
+    { UI_SCREEN_BLUETOOTH, MENU_GROUP_STATE },
     { UI_SCREEN_SCRIPTS,   MENU_GROUP_SYSTEM },
     { UI_SCREEN_LOGS,      MENU_GROUP_SYSTEM },
     { UI_SCREEN_SETTINGS,  MENU_GROUP_SYSTEM },
@@ -762,8 +794,10 @@ void UIManager::updateClockWatch()
 #if CONFIG_USB_MIDI_HOST_ENABLED
         want |= MIDI_TRANSPORT_USB;   // Read once a device is plugged in
 #endif
-        const midi_tmask_t others[] = { MIDI_TRANSPORT_SAM2695, MIDI_TRANSPORT_USB_DEVICE };
-        for (midi_tmask_t bit : others) {
+        midi_tmask_t others[3 + BLE_MIDI_HOST_MAX_DEVICES] = { MIDI_TRANSPORT_SAM2695, MIDI_TRANSPORT_USB_DEVICE };
+        int n = 2 + ble_clock_bits(others + 2, 1 + BLE_MIDI_HOST_MAX_DEVICES);
+        for (int i = 0; i < n; i++) {
+            midi_tmask_t bit = others[i];
             const midi_transport_t* t = MIDI_transport_get(bit);
             if (t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx)) want |= bit;
         }

@@ -172,7 +172,7 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         13
+#define UI_SCREEN_COUNT         14
 
 // Screen indices
 // New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
@@ -191,6 +191,7 @@ typedef enum {
     UI_SCREEN_HOME,       // Tile menu every other screen is reached from
     UI_SCREEN_KEYS,       // On-screen keyboard (docs/KEYS.md)
     UI_SCREEN_SEQUENCER,  // Step / realtime sequencer (docs/SEQUENCER.md)
+    UI_SCREEN_BLUETOOTH,  // BLE-MIDI device / host (docs/BLE_MIDI.md); BLE builds only
 } ui_screen_index_t;
 
 // What caused a screen switch, reported with UI_EVENT_SCREEN_CHANGE

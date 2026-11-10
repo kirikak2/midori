@@ -16,6 +16,7 @@ set(INCLUDE_DIRS
 # Codec / amplifier power-up for the AMY synth (picoruby-amy); empty on
 # boards without it.
 list(APPEND SRCS "platform/board_audio.cpp")
+list(APPEND SRCS "platform/board_ble.c")
 
 # Platform-specific sources
 if(CONFIG_USB_MIDI_BOARD_M5STACK_CORES3 OR CONFIG_USB_MIDI_BOARD_M5STACK_TAB5)
@@ -55,6 +56,7 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/seq_engine.c"
         "ui/ui_sequencer.cpp"
         "ui/screen_sequencer.cpp"
+        "ui/screen_bluetooth.cpp"
         "ui/screen_home.cpp"
         "ui/ui_layout.cpp"
         "ui/ui_widgets.cpp"
