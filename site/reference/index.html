@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference — MIDoRI</title>
+<meta name="description" content="How each MIDoRI screen works: Pads, Knobs, XYPad, Keys, Sequencer, Tombola, Tempo, AMY, MIDI Devices and Bluetooth.">
+<meta property="og:title" content="Reference — MIDoRI">
+<meta property="og:description" content="How each MIDoRI screen works: Pads, Knobs, XYPad, Keys, Sequencer, Tombola, Tempo, AMY, MIDI Devices and Bluetooth.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MIDoRI">
+<meta property="og:url" content="https://kirikak2.github.io/midori/reference/">
+<meta property="og:image" content="https://kirikak2.github.io/midori/assets/og-en.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Reference — MIDoRI">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="ja" href="../ja/reference/">
+<link rel="icon" href="../assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="../"><img class="logo-mark" src="../assets/icon.svg" alt="">MIDoRI</a>
+    <nav class="nav">
+      <a href="../#scenes" class="hide-sm">What it does</a>
+      <a href="../#boards" class="hide-sm">Boards</a>
+      <a href="../install/">Install</a>
+      <a href="./" aria-current="page">Reference</a>
+      <a href="https://github.com/kirikak2/midori" class="hide-sm">GitHub</a>
+      <a href="../ja/reference/" class="lang" hreflang="ja">日本語</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="page-head">
+    <h1>Reference</h1>
+  </div>
+
+  <div class="ref-layout">
+    <nav class="ref-toc" aria-label="Contents">
+      <b>CONTENTS</b>
+      <ol>
+        <li><a href="#basics">Getting around</a></li>
+        <li><a href="#pads">Pads</a></li>
+        <li><a href="#knobs">Knobs</a></li>
+        <li><a href="#xypad">XYPad</a></li>
+        <li><a href="#keys">Keys</a></li>
+        <li><a href="#sequencer">Sequencer</a></li>
+        <li><a href="#tombola">Tombola</a></li>
+        <li><a href="#tempo">Tempo</a></li>
+        <li><a href="#amy">AMY</a></li>
+        <li><a href="#midi-devices">MIDI Devices (MIDI Info)</a></li>
+        <li><a href="#bluetooth">Bluetooth</a></li>
+      </ol>
+    </nav>
+
+    <div>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="basics">
+        <h2>Getting around</h2>
+        <p>MIDoRI starts on the <b>Home</b> screen. Each tile opens a screen, and the small text on a tile shows its state
+          (the BPM, the number of patches, whether Tombola is running…).</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Nav bar</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Home (left)</td><td>Back to the Home screen.</td></tr>
+            <tr><td>Middle</td><td>The screen's own button: TAP on Tempo, Send on Knobs, Start / Stop on Tombola, Scan on Bluetooth. Otherwise it shows the screen name.</td></tr>
+            <tr><td>Back (right)</td><td>The screen you were on before (Home doesn't count). Pressing it again flips between the two, so you can go XYPad ⇄ Knobs with one tap.</td></tr>
+          </tbody>
+        </table></div>
+        <p>The Pads, Knobs and XYPad screens are empty until a script or plugin fills them. The SD card files come with
+          plugins that do (in <code>/sd/plugins/</code>, loaded at start-up), and the
+          <a href="https://github.com/kirikak2/midori/tree/main/examples">examples</a> show how to write your own.
+          Screens a plugin builds from several parts (a <b>layout</b>) get their own tile on Home.</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="pads">
+        <h2>Pads</h2>
+        <div class="ref-meta"><span>Tab5 · CrowPanel: 12 pads (4 × 3)</span><span>CoreS3: 6 pads (3 × 2)</span></div>
+        <p>A grid of buttons for one-shot actions: a drum hit, a scene change, starting a phrase. Each pad has a label and a color
+          and plays whatever its script tells it to. Several fingers at once are fine.</p>
+        <h3>Pad types</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Type</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td>trigger</td><td>Fires once when you press it (the default).</td></tr>
+            <tr><td>momentary</td><td>On while your finger is down, off when you lift it: good for holding a note or an effect.</td></tr>
+            <tr><td>toggle</td><td>Each press flips it on or off, and it stays lit while on: good for Hold, mute or Play.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>dev = MIDI::Device.new(MIDIDevices.sam2695)
+UI.pad(1, label: "Kick", color: :red) { dev.trigger(36, 127, channel: 9) }
+UI.pad(2, label: "Hold", color: :yellow, type: :momentary) { |down| ... }
+UI.pad(3, label: "Play", color: :green, type: :toggle) { |on| on ? UI::Tempo.start : UI::Tempo.stop }
+UI.pad_label(1, "Kick!")   # also pad_color, pad_state, pad_clear
+UI.show(:pads)</pre></div>
+        <p>Colors: <code>:red :green :blue :yellow :cyan :magenta :orange :purple :white :gray</code>. The blocks run while the
+          script keeps calling <code>UI.process</code>.</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="knobs">
+        <h2>Knobs</h2>
+        <div class="ref-meta"><span>Tab5 · CrowPanel: 12 knobs × 4 banks</span><span>CoreS3: 6 knobs × 4 banks</span></div>
+        <p>Knobs for values you set and leave: cutoff, resonance, volume, effect sends. Each bank (A–D) is a full set of knobs
+          with its own labels and colors, for example A for the synth, B for drums and C for effects.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Drag around a knob</td><td>Turns it like a real knob: the tip of the gauge stays under your finger. You can grab anywhere in the knob's cell, and the farther from the center you hold, the finer the control.</td></tr>
+            <tr><td>Several fingers</td><td>Turn several knobs at once.</td></tr>
+            <tr><td>A / B / C / D (right strip)</td><td>Switch banks. Switching doesn't send anything; the other banks keep their values.</td></tr>
+            <tr><td>Send (nav bar)</td><td>Sends the current values of the visible bank again, for gear you plugged in afterwards.</td></tr>
+          </tbody>
+        </table></div>
+        <p>A knob sends only when its value changes. Defining a knob doesn't send its starting value; press Send (or call
+          <code>UI.knob_send_all</code>) to line your gear up with the screen.</p>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>UI.knob(1, label: "Cutoff", color: :cyan, value: 64) { |v| dev.control_change(74, v.to_i) }
+UI.knob(2, bank: 2, label: "Pan", origin: :center, value: 64) { |v| dev.control_change(10, v.to_i) }
+UI.knob(3, label: "BPM", min: 40, max: 240) { |v| UI::Tempo.bpm = v }
+UI.knob_send_all(bank: :all)
+UI.knobs</pre></div>
+        <p>Options: <code>min:</code> / <code>max:</code> (0–127), <code>step:</code> (1; 0 for continuous), <code>origin: :center</code>
+          for a gauge that grows both ways, <code>sensitivity:</code> (1.0).</p>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/KNOBS.md">docs/KNOBS.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="xypad">
+        <h2>XYPad</h2>
+        <div class="ref-meta"><span>Tab5 · CoreS3 · CrowPanel</span><span>Up to 5 fingers</span></div>
+        <p>A surface you play with your fingers: across picks the pitch, up and down moves a CC. Each finger plays on its own MIDI channel,
+          so every note can bend and open its filter on its own.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Put a finger down</td><td>The screen is split into columns, one per note of the scale. Where your finger lands picks the note.</td></tr>
+            <tr><td>Slide sideways</td><td>Bends the pitch from where you landed: sliding across the whole width bends by the glide range (2 semitones by default).</td></tr>
+            <tr><td>Slide up / down</td><td>Sends a CC (74 by default, often the filter cutoff). Top is the highest value.</td></tr>
+            <tr><td>Lift</td><td>Note off. With Hold on, the note keeps sounding until Hold is turned off.</td></tr>
+          </tbody>
+        </table></div>
+        <p>A short label next to each finger shows what it's playing. A finger can also be set to send two CCs instead of a note.</p>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>pad = UI::XYPad.new(scale: [36, 38, 40, 41, 43, 45, 47, 48],
+                    glide_range: 2, y_cc: 74, device: dev)
+pad.slot(5, x_mode: :cc, x_cc: 70, y_cc: 71, device: fx)   # the 5th finger only
+UI.pad(1, label: "Hold", type: :toggle) { |on| pad.hold = on }
+pad.show</pre></div>
+        <p>XYPad also appears in MIDI Devices, so you can send what it plays to more gear by patching it there.</p>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/XYPAD.md">docs/XYPAD.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="keys">
+        <h2>Keys</h2>
+        <div class="ref-meta"><span>Tab5 · CoreS3 · CrowPanel</span><span>1–4 octaves</span><span>Up to 5 fingers</span></div>
+        <p>A keyboard on the screen, 2 octaves from C3 by default. Keys also lights up the notes it receives,
+          like a light-up MIDI keyboard, so you can see what your gear or DAW is playing.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Press a key</td><td>Plays it (cyan while pressed).</td></tr>
+            <tr><td>Slide</td><td>Moving onto the next key plays that key, like a glissando.</td></tr>
+            <tr><td>Where you press</td><td>When the script sets <code>velocity: :position</code>, pressing nearer the front of the key plays louder.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>In MIDI Devices</h3>
+        <ul>
+          <li><b>Keys → gear</b>: what you play goes to that gear.</li>
+          <li><b>Gear → Keys</b>: notes coming in light the keys (orange). Patch a keyboard or <b>PC</b> to Keys to see what's playing.
+            Keys doesn't pass incoming notes on; to hear the keyboard too, also patch it to a synth.</li>
+        </ul>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>keys = UI::Keys.new(octaves: 2, low: 48, velocity: :position, device: MIDIDevices.amy)
+MIDI.route(MIDIDevices.usb_midi_host, keys)   # light keys from an external keyboard
+keys.set_color([48, 52, 55], :blue)           # show a chord or scale
+keys.show</pre></div>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/KEYS.md">docs/KEYS.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="sequencer">
+        <h2>Sequencer</h2>
+        <div class="ref-meta"><span>Tab5 · CoreS3 · CrowPanel</span><span>16 lines × 16 patterns</span></div>
+        <p>A pattern sequencer for your whole set. A <b>song</b> has up to 16 <b>lines</b> (tracks, each with its own MIDI channel)
+          and 16 <b>patterns</b>; a <b>chain</b> plays patterns in order. Each line can have its own length, so lines of
+          different lengths make polyrhythms.</p>
+        <h3>Timing and playback</h3>
+        <ul>
+          <li>The Sequencer follows the MIDI clock it receives. Out of the box, Tempo is patched to it (clock only), so it plays at the Tempo screen's BPM.
+            To follow other gear, patch that gear to Sequencer with <b>Clock</b> in MIDI Devices instead.</li>
+          <li><b>Play / Stop</b> on the Sequencer screen plays or stops the Tempo (and everything else following it) when the clock comes from Tempo.
+            Tempo's own Play and a Start from external gear work too.</li>
+          <li>Notes go wherever the Sequencer is patched in MIDI Devices, on each line's channel.</li>
+        </ul>
+        <h3>Patterns and chain</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Tap a pattern slot (1–16)</td><td>Switch to it: immediately when stopped, at the end of the current pattern when playing (the slot blinks while waiting). This turns the chain off.</td></tr>
+            <tr><td>Long-press a slot</td><td>Menu: Edit here (edit this pattern while another one plays), Copy, Paste, Clear, Length.</td></tr>
+            <tr><td>Chain</td><td>Tap to turn it on or off; long-press to edit the order and how many times each pattern repeats.</td></tr>
+            <tr><td>◀ ▶ / 8·16 / Follow</td><td>Scroll through long lines by half a page, show 8 or 16 steps, and follow the playhead.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Lines</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Tap a line header</td><td>Select the line (for REC and Follow).</td></tr>
+            <tr><td>M</td><td>Mute or unmute.</td></tr>
+            <tr><td>Long-press a line header</td><td>Line settings: Grid / Realtime, channel, steps, rate, bars, velocity, gate, quantize, record mode, program and bank, name, Copy / Paste / Clear for this line, Delete.</td></tr>
+            <tr><td>+ Line</td><td>Add a line.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Putting notes on the grid</h3>
+        <p>The grid places the <b>chord</b>: the notes you played last on Keys or a keyboard patched to Sequencer (shown in the header;
+          tap it to hear it).</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Tap an empty step</td><td>Place the chord, one step long.</td></tr>
+            <tr><td>Press an empty step and drag</td><td>Place the chord as long as you drag.</td></tr>
+            <tr><td>Tap a step with notes</td><td>Delete the notes starting there.</td></tr>
+            <tr><td>Press a step with notes and drag</td><td>Change their length.</td></tr>
+            <tr><td>Long-press a step with notes</td><td>Replace them with the chord.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Recording</h3>
+        <p>Select a line and tap <b>REC</b> to arm it; what you play while the Sequencer runs is recorded into the playing pattern.
+          Choose overdub or replace and quantize in the line settings. Nothing is recorded while stopped.</p>
+        <h3>Saving</h3>
+        <ul>
+          <li><b>File</b> (shows the song name, <code>*</code> = unsaved changes): Save, Save new, Load, New, Delete (press twice), Close.
+            Songs go to <code>/sd/patterns/</code>.</li>
+          <li>Your work is also autosaved: 5 seconds after the last change, every 60 seconds while you keep editing, and on Stop. It comes back after a restart.</li>
+        </ul>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>seq = UI::Sequencer.current        # the song on screen
+seq.on_pattern { |e| UI.log("pattern #{e[:pattern]}") }
+seq.show</pre></div>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/SEQUENCER.md">docs/SEQUENCER.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="tombola">
+        <h2>Tombola</h2>
+        <div class="ref-meta"><span>Tab5 · CoreS3 · CrowPanel</span><span>Up to 16 balls</span></div>
+        <p>A spinning polygon with balls bouncing inside. Every time a ball hits a side, that side's note plays: harder hits play louder.
+          Out of the box it plays a drum kit (GM drums on channel 10).</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Start / Stop (nav bar)</td><td>Start or stop. Starting with no balls adds three.</td></tr>
+            <tr><td>Tap inside the polygon</td><td>Add a ball there.</td></tr>
+            <tr><td>Drag</td><td>Turn the polygon by hand: it follows your finger and stops when you stop. Flick to throw the balls around. When you let go, it spins at its set speed again.</td></tr>
+          </tbody>
+        </table></div>
+        <p>The text in the corner shows the sides, speed (rpm), gravity, bounce and number of balls. Tombola keeps playing while you look at other screens.</p>
+        <h3>In MIDI Devices</h3>
+        <ul>
+          <li><b>Tombola → gear</b>: the hits go there.</li>
+          <li><b>Gear → Tombola</b>: each note you hold adds a ball that plays that note; it goes away when you let go.</li>
+          <li><b>Tempo → Tombola</b>: Tempo's Play / Stop starts and stops it.</li>
+        </ul>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>t = UI::Tombola.new(sides: 6, rotation: 12, gravity: 0.5, device: dev)
+t.scale = [36, 38, 42, 45, 46, 49]   # side N plays scale[N % size]
+t.add_ball(color: :red)
+UI.pad(1, label: "Faster") { t.rotation += 4 }
+t.start
+t.show</pre></div>
+        <p>Also: <code>gravity_mode</code> (<code>:down</code> / <code>:center</code> / <code>:none</code>), <code>bounce</code>, <code>friction</code>, <code>ball_size</code>, <code>channel</code>, <code>duration</code>, <code>on_hit</code>.</p>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/TOMBOLA.md">docs/TOMBOLA.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="tempo">
+        <h2>Tempo</h2>
+        <div class="ref-meta"><span>Tab5 · CoreS3 · CrowPanel</span><span>20–300 BPM</span></div>
+        <p>MIDoRI's master clock. It sends MIDI clock to every device it's patched to in MIDI Devices, and Start / Stop for the whole setup.
+          It can also follow clock from other gear and pass it on.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Tap the BPM</td><td>Tap tempo. TAP on the nav bar does the same.</td></tr>
+            <tr><td>Swipe the BPM</td><td>Up or right is faster, down or left is slower, 1 BPM per step. The number turns yellow while you swipe.</td></tr>
+            <tr><td>▶ Play / ■ Stop</td><td>Sends MIDI Start or Stop. The BPM turns green while playing.</td></tr>
+            <tr><td>USB-H / USB-D / DIN / BLE</td><td>Where external clock comes from: USB gear, the computer, the DIN/TRS jack, Bluetooth. <b>Ext:</b> shows the BPM measured from it.</td></tr>
+            <tr><td>Sync</td><td>Follow the external clock (the BPM turns light blue). Gear patched from Tempo then follows it too.</td></tr>
+          </tbody>
+        </table></div>
+        <p>Clock is sent only to the devices Tempo is patched to (Tempo appears as a row in MIDI Devices). It keeps ticking whether or not you've pressed Play, as most gear expects.</p>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>MIDI.route(UI::Tempo, MIDIDevices.usb_midi_device)   # clock to the DAW
+UI::Tempo.bpm = 128
+UI::Tempo.start                                      # .stop / .tap / .sync = true
+UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre></div>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/TEMPO.md">docs/TEMPO.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="amy">
+        <h2>AMY</h2>
+        <div class="ref-meta"><span>Tab5 · CrowPanel</span><span>Speaker / headphones</span></div>
+        <p>The built-in synthesizer (<a href="https://github.com/shorepine/amy">AMY</a>). It plays through the board's speaker,
+          or headphones on the Tab5, and has two kinds of sound: <b>FM</b> (the 128 DX7 presets) and <b>Synth</b>
+          (an analog-style synth with the 128 Juno-60 presets). The <b>AMY</b> tile on Home opens a panel for building sounds without a script.</p>
+        <h3>The AMY panel</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Part of the screen</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Tabs</td><td>One tab per part (a sound on a MIDI channel). <b>+</b> → <b>+ FM</b> or <b>+ Synth</b> adds one on the lowest free channel. Up to 8 tabs.</td></tr>
+            <tr><td>&lt;&lt; &lt; &gt; &gt;&gt;</td><td>Previous / next preset, by 1 or 10.</td></tr>
+            <tr><td>Ch- / Ch+</td><td>The part's MIDI channel (1–16). Parts on the same channel play together as a layer.</td></tr>
+            <tr><td>Del</td><td>Press twice (Sure?) to remove the part.</td></tr>
+            <tr><td>Envelopes</td><td>Drag the handles: A sideways, D sideways and up/down, S up/down, R sideways. Synth has Amp and Filter; FM edits one operator at a time (pick it with Op n).</td></tr>
+            <tr><td>Knobs</td><td>Synth: Cutoff, Reso, FltEnv, KeyTrk, Glide, Pan, Volume, Reverb. FM: Algo, Feedbk, OpLvl, Ratio, Cutoff, Reso, Volume, Reverb. (Reverb is shared by all parts.)</td></tr>
+            <tr><td>Keyboard</td><td>One octave to try the part on its channel. Oct- / Oct+ shift it.</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>To play AMY from other gear, patch that gear to <b>AMY</b> in MIDI Devices. AMY starts the first time something needs it.</li>
+          <li>Speaker and headphone volume are on the <b>Settings</b> screen. The Tab5 switches to the headphone volume when you plug some in.</li>
+          <li>Parts made on the panel aren't saved yet: running a script clears them.</li>
+        </ul>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>amy = MIDIDevices.amy
+fm  = amy.add_fm(channel: 0, patch: 128)      # DX7 preset
+syn = amy.add_synth(channel: 1, patch: 5)     # Juno-60 preset
+syn.cutoff = 900
+MIDI.route(MIDIDevices.usb_midi_host, amy)    # play it from a keyboard</pre></div>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_SYNTH.md">docs/AMY_SYNTH.md</a> ·
+          <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_PANEL.md">docs/AMY_PANEL.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="midi-devices">
+        <h2>MIDI Devices (MIDI Info)</h2>
+        <div class="ref-meta"><span>Home tile: MIDI Info</span><span>Up to 16 devices</span></div>
+        <p>The patch bay. <b>Rows are MIDI IN</b> (where MIDI comes from) and <b>columns are MIDI OUT</b> (where it goes). A dot in a cell
+          means everything from that row goes to that column. Patches you make here are saved right away and come back when you power on.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Tap a cell</td><td>Patch or unpatch (all channels). Unpatching sends All Notes Off on the channels that were used, so nothing hangs.</td></tr>
+            <tr><td>Long-press a cell → Ch</td><td>Choose what passes: All, Clock (clock and Start / Stop only), channels 1–16 (several allowed), Off. Done or tapping outside closes it.</td></tr>
+            <tr><td>Long-press a cell → Filters</td><td>Chain MIDI filters (chords, arpeggios… from plugins) in the order you pick them. Long-press a chosen filter for its settings.</td></tr>
+            <tr><td>Long-press a row or column name</td><td>Device details: state, product name, transfer counters (handy when MIDI doesn't arrive).</td></tr>
+            <tr><td>Drag the grid</td><td>Scroll when there are more devices than fit. The names stay in place.</td></tr>
+            <tr><td>Top-left corner button</td><td>Show <b>All</b>, only <b>Patched</b>, or only <b>Unpatched</b> devices.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Reading the grid</h3>
+        <ul>
+          <li>Dot next to a row name: green = connected, gray = not connected. Line under a column name: yellow = standby (AMY before it starts).</li>
+          <li>A patch whose device isn't connected shows as a gray ring. It starts working again as soon as the device comes back.</li>
+          <li>Bottom-left of a cell: the channels it passes (<code>1-4,10,clk</code>). Top-right: <code>f2</code> = a chain of 2 filters.</li>
+        </ul>
+        <h3>Devices you'll see</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td>(product name)</td><td>USB MIDI gear, by name. Up to 4 through a USB hub.</td></tr>
+            <tr><td>PC</td><td>The computer or iPad on USB (midi_device mode).</td></tr>
+            <tr><td>SAM2695</td><td>The SAM2695 unit: its General MIDI sounds and its DIN / TRS jacks.</td></tr>
+            <tr><td>BLE / (device name)</td><td>The iPad or Mac connected over Bluetooth, and BLE-MIDI gear MIDoRI connected to.</td></tr>
+            <tr><td>AMY</td><td>The built-in synth (OUT only).</td></tr>
+            <tr><td>Keys · Sequencer · Tombola</td><td>The on-screen instruments: both IN and OUT.</td></tr>
+            <tr><td>Tempo · XYPad</td><td>Send only (IN rows).</td></tr>
+            <tr><td>Script</td><td>The running script. Script's row is where the script's output goes; its column is what the script listens to.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>md = UI::MIDIDevices
+md.patch(MIDIDevices.usb_midi_host, MIDIDevices.amy)
+md.patch(MIDIDevices.usb_midi_device, MIDIDevices.sam2695, channel: [0, 9, :clock])
+out = md.output            # play into Script: goes wherever Script is patched
+md.input.on(:note_on) { |m| out.note_on(m.note + 12, m.velocity) }
+md.save                    # patches made by a script last until it ends, unless saved</pre></div>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/UI_MIDI_DEVICES.md">docs/UI_MIDI_DEVICES.md</a> ·
+          <a href="https://github.com/kirikak2/midori/blob/main/docs/MIDI_FILTER_REGISTRY.md">docs/MIDI_FILTER_REGISTRY.md</a> (Japanese)</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="bluetooth">
+        <h2>Bluetooth</h2>
+        <div class="ref-meta"><span>Tab5 · CoreS3</span><span>1 iPad / Mac + 2 BLE-MIDI devices</span></div>
+        <p>BLE-MIDI works both ways. As a <b>Device</b>, MIDoRI shows up on an iPad or Mac as a Bluetooth MIDI device (named
+          "Midori Tab5" or "Midori CoreS3"). As a <b>Host</b>, it connects out to BLE-MIDI keyboards and adapters (WIDI and the like).</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Touch</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Device On / Off</td><td>Be visible to an iPad or Mac. Below it: the name and state (advertising / connected).</td></tr>
+            <tr><td>Host On / Off</td><td>Connect out to BLE-MIDI gear.</td></tr>
+            <tr><td>Scan (nav bar)</td><td>Look for BLE-MIDI gear for 8 seconds. Press again to stop.</td></tr>
+            <tr><td>Tap a device in the list</td><td>Connect or disconnect.</td></tr>
+            <tr><td>x (right end)</td><td>Forget a known device.</td></tr>
+            <tr><td>Drag the list</td><td>Scroll.</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>The list shows connected devices first (dark blue), then known ones (<code>*</code>), then ones the scan found (with signal strength).</li>
+          <li>Devices you've connected once reconnect by themselves while Host is on, unless you disconnected them yourself.</li>
+          <li>The On / Off switches are saved. Connected devices appear in MIDI Devices (<b>BLE</b> for the iPad / Mac, the device name for gear), and Tempo can sync to BLE clock.</li>
+          <li>On a Mac, connect from Audio MIDI Setup → MIDI Studio → Bluetooth; on an iPad, from your app's Bluetooth MIDI settings.
+            If pairing fails after you reinstalled MIDoRI, delete "Midori" from the iPad's or Mac's Bluetooth devices and try again.</li>
+        </ul>
+        <h3>From a script</h3>
+        <div class="code-card"><pre>widi = BLE_MIDI_HOST.connect("WIDI")          # by name; scans if needed
+dev  = MIDI::Device.new(MIDIDevices.ble_midi_host("WIDI"))
+MIDI.route(MIDIDevices.ble_midi_device, MIDIDevices.amy)   # iPad → AMY</pre></div>
+        <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/BLE_MIDI.md">docs/BLE_MIDI.md</a> (Japanese)</p>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span>MIDoRI — MIDI on Ruby Interpreter · MIT License</span>
+    <span><a href="https://github.com/kirikak2/midori">GitHub</a> · <a href="https://github.com/kirikak2/midori/releases">Releases</a> · <a href="https://github.com/kirikak2/midori/issues">Report a problem</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

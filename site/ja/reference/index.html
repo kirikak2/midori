@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リファレンス — MIDoRI</title>
+<meta name="description" content="MIDoRI の各画面の使い方。Pads・Knobs・XYPad・Keys・Sequencer・Tombola・Tempo・AMY・MIDI Devices・Bluetooth。">
+<meta property="og:title" content="リファレンス — MIDoRI">
+<meta property="og:description" content="MIDoRI の各画面の使い方。Pads・Knobs・XYPad・Keys・Sequencer・Tombola・Tempo・AMY・MIDI Devices・Bluetooth。">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MIDoRI">
+<meta property="og:url" content="https://kirikak2.github.io/midori/ja/reference/">
+<meta property="og:image" content="https://kirikak2.github.io/midori/assets/og-ja.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="リファレンス — MIDoRI">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" hreflang="en" href="../../reference/">
+<link rel="icon" href="../../assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="../"><img class="logo-mark" src="../../assets/icon.svg" alt="">MIDoRI</a>
+    <nav class="nav">
+      <a href="../#scenes" class="hide-sm">できること</a>
+      <a href="../#boards" class="hide-sm">対応ボード</a>
+      <a href="../install/">インストール</a>
+      <a href="./" aria-current="page">リファレンス</a>
+      <a href="https://github.com/kirikak2/midori" class="hide-sm">GitHub</a>
+      <a href="../../reference/" class="lang" hreflang="en">EN</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="page-head">
+    <h1>リファレンス</h1>
+  </div>
+
+  <div class="ref-layout">
+    <nav class="ref-toc" aria-label="目次">
+      <b>目次</b>
+      <ol>
+        <li><a href="#basics">画面の移動</a></li>
+        <li><a href="#pads">Pads</a></li>
+        <li><a href="#knobs">Knobs</a></li>
+        <li><a href="#xypad">XYPad</a></li>
+        <li><a href="#keys">Keys</a></li>
+        <li><a href="#sequencer">Sequencer</a></li>
+        <li><a href="#tombola">Tombola</a></li>
+        <li><a href="#tempo">Tempo</a></li>
+        <li><a href="#amy">AMY</a></li>
+        <li><a href="#midi-devices">MIDI Devices（MIDI Info）</a></li>
+        <li><a href="#bluetooth">Bluetooth</a></li>
+      </ol>
+    </nav>
+
+    <div>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="basics">
+        <h2>画面の移動</h2>
+        <p>MIDoRI は <b>Home</b> 画面で起動します。タイルをタップするとその画面へ。タイルの小さな文字はその画面の状態です
+          （BPM、パッチの数、Tombola が動いているか など）。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>ナビバー</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>Home（左）</td><td>Home 画面へ戻る。</td></tr>
+            <tr><td>中央</td><td>画面ごとのボタン（Tempo は TAP、Knobs は Send、Tombola は Start / Stop、Bluetooth は Scan）。ないときは画面名。</td></tr>
+            <tr><td>Back（右）</td><td>直前の画面へ（Home は数えません）。もう一度押すと元の画面に戻るので、XYPad ⇄ Knobs のように 1 タップで行き来できます。</td></tr>
+          </tbody>
+        </table></div>
+        <p>Pads・Knobs・XYPad は、スクリプトかプラグインが中身を決めるまで空です。SD カード用ファイルには中身を作るプラグインが
+          入っていて（<code>/sd/plugins/</code>、起動時に読み込み）、自分で書くときは
+          <a href="https://github.com/kirikak2/midori/tree/main/examples">examples</a> が出発点になります。
+          プラグインが部品を組み合わせて作った画面（<b>レイアウト</b>）は、それぞれ Home にタイルが出ます。</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="pads">
+        <h2>Pads</h2>
+        <div class="ref-meta"><span>Tab5・CrowPanel: 12 個（4 × 3）</span><span>CoreS3: 6 個（3 × 2）</span></div>
+        <p>ワンショットの操作に使うボタンのグリッド。ドラムを叩く、シーンを切り替える、フレーズを始める、など。
+          パッドごとにラベルと色があり、何をするかはスクリプトが決めます。複数の指で同時に押せます。</p>
+        <h3>パッドの種類</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>種類</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>trigger</td><td>押した瞬間に 1 回（既定）。</td></tr>
+            <tr><td>momentary</td><td>押している間オン、離すとオフ。音やエフェクトを押さえている間だけかけるのに。</td></tr>
+            <tr><td>toggle</td><td>押すたびにオン / オフが切り替わり、オンの間は点灯。Hold・ミュート・Play に。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>dev = MIDI::Device.new(MIDIDevices.sam2695)
+UI.pad(1, label: "Kick", color: :red) { dev.trigger(36, 127, channel: 9) }
+UI.pad(2, label: "Hold", color: :yellow, type: :momentary) { |down| ... }
+UI.pad(3, label: "Play", color: :green, type: :toggle) { |on| on ? UI::Tempo.start : UI::Tempo.stop }
+UI.pad_label(1, "Kick!")   # pad_color / pad_state / pad_clear も
+UI.show(:pads)</pre></div>
+        <p>色: <code>:red :green :blue :yellow :cyan :magenta :orange :purple :white :gray</code>。ブロックはスクリプトが
+          <code>UI.process</code> を呼んでいる間に動きます。</p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="knobs">
+        <h2>Knobs</h2>
+        <div class="ref-meta"><span>Tab5・CrowPanel: 12 個 × 4 バンク</span><span>CoreS3: 6 個 × 4 バンク</span></div>
+        <p>カットオフ・レゾナンス・音量・センドなど、合わせておく値のためのノブ。バンク（A〜D）はノブ一式の丸ごと 1 セットで、
+          ラベルも色もバンクごとに違ってかまいません（A = シンセ、B = ドラム、C = エフェクト のように）。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>ノブのまわりをなぞる</td><td>実物のノブのように回ります。ゲージの先端が指の下から動きません。ノブの枠の中ならどこを持ってもよく、中心から遠くを持つほど細かく合わせられます。</td></tr>
+            <tr><td>複数の指</td><td>いくつものノブを同時に回せます。</td></tr>
+            <tr><td>A / B / C / D（右端）</td><td>バンクの切り替え。切り替えても何も送りません。ほかのバンクの値はそのまま残ります。</td></tr>
+            <tr><td>Send（ナビバー）</td><td>表示中のバンクの今の値を送り直します。あとから機材をつないだときに。</td></tr>
+          </tbody>
+        </table></div>
+        <p>ノブが送るのは値が変わったときだけ。定義しただけでは初期値は送られないので、画面と機材をそろえるには Send を押すか
+          <code>UI.knob_send_all</code> を呼びます。</p>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>UI.knob(1, label: "Cutoff", color: :cyan, value: 64) { |v| dev.control_change(74, v.to_i) }
+UI.knob(2, bank: 2, label: "Pan", origin: :center, value: 64) { |v| dev.control_change(10, v.to_i) }
+UI.knob(3, label: "BPM", min: 40, max: 240) { |v| UI::Tempo.bpm = v }
+UI.knob_send_all(bank: :all)
+UI.knobs</pre></div>
+        <p>オプション: <code>min:</code> / <code>max:</code>（0〜127）、<code>step:</code>（1。0 で連続値）、<code>origin: :center</code>
+          （中央から両側へ伸びるゲージ）、<code>sensitivity:</code>（1.0）。</p>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/KNOBS.md">docs/KNOBS.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="xypad">
+        <h2>XYPad</h2>
+        <div class="ref-meta"><span>Tab5・CoreS3・CrowPanel</span><span>最大 5 本の指</span></div>
+        <p>指で弾く演奏面。横が音程、縦が CC。指ごとに別の MIDI チャンネルで鳴るので、1 音ずつ別々にベンドしたりフィルタを開けたりできます。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>指を置く</td><td>画面はスケールの音の数だけ縦に区切られていて、指を置いた列の音が鳴ります。</td></tr>
+            <tr><td>横に動かす</td><td>置いた位置からピッチベンド。画面の端から端までで、グライド幅（既定 2 半音）ぶん曲がります。</td></tr>
+            <tr><td>縦に動かす</td><td>CC を送ります（既定 74。多くの音源でフィルタのカットオフ）。上ほど大きい値。</td></tr>
+            <tr><td>離す</td><td>ノートオフ。Hold がオンなら、Hold を切るまで鳴り続けます。</td></tr>
+          </tbody>
+        </table></div>
+        <p>指の近くに、いま何を鳴らしているかが短く出ます。音の代わりに CC を 2 つ送る指にもできます。</p>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>pad = UI::XYPad.new(scale: [36, 38, 40, 41, 43, 45, 47, 48],
+                    glide_range: 2, y_cc: 74, device: dev)
+pad.slot(5, x_mode: :cc, x_cc: 70, y_cc: 71, device: fx)   # 5 本目の指だけ
+UI.pad(1, label: "Hold", type: :toggle) { |on| pad.hold = on }
+pad.show</pre></div>
+        <p>XYPad は MIDI Devices にも出ているので、そこでパッチすれば弾いた内容をほかの機材にも送れます。</p>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/XYPAD.md">docs/XYPAD.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="keys">
+        <h2>Keys</h2>
+        <div class="ref-meta"><span>Tab5・CoreS3・CrowPanel</span><span>1〜4 オクターブ</span><span>最大 5 本の指</span></div>
+        <p>画面の鍵盤（既定は C3 から 2 オクターブ）。受け取ったノートで鍵が光るので、光る MIDI 鍵盤のように、機材や DAW が
+          何を弾いているかも見られます。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>鍵を押す</td><td>その音が鳴ります（押している間はシアン）。</td></tr>
+            <tr><td>指を滑らせる</td><td>隣の鍵に移るとその鍵を弾き直します（グリッサンド）。</td></tr>
+            <tr><td>押す位置</td><td>スクリプトで <code>velocity: :position</code> にすると、鍵の手前ほど強く鳴ります。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>MIDI Devices で</h3>
+        <ul>
+          <li><b>Keys → 機材</b>: 弾いた音がその機材へ。</li>
+          <li><b>機材 → Keys</b>: 届いたノートで鍵が光ります（オレンジ）。鍵盤や <b>PC</b> を Keys へパッチすると鳴っている音が見えます。
+            Keys は受けた音を先へ流さないので、鍵盤の音も聞きたいときはシンセへのパッチも張ります。</li>
+        </ul>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>keys = UI::Keys.new(octaves: 2, low: 48, velocity: :position, device: MIDIDevices.amy)
+MIDI.route(MIDIDevices.usb_midi_host, keys)   # 外部鍵盤の演奏で鍵を光らせる
+keys.set_color([48, 52, 55], :blue)           # 和音やスケールを表示
+keys.show</pre></div>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/KEYS.md">docs/KEYS.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="sequencer">
+        <h2>Sequencer</h2>
+        <div class="ref-meta"><span>Tab5・CoreS3・CrowPanel</span><span>16 ライン × 16 パターン</span></div>
+        <p>セット全体を回すパターンシーケンサー。<b>ソング</b>は最大 16 本の<b>ライン</b>（トラック。ラインごとに MIDI チャンネル）と
+          16 個の<b>パターン</b>からなり、<b>チェーン</b>でパターンを順番に再生します。ラインごとに長さを変えられるので、
+          長さの違うラインを並べればポリリズムになります。</p>
+        <h3>タイミングと再生</h3>
+        <ul>
+          <li>Sequencer は受け取った MIDI クロックで進みます。初期状態で Tempo → Sequencer のパッチ（クロックだけ）があるので、Tempo 画面の BPM で動きます。
+            ほかの機材に合わせるときは、MIDI Devices でその機材 → Sequencer を <b>Clock</b> で張り替えます。</li>
+          <li>Sequencer 画面の <b>Play / Stop</b> は、クロックが Tempo から来ているなら Tempo を（それに従うほかの機材ごと）再生・停止します。
+            Tempo 画面の Play や外部機材の Start でも動きます。</li>
+          <li>ノートは MIDI Devices で Sequencer からパッチした先へ、ラインのチャンネルで送られます。</li>
+        </ul>
+        <h3>パターンとチェーン</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>パターン（1〜16）をタップ</td><td>そのパターンへ。停止中はすぐ、再生中は今のパターンの終わりで切り替わります（待っている間は点滅）。チェーンはオフになります。</td></tr>
+            <tr><td>パターンを長押し</td><td>メニュー: Edit here（別のパターンを再生したままこのパターンを編集）、Copy、Paste、Clear、Length。</td></tr>
+            <tr><td>Chain</td><td>タップでオン / オフ、長押しで順番と繰り返し回数の編集。</td></tr>
+            <tr><td>◀ ▶ / 8・16 / Follow</td><td>長いラインを半ページずつ送る、8 か 16 ステップ表示、再生位置に追従。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>ライン</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>ライン見出しをタップ</td><td>ラインを選ぶ（REC と Follow の対象）。</td></tr>
+            <tr><td>M</td><td>ミュート / 解除。</td></tr>
+            <tr><td>ライン見出しを長押し</td><td>ラインの設定: Grid / Realtime、チャンネル、ステップ数、レート、小節数、ベロシティ、ゲート、クオンタイズ、録音モード、プログラム・バンク、名前、このラインの Copy / Paste / Clear、Delete。</td></tr>
+            <tr><td>+ Line</td><td>ラインを足す。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>グリッドにノートを置く</h3>
+        <p>グリッドに置くのは<b>和音</b>: Keys や Sequencer へパッチした鍵盤で最後に弾いた音です（ヘッダに表示。タップで試聴）。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>空のマスをタップ</td><td>和音を長さ 1 ステップで置く。</td></tr>
+            <tr><td>空のマスを押してドラッグ</td><td>ドラッグした長さで和音を置く。</td></tr>
+            <tr><td>ノートのあるマスをタップ</td><td>そこから始まるノートを消す。</td></tr>
+            <tr><td>ノートのあるマスを押してドラッグ</td><td>長さを変える。</td></tr>
+            <tr><td>ノートのあるマスを長押し</td><td>和音で置き換える。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>録音</h3>
+        <p>ラインを選んで <b>REC</b> をタップすると録音待機。Sequencer が動いている間に弾いたものが、再生中のパターンに録音されます。
+          overdub / replace とクオンタイズはラインの設定で選びます。停止中は録音しません。</p>
+        <h3>保存</h3>
+        <ul>
+          <li><b>File</b>（ソング名を表示。<code>*</code> は未保存の変更あり）: Save、Save new、Load、New、Delete（2 回押し）、Close。
+            ソングは <code>/sd/patterns/</code> に保存されます。</li>
+          <li>作業内容は自動でも保存されます（最後の変更から 5 秒後、編集が続いていれば 60 秒ごと、Stop のとき）。再起動しても戻ります。</li>
+        </ul>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>seq = UI::Sequencer.current        # 画面のソング
+seq.on_pattern { |e| UI.log("pattern #{e[:pattern]}") }
+seq.show</pre></div>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/SEQUENCER.md">docs/SEQUENCER.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="tombola">
+        <h2>Tombola</h2>
+        <div class="ref-meta"><span>Tab5・CoreS3・CrowPanel</span><span>ボール最大 16 個</span></div>
+        <p>回転する多角形の中でボールが跳ね、辺に当たるたびにその辺の音が鳴ります。強く当たるほど大きな音。
+          初期状態ではドラムキット（チャンネル 10 の GM ドラム）を鳴らします。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>Start / Stop（ナビバー）</td><td>開始 / 停止。ボールがなければ 3 個入れて始めます。</td></tr>
+            <tr><td>多角形の内側をタップ</td><td>そこにボールを足す。</td></tr>
+            <tr><td>ドラッグ</td><td>多角形を手で回す。指についてきて、指を止めれば止まります。弾くとボールが飛び散ります。離すと設定の速さで回り始めます。</td></tr>
+          </tbody>
+        </table></div>
+        <p>隅の文字は辺の数・回転（rpm）・重力・反発・ボールの数。ほかの画面を見ている間も演奏は続きます。</p>
+        <h3>MIDI Devices で</h3>
+        <ul>
+          <li><b>Tombola → 機材</b>: 当たった音がその機材へ。</li>
+          <li><b>機材 → Tombola</b>: 押さえたノートごとに、その音を鳴らすボールが増え、離すと消えます。</li>
+          <li><b>Tempo → Tombola</b>: Tempo の Play / Stop で回る・止まる。</li>
+        </ul>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>t = UI::Tombola.new(sides: 6, rotation: 12, gravity: 0.5, device: dev)
+t.scale = [36, 38, 42, 45, 46, 49]   # 辺 N → scale[N % size]
+t.add_ball(color: :red)
+UI.pad(1, label: "Faster") { t.rotation += 4 }
+t.start
+t.show</pre></div>
+        <p>ほかに <code>gravity_mode</code>（<code>:down</code> / <code>:center</code> / <code>:none</code>）、<code>bounce</code>、<code>friction</code>、<code>ball_size</code>、<code>channel</code>、<code>duration</code>、<code>on_hit</code>。</p>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/TOMBOLA.md">docs/TOMBOLA.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="tempo">
+        <h2>Tempo</h2>
+        <div class="ref-meta"><span>Tab5・CoreS3・CrowPanel</span><span>20〜300 BPM</span></div>
+        <p>MIDoRI のマスタークロック。MIDI Devices でパッチした機材すべてに MIDI クロックを送り、セット全体の Start / Stop を出します。
+          ほかの機材のクロックに合わせて、それを送り直すこともできます。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>BPM をタップ</td><td>タップテンポ。ナビバーの TAP も同じ。</td></tr>
+            <tr><td>BPM をスワイプ</td><td>上・右で速く、下・左で遅く、1 BPM ずつ。スワイプ中は数字が黄色。</td></tr>
+            <tr><td>▶ Play / ■ Stop</td><td>MIDI Start / Stop を送ります。再生中は BPM が緑。</td></tr>
+            <tr><td>USB-H / USB-D / DIN / BLE</td><td>外部クロックの出どころ（USB の機材、パソコン、DIN / TRS ジャック、Bluetooth）。<b>Ext:</b> にそこから測った BPM が出ます。</td></tr>
+            <tr><td>Sync</td><td>外部クロックに追従（BPM が水色）。Tempo からパッチした機材もそれに従います。</td></tr>
+          </tbody>
+        </table></div>
+        <p>クロックを送るのは Tempo からパッチした機材だけ（Tempo は MIDI Devices の行に出ます）。多くの機材が期待するとおり、
+          Play を押していなくてもクロックは流れ続けます。</p>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>MIDI.route(UI::Tempo, MIDIDevices.usb_midi_device)   # DAW へクロック
+UI::Tempo.bpm = 128
+UI::Tempo.start                                      # .stop / .tap / .sync = true
+UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre></div>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/TEMPO.md">docs/TEMPO.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="amy">
+        <h2>AMY</h2>
+        <div class="ref-meta"><span>Tab5・CrowPanel</span><span>スピーカー / ヘッドホン</span></div>
+        <p>内蔵シンセサイザー（<a href="https://github.com/shorepine/amy">AMY</a>）。ボードのスピーカー（Tab5 はヘッドホンも）から鳴り、
+          音源は <b>FM</b>（DX7 のプリセット 128 種）と <b>Synth</b>（Juno-60 のプリセット 128 種を持つアナログ風シンセ）の 2 種類。
+          Home の <b>AMY</b> タイルから、スクリプトなしで音色を組むパネルを開けます。</p>
+        <h3>AMY パネル</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>画面の部分</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>タブ</td><td>タブ 1 枚 = パート 1 個（MIDI チャンネルに載った音色）。<b>+</b> → <b>+ FM</b> / <b>+ Synth</b> で、空いている一番小さいチャンネルに足します。最大 8 枚。</td></tr>
+            <tr><td>&lt;&lt; &lt; &gt; &gt;&gt;</td><td>プリセットを 1 つ / 10 個ずつ前後へ。</td></tr>
+            <tr><td>Ch- / Ch+</td><td>パートの MIDI チャンネル（1〜16）。同じチャンネルのパートは重なって一緒に鳴ります。</td></tr>
+            <tr><td>Del</td><td>2 回押し（Sure?）でパートを消す。</td></tr>
+            <tr><td>エンベロープ</td><td>ハンドルをドラッグ（A: 横、D: 横と縦、S: 縦、R: 横）。Synth は Amp と Filter、FM はオペレータを 1 つずつ（Op n で選ぶ）。</td></tr>
+            <tr><td>ノブ</td><td>Synth: Cutoff・Reso・FltEnv・KeyTrk・Glide・Pan・Volume・Reverb。FM: Algo・Feedbk・OpLvl・Ratio・Cutoff・Reso・Volume・Reverb（Reverb は全パート共通）。</td></tr>
+            <tr><td>鍵盤</td><td>パートのチャンネルで試し弾きする 1 オクターブ。Oct- / Oct+ で移動。</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>ほかの機材から AMY を弾くには、MIDI Devices でその機材 → <b>AMY</b> をパッチします。AMY は初めて必要になったときに起動します。</li>
+          <li>スピーカーとヘッドホンの音量は <b>Settings</b> 画面。Tab5 はヘッドホンを挿すとヘッドホンの音量に切り替わります。</li>
+          <li>パネルで組んだパートはまだ保存できません（スクリプトを実行すると消えます）。</li>
+        </ul>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>amy = MIDIDevices.amy
+fm  = amy.add_fm(channel: 0, patch: 128)      # DX7 のプリセット
+syn = amy.add_synth(channel: 1, patch: 5)     # Juno-60 のプリセット
+syn.cutoff = 900
+MIDI.route(MIDIDevices.usb_midi_host, amy)    # 鍵盤から弾く</pre></div>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_SYNTH.md">docs/AMY_SYNTH.md</a> ・
+          <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_PANEL.md">docs/AMY_PANEL.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="midi-devices">
+        <h2>MIDI Devices（MIDI Info）</h2>
+        <div class="ref-meta"><span>Home のタイル: MIDI Info</span><span>最大 16 台</span></div>
+        <p>パッチベイ。<b>行が MIDI IN</b>（MIDI の出どころ）、<b>列が MIDI OUT</b>（行き先）。セルの丸は「その行から来たものを
+          その列へ送る」という意味です。ここで張ったパッチはすぐ保存され、電源を入れ直しても戻ります。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>セルをタップ</td><td>パッチの付け外し（全チャンネル）。外すと、使っていたチャンネルに All Notes Off を送るので音が残りません。</td></tr>
+            <tr><td>セルを長押し → Ch</td><td>通すものを選ぶ: All、Clock（クロックと Start / Stop だけ）、チャンネル 1〜16（複数可）、Off。Done か外側のタップで閉じます。</td></tr>
+            <tr><td>セルを長押し → Filters</td><td>MIDI フィルタ（プラグインのコード・アルペジオなど）を選んだ順につなぐ。選んだフィルタを長押しで設定。</td></tr>
+            <tr><td>行・列の名前を長押し</td><td>デバイスの詳細: 状態、製品名、転送の回数（MIDI が届かないときの切り分けに）。</td></tr>
+            <tr><td>グリッドをドラッグ</td><td>収まらないときにスクロール。名前の行・列は固定です。</td></tr>
+            <tr><td>左上の角のボタン</td><td><b>All</b>（全部）/ <b>Patched</b>（パッチのあるものだけ）/ <b>Unpatched</b>（ないものだけ）を切り替え。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>グリッドの見方</h3>
+        <ul>
+          <li>行の名前の丸: 緑 = 接続中、灰色 = 未接続。列の名前の下の線: 黄 = 待機中（起動前の AMY）。</li>
+          <li>つながっていない機器のパッチは灰色の輪。機器が戻ればそのまま効きます。</li>
+          <li>セルの左下は通すチャンネル（<code>1-4,10,clk</code>）、右上の <code>f2</code> はフィルタ 2 段のチェーン。</li>
+        </ul>
+        <h3>並ぶデバイス</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>名前</th><th>中身</th></tr></thead>
+          <tbody>
+            <tr><td>（製品名）</td><td>USB MIDI 機器。USB ハブ越しに最大 4 台。</td></tr>
+            <tr><td>PC</td><td>USB でつないだパソコンや iPad（midi_device モード）。</td></tr>
+            <tr><td>SAM2695</td><td>SAM2695 ユニット（GM 音源と DIN / TRS ジャック）。</td></tr>
+            <tr><td>BLE /（機器名）</td><td>Bluetooth でつながった iPad や Mac と、MIDoRI からつないだ BLE-MIDI 機器。</td></tr>
+            <tr><td>AMY</td><td>内蔵シンセ（OUT のみ）。</td></tr>
+            <tr><td>Keys・Sequencer・Tombola</td><td>画面の楽器（IN と OUT の両方）。</td></tr>
+            <tr><td>Tempo・XYPad</td><td>送るだけ（IN の行のみ）。</td></tr>
+            <tr><td>Script</td><td>実行中のスクリプト。Script の行がスクリプトの出力の行き先、列がスクリプトが聞く入力の出どころ。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>md = UI::MIDIDevices
+md.patch(MIDIDevices.usb_midi_host, MIDIDevices.amy)
+md.patch(MIDIDevices.usb_midi_device, MIDIDevices.sam2695, channel: [0, 9, :clock])
+out = md.output            # Script へ送る = Script のパッチの先へ出ていく
+md.input.on(:note_on) { |m| out.note_on(m.note + 12, m.velocity) }
+md.save                    # スクリプトが張ったパッチはスクリプト限り（save で保存）</pre></div>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/UI_MIDI_DEVICES.md">docs/UI_MIDI_DEVICES.md</a> ・
+          <a href="https://github.com/kirikak2/midori/blob/main/docs/MIDI_FILTER_REGISTRY.md">docs/MIDI_FILTER_REGISTRY.md</a></p>
+      </section>
+
+<!-- ============================================================ -->
+      <section class="ref-sec" id="bluetooth">
+        <h2>Bluetooth</h2>
+        <div class="ref-meta"><span>Tab5・CoreS3</span><span>iPad / Mac 1 台 + BLE-MIDI 機器 2 台</span></div>
+        <p>BLE-MIDI は両方向。<b>Device</b> としては iPad や Mac から Bluetooth MIDI 機器として見え（名前は
+          「Midori Tab5」「Midori CoreS3」）、<b>Host</b> としては BLE-MIDI の鍵盤やアダプタ（WIDI など）へこちらからつなぎます。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>操作</th><th>動作</th></tr></thead>
+          <tbody>
+            <tr><td>Device On / Off</td><td>iPad や Mac から見えるようにする。下に名前と状態（advertising / connected）。</td></tr>
+            <tr><td>Host On / Off</td><td>BLE-MIDI 機器へつなぎに行く。</td></tr>
+            <tr><td>Scan（ナビバー）</td><td>BLE-MIDI 機器を 8 秒間探す。もう一度押すと止めます。</td></tr>
+            <tr><td>一覧の機器をタップ</td><td>接続 / 切断。</td></tr>
+            <tr><td>x（右端）</td><td>既知の機器を忘れる。</td></tr>
+            <tr><td>一覧をドラッグ</td><td>スクロール。</td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li>一覧は接続中の機器（紺）、既知の機器（<code>*</code>）、スキャンで見つかった機器（電波の強さつき）の順。</li>
+          <li>一度つないだ機器は、Host がオンの間は自動でつなぎ直します（自分で切断したものを除く）。</li>
+          <li>On / Off は保存されます。つながった機器は MIDI Devices に出て（iPad / Mac は <b>BLE</b>、機器は機器名）、Tempo は BLE のクロックに同期できます。</li>
+          <li>Mac は「Audio MIDI 設定」→ MIDI スタジオ → Bluetooth から、iPad はアプリの Bluetooth MIDI 設定からつなぎます。
+            MIDoRI を入れ直したあとペアリングできないときは、iPad / Mac の Bluetooth 設定で「Midori」を削除してからやり直してください。</li>
+        </ul>
+        <h3>スクリプトから</h3>
+        <div class="code-card"><pre>widi = BLE_MIDI_HOST.connect("WIDI")          # 名前で（必要ならスキャン）
+dev  = MIDI::Device.new(MIDIDevices.ble_midi_host("WIDI"))
+MIDI.route(MIDIDevices.ble_midi_device, MIDIDevices.amy)   # iPad → AMY</pre></div>
+        <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/BLE_MIDI.md">docs/BLE_MIDI.md</a></p>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span>MIDoRI — MIDI on Ruby Interpreter · オープンソース（MIT License）</span>
+    <span><a href="https://github.com/kirikak2/midori">GitHub</a> · <a href="https://github.com/kirikak2/midori/releases">リリース</a> · <a href="https://github.com/kirikak2/midori/issues">不具合の報告</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
