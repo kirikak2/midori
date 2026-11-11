@@ -563,3 +563,54 @@ details p, details li { color: var(--muted); }
   box-shadow: var(--shadow); background: #000;
 }
 .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* ======================================================================
+   Reference page — sidebar contents + one section per screen
+   ====================================================================== */
+.ref-layout {
+  display: grid; grid-template-columns: 200px minmax(0, 1fr);
+  gap: 40px; align-items: start; padding-bottom: 48px;
+}
+.ref-toc { position: sticky; top: 76px; padding-top: 32px; }
+.ref-toc b { display: block; font-size: .78rem; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+.ref-toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ref-toc a {
+  display: block; padding: 5px 10px; border-radius: 8px;
+  color: var(--muted); text-decoration: none; font-size: .93rem;
+}
+.ref-toc a:hover { color: var(--text); background: var(--bg-alt); }
+@media (max-width: 880px) {
+  .ref-layout { grid-template-columns: 1fr; gap: 0; }
+  .ref-toc { position: static; padding-top: 24px; }
+  .ref-toc ol { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ref-toc a { border: 1px solid var(--line); background: var(--surface); padding: 4px 12px; border-radius: 999px; font-size: .88rem; }
+}
+
+section.ref-sec { padding: 40px 0 8px; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
+section.ref-sec:first-child { border-top: 0; }
+.ref-sec h2 { margin-bottom: 6px; }
+.ref-sec h3 { font-size: 1.08rem; margin: 26px 0 8px; }
+.ref-sec > p, .ref-sec li { color: var(--muted); }
+.ref-sec > p { max-width: 46em; }
+.ref-sec ul { padding-left: 1.2em; }
+.ref-sec .table-wrap { margin: 10px 0 4px; }
+.ref-sec td:first-child { white-space: nowrap; color: var(--text); font-weight: 700; }
+.ref-sec td { color: var(--muted); }
+@media (max-width: 600px) { .ref-sec td:first-child { white-space: normal; } }
+.ref-sec .code-card { margin: 10px 0 4px; }
+.ref-sec .code-card pre { font-size: .84rem; }
+.ref-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.ref-meta span {
+  font-size: .78rem; font-weight: 700; color: var(--accent-strong);
+  background: var(--accent-soft); padding: 2px 10px; border-radius: 999px;
+}
+.ref-more { font-size: .92rem; margin-top: 14px; }
+.ref-more a { font-weight: 700; }
+
+/* the header carries Install + Reference + language on phones */
+@media (max-width: 420px) {
+  .site-header .wrap { gap: 8px; }
+  .logo { font-size: 1rem; gap: 8px; }
+  .nav { gap: 2px; }
+  .nav a { padding: 6px 6px; font-size: .88rem; }
+}
