@@ -553,7 +553,7 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
 
 ### 12.1 web_midi（2026-11-13）
 
-[mrbgems/picoruby-web_midi](../mrbgems/picoruby-web_midi/)（wasm のビルドだけに入れる、mruby のみ。picoruby-ui と同じく通常ディレクトリ）。
+[mrbgems/picoruby-web_midi](../mrbgems/picoruby-web_midi/)（wasm のビルドだけに入れる、mruby のみ。別リポジトリ kirikak2/picoruby-web_midi のサブモジュール）。
 
 - ページは Web MIDI の入力と出力を**名前で組にして 1 ポート**（スロット、最大 8）にし、VM の起動前に
   `web_midi_port()` で渡す。ポートは picoruby-midi の登録表の動的ビットを取り、入力はパケットソースとして
