@@ -56,12 +56,14 @@ export class MidoriDevice {
     return dev;
   }
 
-  constructor({ canvas, script, onOutput, onMidiOut }) {
+  constructor({ canvas, script, onOutput, onMidiOut, webMidiPorts, onWebMidiOut }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.script = script || '';
     this.onOutput = onOutput || (s => console.log(s));
     this.onMidiOut = onMidiOut || (() => {});
+    this.webMidiPorts = webMidiPorts || [];          // [{ slot, name, input, output, connected }]
+    this.onWebMidiOut = onWebMidiOut || (() => {});
     this.running = false;
     this.fingers = new Map();     // pointerId -> { id, x, y }
     this.pinned = new Map();      // Alt+click fingers that stay down
@@ -82,11 +84,18 @@ export class MidoriDevice {
 
     M.simPresent = (ptr, stride, x, y, w, h) => this._present(ptr, stride, x, y, w, h);
     M.simMidiOut = (role, cin, b1, b2, b3, timeUs) => this.onMidiOut(role, cin, b1, b2, b3, timeUs);
+    M.webMidiOut = (slot, cin, b1, b2, b3, timeUs) => this.onWebMidiOut(slot, cin, b1, b2, b3, timeUs);
     M.simStopScript = () => this.onOutput('[sim] stop requested', 'sys');
     M.simRequestScript = path => this.onOutput(`[sim] script requested: ${path}`, 'sys');
 
     this._touchBuf = M._malloc(MAX_FINGERS * 12);
     M._sim_boot();
+    // Before Ruby starts: its start-up lists these on the MIDI Devices screen
+    for (const p of this.webMidiPorts) {
+      M.ccall('web_midi_port', null, ['number', 'string', 'number', 'number'],
+              [p.slot, p.name, p.input ? 1 : 0, p.output ? 1 : 0]);
+      M._web_midi_connected(p.slot, p.connected ? 1 : 0);
+    }
     if (M.ccall('picorb_init', 'number', [], []) !== 0) {
       this.onOutput('[sim] PicoRuby failed to start', 'err');
       return;
@@ -114,6 +123,17 @@ export class MidoriDevice {
     if (!this.M) return;
     const p = toUsbPacket(bytes);
     if (p) this.M._sim_midi_in(role, p[0], p[1], p[2], p[3]);
+  }
+
+  // Midi from a named Web MIDI port (MIDIDevices.web_midi)
+  webMidiIn(slot, bytes) {
+    if (!this.M) return;
+    const p = toUsbPacket(bytes);
+    if (p) this.M._web_midi_in(slot, p[0], p[1], p[2], p[3]);
+  }
+
+  setWebMidiConnected(slot, on) {
+    if (this.M) this.M._web_midi_connected(slot, on ? 1 : 0);
   }
 
   setConnected(role, on) {

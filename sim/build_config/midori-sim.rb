@@ -51,4 +51,5 @@ MRuby::CrossBuild.new("midori-sim") do |conf|
   conf.gem "#{midori_gems}/picoruby-midi"
   conf.gem "#{midori_gems}/picoruby-midi-mml"
   conf.gem "#{midori_gems}/picoruby-ui"
+  conf.gem "#{midori_gems}/picoruby-web_midi"   # MIDIDevices.web_midi (wasm only)
 end

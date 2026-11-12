@@ -64,7 +64,7 @@
 <script type="module">
 import { MidoriDevice, fromUsbPacket } from './device.js';
 import { BuiltinSynth } from './synth.js';
-import { WebMidiRoles, ROLES } from './webmidi.js';
+import { WebMidi, ROLES } from './webmidi.js';
 
 const EXAMPLES = {
   'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
@@ -77,6 +77,29 @@ UI.pad(1, label: "C4") { dev.trigger(60, 110, duration: 400) }
 UI.pad(2, label: "E4") { dev.trigger(64, 110, duration: 400) }
 UI.pad(3, label: "G4") { dev.trigger(67, 110, duration: 400) }
 UI.knobs
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'Web MIDI': `# 「Web MIDI を使う」を押してから Run。ポートは名前（の一部）で選ぶ
+unless MIDIDevices.respond_to?(:web_midi)
+  raise "MIDIDevices.web_midi はシミュレーターだけの機能です"
+end
+MIDIDevices.web_midis.each { |p| puts p.inspect }
+
+port = MIDIDevices.web_midis.first
+if port
+  # ポートで弾いた音を内蔵音源（SAM2695 役）で鳴らし、鍵盤も光らせる
+  keys = UI::Keys.new(octaves: 2, low: 48, device: port)   # 画面の鍵盤 → ポートへ
+  MIDI.route(port, MIDIDevices.sam2695)
+  MIDI.route(port, keys)
+  MIDI.on(port, :note_on) { |m| puts "note #{m.note} vel #{m.velocity}" }
+  keys.show
+else
+  puts "Web MIDI のポートがありません"
+end
 
 loop do
   UI.process
@@ -122,7 +145,7 @@ end
 const $ = id => document.getElementById(id);
 const code = $('code'), log = $('log');
 const synth = new BuiltinSynth();
-const midi = new WebMidiRoles();
+const midi = new WebMidi();
 let device = null;
 
 const STORE = 'midori-sim/script';
@@ -157,29 +180,43 @@ function midiOut(role, cin, b1, b2, b3, timeUs) {
   const bytes = fromUsbPacket(cin, b1, b2, b3);
   if (!bytes) return;
   const at = timeUs / 1000 + LOOKAHEAD_MS;
-  if (midi.send(role, bytes, at)) return;
+  if (midi.sendRole(role, bytes, at)) return;
   if (role === 2 && synth.ctx) synth.message(bytes, synth.ctx.currentTime + (at - performance.now()) / 1000);
 }
+// MIDIDevices.web_midi("name") -> that Web MIDI output
+function webMidiOut(slot, cin, b1, b2, b3, timeUs) {
+  const bytes = fromUsbPacket(cin, b1, b2, b3);
+  if (bytes) midi.sendPort(slot, bytes, timeUs / 1000 + LOOKAHEAD_MS);
+}
 
-midi.onInput = (role, bytes) => { if (device) device.midiIn(role, bytes); };
+midi.onRoleInput = (role, bytes) => { if (device) device.midiIn(role, bytes); };
+midi.onPortInput = (slot, bytes) => { if (device) device.webMidiIn(slot, bytes); };
 
 async function run() {
   synth.resume();
   if (device) { device.stop(); synth.allOff(); }
   log.textContent = '';
   print('[sim] starting', 'sys');
-  device = await MidoriDevice.start({ canvas: $('screen'), script: code.value, onOutput: print, onMidiOut: midiOut });
+  device = await MidoriDevice.start({
+    canvas: $('screen'), script: code.value, onOutput: print, onMidiOut: midiOut,
+    webMidiPorts: midi.namedPorts, onWebMidiOut: webMidiOut,
+  });
   device.M.simVolume = (out, percent) => { if (out === 0) synth.setVolume(percent); };
-  for (const r of [0, 1]) device.setConnected(r, midi.connected(r));
+  for (const r of [0, 1]) device.setConnected(r, midi.roleConnected(r));
+  knownPorts = portNames();
 }
 
 $('run').onclick = run;
 $('stop').onclick = () => { if (device) { device.stop(); device = null; synth.allOff(); print('[sim] stopped', 'sys'); } };
 
+// The named ports the running device was started with: a new one needs a Run
+let knownPorts = '';
+function portNames() { return midi.namedPorts.map(p => p.name).join('\n'); }
+
 function renderPorts() {
   const fs = $('ports');
   fs.hidden = false;
-  fs.querySelectorAll('label').forEach(l => l.remove());
+  fs.querySelectorAll('label, p').forEach(l => l.remove());
   for (const role of ROLES) {
     const label = document.createElement('label');
     label.append(role.name);
@@ -190,18 +227,35 @@ function renderPorts() {
     if (role.id !== 2) for (const p of midi.inputPorts) inSel.add(new Option(`入力: ${p.name}`, p.id));
     for (const p of midi.outputPorts) outSel.add(new Option(`出力: ${p.name}`, p.id));
     inSel.disabled = role.id === 2;
-    inSel.value = midi.inputs[role.id]?.id || '';
-    outSel.value = midi.outputs[role.id]?.id || '';
-    inSel.onchange = () => { midi.setInput(role.id, inSel.value); if (device && role.id < 2) device.setConnected(role.id, midi.connected(role.id)); };
-    outSel.onchange = () => { midi.setOutput(role.id, outSel.value); if (device && role.id < 2) device.setConnected(role.id, midi.connected(role.id)); };
+    inSel.value = midi.roleInput[role.id] || '';
+    outSel.value = midi.roleOutput[role.id] || '';
+    const sync = () => { if (device && role.id < 2) device.setConnected(role.id, midi.roleConnected(role.id)); };
+    inSel.onchange = () => { midi.setRoleInput(role.id, inSel.value); sync(); };
+    outSel.onchange = () => { midi.setRoleOutput(role.id, outSel.value); sync(); };
     label.append(inSel, outSel);
     fs.append(label);
+  }
+  const ports = midi.namedPorts;
+  const names = document.createElement('p');
+  names.className = 'hint';
+  names.textContent = ports.length
+    ? `MIDIDevices.web_midi で使えるポート: ${ports.map(p => `"${p.name}"${p.connected ? '' : '（未接続）'}`).join(', ')}`
+    : 'Web MIDI のポートが見つかりません';
+  fs.append(names);
+  // A port opening or closing reaches the running device at once
+  if (device) for (const p of ports) device.setWebMidiConnected(p.slot, p.connected);
+  if (device && portNames() !== knownPorts) {
+    print('[sim] MIDI ポートが変わりました。Run し直すと MIDIDevices.web_midi と MIDI Devices 画面に反映されます', 'sys');
+    knownPorts = portNames();
   }
 }
 midi.onChange = () => { if (midi.access) renderPorts(); };
 $('midi').onclick = async () => {
-  try { await midi.enable(); $('midi').hidden = true; }
-  catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
+  try {
+    await midi.enable();
+    $('midi').hidden = true;
+    print('[sim] Web MIDI を有効にしました。ポートを Ruby から使うには Run し直してください', 'sys');
+  } catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
 };
 if (!midi.supported) $('midi').disabled = true;
 

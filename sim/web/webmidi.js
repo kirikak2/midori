@@ -1,7 +1,13 @@
-// Web MIDI ports in the device's roles (docs/WEB_SIMULATOR.md §5.1):
-//   role 0  USB-MIDI Host   (e.g. a keyboard on the computer)
-//   role 1  USB-MIDI Device (e.g. a DAW, through IAC / loopMIDI)
-//   role 2  SAM2695         (the built-in synth unless a Web MIDI output is chosen)
+// Web MIDI for the simulator.
+//
+// Two ways a port reaches the device (docs/WEB_SIMULATOR.md §5.1):
+//   - a role: the port stands in for one of the device's own connectors
+//       role 0  USB-MIDI Host   (e.g. a keyboard on the computer)
+//       role 1  USB-MIDI Device (e.g. a DAW, through IAC / loopMIDI)
+//       role 2  SAM2695         (the built-in synth unless an output is chosen)
+//   - by name: every port is also MIDIDevices.web_midi("name") in Ruby and a
+//     row / column of the MIDI Devices screen (picoruby-web_midi). Web MIDI
+//     lists inputs and outputs apart; one name = one port (slot).
 
 export const ROLES = [
   { id: 0, name: 'USB-MIDI Host' },
@@ -9,13 +15,17 @@ export const ROLES = [
   { id: 2, name: 'SAM2695' },
 ];
 
-export class WebMidiRoles {
+export const MAX_NAMED_PORTS = 8;   // WEB_MIDI_MAX_PORTS
+
+export class WebMidi {
   constructor() {
     this.access = null;
-    this.inputs = [null, null, null];    // MIDIInput per role
-    this.outputs = [null, null, null];   // MIDIOutput per role
-    this.onInput = () => {};             // (role, bytes, timeStamp)
+    this.roleInput = [null, null, null];    // MIDIInput id per role
+    this.roleOutput = [null, null, null];   // MIDIOutput id per role
+    this.onRoleInput = () => {};            // (role, bytes, timeStamp)
+    this.onPortInput = () => {};            // (slot, bytes, timeStamp)
     this.onChange = () => {};
+    this._slots = [];                       // names, in slot order (kept while the page lives)
   }
 
   get supported() { return typeof navigator !== 'undefined' && !!navigator.requestMIDIAccess; }
@@ -24,32 +34,56 @@ export class WebMidiRoles {
   async enable() {
     if (!this.supported) throw new Error('Web MIDI is not available in this browser');
     this.access = await navigator.requestMIDIAccess({ sysex: false });
-    this.access.onstatechange = () => this.onChange();
+    this.access.onstatechange = () => { this._listen(); this.onChange(); };
+    this._listen();
     this.onChange();
   }
 
   get inputPorts() { return this.access ? [...this.access.inputs.values()] : []; }
   get outputPorts() { return this.access ? [...this.access.outputs.values()] : []; }
 
-  setInput(role, id) {
-    const old = this.inputs[role];
-    if (old) old.onmidimessage = null;
-    const port = id ? this.inputPorts.find(p => p.id === id) : null;
-    this.inputs[role] = port || null;
-    if (port) port.onmidimessage = ev => this.onInput(role, ev.data, ev.timeStamp);
-    this.onChange();
+  // The named ports, one per name, with a stable slot each:
+  // [{ slot, name, input, output, connected }]
+  get namedPorts() {
+    const byName = new Map();
+    for (const p of this.inputPorts) byName.set(p.name, { ...(byName.get(p.name) || {}), input: p });
+    for (const p of this.outputPorts) byName.set(p.name, { ...(byName.get(p.name) || {}), output: p });
+    for (const name of byName.keys()) {
+      if (!this._slots.includes(name) && this._slots.length < MAX_NAMED_PORTS) this._slots.push(name);
+    }
+    return this._slots.map((name, slot) => {
+      const e = byName.get(name) || {};
+      const connected = !!((e.input && e.input.state === 'connected') || (e.output && e.output.state === 'connected'));
+      return { slot, name, input: e.input || null, output: e.output || null, connected };
+    });
   }
 
-  setOutput(role, id) {
-    this.outputs[role] = id ? this.outputPorts.find(p => p.id === id) || null : null;
-    this.onChange();
+  _listen() {
+    for (const p of this.inputPorts) {
+      p.onmidimessage = ev => {
+        for (const role of [0, 1]) if (this.roleInput[role] === p.id) this.onRoleInput(role, ev.data, ev.timeStamp);
+        const slot = this._slots.indexOf(p.name);
+        if (slot >= 0) this.onPortInput(slot, ev.data, ev.timeStamp);
+      };
+    }
   }
 
-  connected(role) { return !!(this.inputs[role] || this.outputs[role]); }
+  setRoleInput(role, id) { this.roleInput[role] = id || null; this.onChange(); }
+  setRoleOutput(role, id) { this.roleOutput[role] = id || null; this.onChange(); }
+  roleConnected(role) { return !!(this.roleInput[role] || this.roleOutput[role]); }
 
   // Sends at a page time (performance.now() milliseconds)
-  send(role, bytes, atMs) {
-    const out = this.outputs[role];
+  sendRole(role, bytes, atMs) {
+    const id = this.roleOutput[role];
+    const out = id && this.access ? this.access.outputs.get(id) : null;
+    if (!out) return false;
+    out.send(bytes, atMs);
+    return true;
+  }
+
+  sendPort(slot, bytes, atMs) {
+    const name = this._slots[slot];
+    const out = this.outputPorts.find(p => p.name === name);
     if (!out) return false;
     out.send(bytes, atMs);
     return true;

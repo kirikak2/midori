@@ -11,7 +11,18 @@ BOARD=${BOARD:-tab5}
 PICORUBY=$ROOT/components/midori-runtime/picoruby
 LIBMRUBY=$PICORUBY/build/midori-sim/lib/libmruby.a
 
-# Gem mrblib / bindings changed? rake only rebuilds what is out of date
+# rake does not notice a changed gem mrblib (the same as the device build,
+# CLAUDE.md): drop the build of a MIDoRI gem whose mrblib or binding is newer
+# than libmruby.a, so rake makes it again
+if [[ -f "$LIBMRUBY" ]]; then
+  for gem in "$ROOT"/mrbgems/picoruby-*; do
+    name=$(basename "$gem")
+    [[ -d "$PICORUBY/build/midori-sim/mrbgems/$name" ]] || continue
+    if [[ -n $(find "$gem/mrblib" "$gem/src" -newer "$LIBMRUBY" -type f 2>/dev/null | head -1) ]]; then
+      rm -rf "$PICORUBY/build/midori-sim/mrbgems/$name"
+    fi
+  done
+fi
 (cd "$PICORUBY" && MRUBY_CONFIG=$SIM/build_config/midori-sim.rb rake -m -j8 "$LIBMRUBY" >/dev/null)
 BOARD=$BOARD "$SIM/build_c.sh" >/dev/null
 
@@ -19,7 +30,7 @@ OUT=$SIM/web/wasm
 mkdir -p "$OUT"
 EXPORTS='["_picorb_init","_picorb_create_task","_picorb_create_task_with_filename","_mrb_tick_wasm","_mrb_run_step","_mrb_run_step_status","_mrb_gc_scheduler_pending_wasm","_malloc","_free",
 "_sim_boot","_sim_frame","_sim_touch","_sim_rtos_poll","_sim_screen_width","_sim_screen_height",
-"_sim_midi_in","_sim_midi_connect","_sim_scripts_clear","_sim_scripts_add","_sim_scripts_done","_sim_set_current_script"]'
+"_sim_midi_in","_sim_midi_connect","_web_midi_port","_web_midi_connected","_web_midi_in","_sim_scripts_clear","_sim_scripts_add","_sim_scripts_done","_sim_set_current_script"]'
 em++ -g0 -O2 \
   -fwasm-exceptions -sSUPPORT_LONGJMP=wasm \
   -sWASM=1 -sEXPORT_ES6=1 -sMODULARIZE=1 -sEXPORT_NAME=createMidoriSim \

@@ -189,7 +189,7 @@ picoruby-midi の登録表（16 ビット）はそのまま使う。ports/wasm �
 | SAM2695（UART 0x02） | **内蔵音源**（WebAudio の GM 風シンセ）。Ports パネルで Web MIDI 出力に振り替えも可 | `MIDIDevices.sam2695` |
 | AMY | 段階 5 で AMY の wasm 版（AMY は Emscripten ビルドを持つ）。それまでは内蔵音源 | `MIDIDevices.amy` |
 | Script / UI::Keys / Tempo / Tombola / XYPad / Sequencer | 実機と同じ（C のまま動く） | 同じ |
-| その他の Web MIDI ポート | 動的ビットで登録（`Web: <ポート名>`）。MIDI Devices 画面に行・列として出る | `MIDIDevices.web_midi("名前")`（gem `picoruby-web_midi`、wasm のみ。§5.2） |
+| その他の Web MIDI ポート | 動的ビットで登録（表示名はポート名）。MIDI Devices 画面に行・列として出る（§12.1） | `MIDIDevices.web_midi("名前")`（gem `picoruby-web_midi`、wasm のみ。§5.2） |
 
 ### 5.2 スクリプトの互換性
 
@@ -549,5 +549,23 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   ブロックに値が届く）、Layout DSL（`areas` + knob + 入れ子の grid の pad。タップで SAM2695 役へノート）、Keys
   （C++ 側の発音経路で SAM2695 役へ）、Sequencer の起動
 - **サイズ**: wasm 1.85 MB（gzip 前）、JS 132 KB。LovyanGFX と main/ui で約 0.3 MB、残りは PicoRuby
-- **まだ**: ブラウザでの動作確認（この環境にブラウザが無い）、仮想 `/sd` と Scripts、`MIDIDevices.web_midi`
-  （picoruby-web_midi）、AMY、SysEx、CoreS3、デザイナー、CI
+- **まだ**: 仮想 `/sd` と Scripts、AMY、SysEx、CoreS3、デザイナー、CI（ブラウザでの動作確認は済み）
+
+### 12.1 web_midi（2026-11-13）
+
+[mrbgems/picoruby-web_midi](../mrbgems/picoruby-web_midi/)（wasm のビルドだけに入れる、mruby のみ。picoruby-ui と同じく通常ディレクトリ）。
+
+- ページは Web MIDI の入力と出力を**名前で組にして 1 ポート**（スロット、最大 8）にし、VM の起動前に
+  `web_midi_port()` で渡す。ポートは picoruby-midi の登録表の動的ビットを取り、入力はパケットソースとして
+  入力タスクが読む。だから `MIDI.route` / `MIDI.on` / filter / MIDI Devices 画面が実機のトランスポートと同じに効く
+- Ruby: `MIDIDevices.web_midi("名前")`（完全一致、なければ部分一致・大小無視）/ `MIDIDevices.web_midis` / `WebMIDI::Port`
+- 起動時（`load_plugins` の位置 = 保存済みパッチの前）に `WebMIDI.register_devices` が MIDI Devices 画面へ載せる。
+  キーは名前の FNV-1a（`w` + 16 進 8 桁。画面のキーは 12 バイトまでで、「IAC Driver Bus 1 / 2」は先頭が同じ）。
+  入力だけのポートは出力の列に出さない（picoruby-ui に `register_builtin(..., output: false)` を追加）
+- 「役」（USB-MIDI Host / Device / SAM2695 の代わり）への割り当ては従来どおりで、同じポートを役と名前の両方で使ってもよい
+- ポートの増減は次の Run から（開閉は実行中の VM にすぐ届く）
+- **picoruby-midi の修正**: filter（`MIDI.on` など）がある間の `MIDI.sleep_ms` は C のキュー待ちで寝るが、シミュレーターの
+  C は待てずに即座に戻り、Ruby の時計はページの tick でしか進まないので抜けられなかった。`MIDI_Filter_can_wait()`
+  （`MIDI_INPUT_POLLED` では false）を足し、待てないホストでは VM の中で 5 ms ずつ寝てからキューを見る
+- **シミュレーターのビルド**: rake は gem の mrblib の変更に気付かない（実機と同じ）。`sim/build.sh` は libmruby.a より
+  新しい mrblib / src を持つ MIDoRI の gem のビルドを消してから rake を呼ぶ

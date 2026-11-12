@@ -4,8 +4,12 @@
 
 $midori_mode = :script
 
-# No /sd/plugins yet (the virtual /sd comes later)
-def load_plugins; end
+# setup_midi_devices calls this between the built-ins and the saved patches.
+# No /sd/plugins yet (the virtual /sd comes later); the page's Web MIDI ports
+# are listed here, so patches saved to them are routed again.
+def load_plugins
+  WebMIDI.register_devices
+end
 
 setup_midi_devices
 setup_sequencer

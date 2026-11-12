@@ -19,15 +19,18 @@ cd sim/web && python3 -m http.server 8080
 `sim/build.sh` runs rake for PicoRuby (`build_config/midori-sim.rb` →
 `components/midori-runtime/picoruby/build/midori-sim/lib/libmruby.a`), then
 `build_c.sh` for the C/C++ half (`out/<board>/libmidori_sim.a`), and links
-them. A changed gem `mrblib/*.rb` or binding is picked up by rake; a changed
-port or `main/ui` file by `build_c.sh` (it rebuilds what is newer than its
-object).
+them. rake does not notice a changed gem `mrblib/*.rb` (as on the device), so
+`build.sh` first drops the build of a MIDoRI gem whose mrblib or binding is
+newer than libmruby.a. A changed port or `main/ui` file is picked up by
+`build_c.sh` (it rebuilds what is newer than its object).
 
 Node smoke tests (no browser needed):
 
 ```bash
 node sim/test/node_knob.mjs                         # a Ruby knob turned by a drag
 node sim/test/run_script.mjs script.rb shot.png 400,400   # run, tap, screenshot
+PORTS='Keystation:i,IAC Driver Bus 1:io' node sim/test/run_script.mjs ...   # with fake Web MIDI ports
+node sim/test/node_web_midi.mjs                     # MIDIDevices.web_midi: route, MIDI.on, send
 ```
 
 ## Layout
@@ -66,6 +69,7 @@ node sim/test/run_script.mjs script.rb shot.png 400,400   # run, tap, screenshot
 ## Status
 
 Stage 0 of docs/WEB_SIMULATOR.md §9: Tab5 only; Home, Knobs, Pads, Keys,
-Layout run with their Ruby; MIDI out to the built-in synth / Web MIDI. Not yet:
-virtual `/sd` and Scripts, `MIDIDevices.web_midi` (picoruby-web_midi), AMY,
-the designer, SysEx, CI.
+Layout run with their Ruby; MIDI out to the built-in synth / Web MIDI; every
+Web MIDI port is also `MIDIDevices.web_midi("name")` and a MIDI Devices row /
+column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1). Not yet:
+virtual `/sd` and Scripts, AMY, the designer, SysEx, CI.

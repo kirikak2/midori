@@ -174,7 +174,7 @@ PicoRuby を組み込む IDF コンポーネントは [components/midori-runtime
 
 MIDI 系および midori 固有の mrbgem は、picoruby サブモジュールの外側、
 リポジトリ直下の [mrbgems/](mrbgems/) に置く（それぞれ独立した git サブモジュール、
-`picoruby-ui` のみ通常ディレクトリ）：
+`picoruby-ui` と `picoruby-web_midi` は通常ディレクトリ）：
 
 | gem | 内容 |
 |-----|------|
@@ -190,6 +190,7 @@ MIDI 系および midori 固有の mrbgem は、picoruby サブモジュール�
 | `mrbgems/picoruby-dfrobot_rotary_encoder` | DFRobot SEN0502 |
 | `mrbgems/picoruby-filesystem-fat` | FAT（SD カード `/sd` 用。upstream で削除された gem を引き取ったもの） |
 | `mrbgems/picoruby-amy` | AMY ソフトシンセ（P4 ボードのみ。中で `lib/amy`＝shorepine/amy をサブモジュールにしている） |
+| `mrbgems/picoruby-web_midi` | Web MIDI のポートをトランスポートに（Web シミュレーター `sim/` の wasm ビルドだけ。通常ディレクトリ） |
 
 これらは upstream picoruby には含めない方針のため、`components/midori-runtime/picoruby/mrbgems/`
 から移動した。ビルドへの取り込みは以下の 2 箇所：

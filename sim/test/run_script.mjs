@@ -1,6 +1,7 @@
 // Runs a Ruby script in the simulator under Node, as the page does, taps
 // the given points and saves a screenshot.
 //   node sim/test/run_script.mjs script.rb out.png [x,y ...]
+// PORTS='Keystation:i,IAC Driver Bus 1:io' adds fake Web MIDI ports.
 import createMidoriSim from '../web/wasm/midori-sim-tab5.js';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
@@ -25,6 +26,12 @@ M.simPresent = (ptr, stride, x, y, w, h) => {
 const midi = [];
 M.simMidiOut = (role, cin, b1, b2, b3) => midi.push([role, b1.toString(16), b2, b3].join(' '));
 M._sim_boot();
+(process.env.PORTS || '').split(',').filter(Boolean).forEach((e, slot) => {
+  const [name, io = 'io'] = e.split(':');
+  M.ccall('web_midi_port', null, ['number', 'string', 'number', 'number'], [slot, name, io.includes('i') ? 1 : 0, io.includes('o') ? 1 : 0]);
+  M._web_midi_connected(slot, 1);
+});
+M.webMidiOut = (slot, cin, b1, b2, b3) => midi.push(['port' + slot, b1.toString(16), b2, b3].join(' '));
 M.ccall('picorb_init', 'number', [], []);
 M.ccall('picorb_create_task_with_filename', 'number', ['string', 'string'], [src, 'script.rb']);
 
