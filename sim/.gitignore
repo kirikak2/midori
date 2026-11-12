@@ -1,0 +1,3 @@
+# Build products (sim/build.sh)
+out/
+web/wasm/

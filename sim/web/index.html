@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDoRI Simulator</title>
+<style>
+  :root {
+    --bg: #f6f7f6; --fg: #1d211e; --muted: #5b625d; --panel: #ffffff; --line: #d7dcd8;
+    --accent: #1f8a4c; --accent-fg: #ffffff; --code-bg: #fbfcfb; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
+      --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
+    --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  button, select { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  textarea { width: 100%; height: 60vh; min-height: 280px; resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--fg); tab-size: 2; }
+  .device { background: #000; border-radius: 14px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; border-radius: 4px; background: #000; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  #log { height: 22vh; min-height: 120px; overflow: auto; margin: 12px 0 0; padding: 8px 10px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+  #log .err { color: var(--err); }
+  #log .sys { color: var(--muted); }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; }
+  fieldset label { display: grid; grid-template-columns: 9em 1fr 1fr; gap: 8px; align-items: center; margin: 4px 0; }
+  fieldset select { width: 100%; min-width: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MIDoRI Simulator <small style="color:var(--muted);font-weight:normal">Tab5 · 試作</small></h1>
+  <button id="run" class="primary">▶ Run</button>
+  <button id="stop">■ Stop</button>
+  <select id="examples" aria-label="Examples"></select>
+  <button id="midi">Web MIDI を使う</button>
+</header>
+<main>
+  <section>
+    <textarea id="code" spellcheck="false" aria-label="Ruby script"></textarea>
+    <p class="hint">Run のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。</p>
+  </section>
+  <section>
+    <div class="device"><canvas id="screen" width="1280" height="720" aria-label="MIDoRI screen"></canvas></div>
+    <p class="hint">クリック / ドラッグ = 指。Alt+クリックで指を置いたままにできます（もう一度 Alt+クリックで離す）。</p>
+    <fieldset id="ports" hidden>
+      <legend>MIDI ポートの割り当て</legend>
+    </fieldset>
+    <div id="log" role="log" aria-live="polite"></div>
+  </section>
+</main>
+<script type="module">
+import { MidoriDevice, fromUsbPacket } from './device.js';
+import { BuiltinSynth } from './synth.js';
+import { WebMidiRoles, ROLES } from './webmidi.js';
+
+const EXAMPLES = {
+  'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
+dev = MIDI::Device.new(MIDIDevices.sam2695)
+
+UI.knob(1, label: "Cutoff", color: :cyan, value: 64) do |v|
+  dev.control_change(74, v.to_i)
+end
+UI.pad(1, label: "C4") { dev.trigger(60, 110, duration: 400) }
+UI.pad(2, label: "E4") { dev.trigger(64, 110, duration: 400) }
+UI.pad(3, label: "G4") { dev.trigger(67, 110, duration: 400) }
+UI.knobs
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'Keys': `keys = UI::Keys.new(octaves: 2, low: 48, device: MIDIDevices.sam2695)
+keys.set_color([48, 52, 55, 60, 64, 67], :blue)
+keys.show
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'Layout': `dev = MIDI::Device.new(MIDIDevices.sam2695)
+
+layout = UI.layout("Perform", cols: 4, rows: 3) do
+  areas <<~GRID
+    k1 k2 k3 k4
+    p  p  p  p
+    p  p  p  p
+  GRID
+  knob area: :k1, label: "Cutoff", value: 64 do |v| dev.control_change(74, v.to_i) end
+  knob area: :k2, label: "Volume", value: 100 do |v| dev.control_change(7, v.to_i) end
+  knob area: :k3, label: "Pan", origin: :center, value: 64 do |v| dev.control_change(10, v.to_i) end
+  knob area: :k4, label: "Prog", value: 0 do |v| dev.program_change(v.to_i) end
+  grid(area: :p, cols: 4, rows: 2) do
+    8.times do |i|
+      pad col: i % 4, row: i / 4, label: "N#{60 + i * 2}" do dev.trigger(60 + i * 2, 110, duration: 300) end
+    end
+  end
+end
+layout.show
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+};
+
+const $ = id => document.getElementById(id);
+const code = $('code'), log = $('log');
+const synth = new BuiltinSynth();
+const midi = new WebMidiRoles();
+let device = null;
+
+const STORE = 'midori-sim/script';
+function loadSaved() { try { return localStorage.getItem(STORE); } catch (e) { return null; } }
+function save() { try { localStorage.setItem(STORE, code.value); } catch (e) {} }
+
+for (const name of Object.keys(EXAMPLES)) $('examples').add(new Option(`Example: ${name}`, name));
+$('examples').add(new Option('Examples…', ''), 0);
+$('examples').value = '';
+$('examples').onchange = e => { if (e.target.value) { code.value = EXAMPLES[e.target.value]; save(); run(); } e.target.value = ''; };
+code.value = loadSaved() || EXAMPLES['Knobs'];
+code.addEventListener('input', save);
+code.addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+});
+
+function print(s, kind = 'out') {
+  if (kind === 'out' && /^[IWD] \(/.test(s)) return;   // ESP-IDF style C logs: kept out of the way
+  const line = document.createElement('div');
+  if (kind !== 'out' || /^E \(/.test(s)) line.className = kind === 'sys' ? 'sys' : 'err';
+  line.textContent = s;
+  log.append(line);
+  while (log.childElementCount > 500) log.firstChild.remove();
+  log.scrollTop = log.scrollHeight;
+}
+
+// Device -> outside. The C side stamps esp_timer microseconds (performance.now()
+// based), sent a little ahead so the page's timer jitter does not reach the notes.
+const LOOKAHEAD_MS = 10;
+function midiOut(role, cin, b1, b2, b3, timeUs) {
+  const bytes = fromUsbPacket(cin, b1, b2, b3);
+  if (!bytes) return;
+  const at = timeUs / 1000 + LOOKAHEAD_MS;
+  if (midi.send(role, bytes, at)) return;
+  if (role === 2 && synth.ctx) synth.message(bytes, synth.ctx.currentTime + (at - performance.now()) / 1000);
+}
+
+midi.onInput = (role, bytes) => { if (device) device.midiIn(role, bytes); };
+
+async function run() {
+  synth.resume();
+  if (device) { device.stop(); synth.allOff(); }
+  log.textContent = '';
+  print('[sim] starting', 'sys');
+  device = await MidoriDevice.start({ canvas: $('screen'), script: code.value, onOutput: print, onMidiOut: midiOut });
+  device.M.simVolume = (out, percent) => { if (out === 0) synth.setVolume(percent); };
+  for (const r of [0, 1]) device.setConnected(r, midi.connected(r));
+}
+
+$('run').onclick = run;
+$('stop').onclick = () => { if (device) { device.stop(); device = null; synth.allOff(); print('[sim] stopped', 'sys'); } };
+
+function renderPorts() {
+  const fs = $('ports');
+  fs.hidden = false;
+  fs.querySelectorAll('label').forEach(l => l.remove());
+  for (const role of ROLES) {
+    const label = document.createElement('label');
+    label.append(role.name);
+    const inSel = document.createElement('select');
+    const outSel = document.createElement('select');
+    inSel.add(new Option(role.id === 2 ? '（入力なし）' : '入力: なし', ''));
+    outSel.add(new Option(role.id === 2 ? '出力: 内蔵音源' : '出力: なし', ''));
+    if (role.id !== 2) for (const p of midi.inputPorts) inSel.add(new Option(`入力: ${p.name}`, p.id));
+    for (const p of midi.outputPorts) outSel.add(new Option(`出力: ${p.name}`, p.id));
+    inSel.disabled = role.id === 2;
+    inSel.value = midi.inputs[role.id]?.id || '';
+    outSel.value = midi.outputs[role.id]?.id || '';
+    inSel.onchange = () => { midi.setInput(role.id, inSel.value); if (device && role.id < 2) device.setConnected(role.id, midi.connected(role.id)); };
+    outSel.onchange = () => { midi.setOutput(role.id, outSel.value); if (device && role.id < 2) device.setConnected(role.id, midi.connected(role.id)); };
+    label.append(inSel, outSel);
+    fs.append(label);
+  }
+}
+midi.onChange = () => { if (midi.access) renderPorts(); };
+$('midi').onclick = async () => {
+  try { await midi.enable(); $('midi').hidden = true; }
+  catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
+};
+if (!midi.supported) $('midi').disabled = true;
+
+run();
+</script>
+</body>
+</html>

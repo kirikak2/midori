@@ -296,6 +296,8 @@ rescue => e
   puts "AMY panel setup failed: #{e.message}"
 end
 
+# ---- The MIDoRI simulator (sim/build.sh) takes this file up to here: the
+# ---- part above must not depend on the SD card, ScriptManager or the modes.
 # Plugins: Ruby kept in /sd/plugins, loaded at every start, in every mode.
 # A plugin may define anything -- named MIDI filters (MIDI.register_filter,
 # docs/MIDI_FILTER_REGISTRY.md), MIDI devices (UI::MIDIDevices.register /
