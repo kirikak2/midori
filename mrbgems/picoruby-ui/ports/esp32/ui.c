@@ -884,6 +884,11 @@ int picoruby_ui_mididev_register(const char *key, const char *name, int bit,
     return ui_mididev_register(key, name, (midi_tmask_t)bit, (uint16_t)color, builtin);
 }
 
+void picoruby_ui_mididev_set_no_out(const char *key)
+{
+    ui_mididev_set_no_out(key);
+}
+
 bool picoruby_ui_mididev_unregister(int bit)
 {
     return ui_mididev_unregister((midi_tmask_t)bit);

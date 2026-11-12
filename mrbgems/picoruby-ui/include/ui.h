@@ -284,6 +284,8 @@ void picoruby_ui_tempo_set_sync(bool on);
 int  picoruby_ui_mididev_register(const char *key, const char *name, int bit,
                                   int color, bool builtin);
 bool picoruby_ui_mididev_unregister(int bit);
+/* Mark built-in `key` as only sending: no MIDI OUT column */
+void picoruby_ui_mididev_set_no_out(const char *key);
 bool picoruby_ui_mididev_activate(const char *key, int bit);
 int  picoruby_ui_mididev_count(void);
 /* Copies entry `index`: its bit, flags (1 built-in, 2 standby), key and name */
