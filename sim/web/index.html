@@ -28,8 +28,11 @@
   main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 16px; padding: 16px; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
   textarea { width: 100%; height: 60vh; min-height: 280px; resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--fg); tab-size: 2; }
-  .device { background: #000; border-radius: 14px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+  .device { background: #000; border-radius: 14px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); margin: 0 auto; }
   canvas { display: block; width: 100%; height: auto; touch-action: none; border-radius: 4px; background: #000; }
+  /* CoreS3: a 2" panel, drawn at up to 2x with its pixels kept sharp */
+  .device[data-board="cores3"] { max-width: 664px; border-radius: 22px; padding: 20px; }
+  .device[data-board="cores3"] canvas { image-rendering: pixelated; }
   .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   #log { height: 22vh; min-height: 120px; overflow: auto; margin: 12px 0 0; padding: 8px 10px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
   #log .err { color: var(--err); }
@@ -41,7 +44,8 @@
 </head>
 <body>
 <header>
-  <h1>MIDoRI Simulator <small style="color:var(--muted);font-weight:normal">Tab5 · 試作</small></h1>
+  <h1>MIDoRI Simulator <small style="color:var(--muted);font-weight:normal">試作</small></h1>
+  <select id="board" aria-label="Board"></select>
   <button id="run" class="primary">▶ Run</button>
   <button id="stop">■ Stop</button>
   <select id="examples" aria-label="Examples"></select>
@@ -53,7 +57,7 @@
     <p class="hint">Run のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。</p>
   </section>
   <section>
-    <div class="device"><canvas id="screen" width="1280" height="720" aria-label="MIDoRI screen"></canvas></div>
+    <div class="device" id="device"><canvas id="screen" width="1280" height="720" aria-label="MIDoRI screen"></canvas></div>
     <p class="hint">クリック / ドラッグ = 指。Alt+クリックで指を置いたままにできます（もう一度 Alt+クリックで離す）。</p>
     <fieldset id="ports" hidden>
       <legend>MIDI ポートの割り当て</legend>
@@ -69,7 +73,7 @@ const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
   .then(r => (r.ok ? r.json() : {})).then(j => String(j.id || Date.now()))
   .catch(() => String(Date.now()));
 const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
-const [{ MidoriDevice }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES }] =
+const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES }] =
   await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js')]);
 
 const EXAMPLES = {
@@ -114,6 +118,7 @@ end
 `,
   'AMY': `# Tab5 の UI モードと同じ AMY パネル（Home の「AMY」タイル）をスクリプトから開く。
 # 「+」でパートを足し、タブごとにプリセット・チャンネル・エンベロープ・ノブ・鍵盤
+raise "AMY は Tab5 / CrowPanel だけです（ボードを Tab5 にしてください）" unless BoardConfig::HAS_AMY
 panel = UI::AMYPanel.new(engine: Proc.new { MIDIDevices.amy })
 panel.show
 
@@ -223,6 +228,20 @@ function webMidiOut(slot, cin, b1, b2, b3, timeUs) {
 midi.onRoleInput = (role, bytes) => { if (device) device.midiIn(role, bytes); };
 midi.onPortInput = (slot, bytes) => { if (device) device.webMidiIn(slot, bytes); };
 
+// The board (one wasm each, sim/build.sh), remembered for this viewer
+const BOARD_STORE = 'midori-sim/board';
+let board = DEFAULT_BOARD;
+try { const b = localStorage.getItem(BOARD_STORE); if (BOARDS[b]) board = b; } catch (e) {}
+for (const [id, b] of Object.entries(BOARDS)) $('board').add(new Option(`${b.name} (${b.width}x${b.height})`, id));
+$('board').value = board;
+$('device').dataset.board = board;
+$('board').onchange = () => {
+  board = $('board').value;
+  try { localStorage.setItem(BOARD_STORE, board); } catch (e) {}
+  $('device').dataset.board = board;
+  boot('ui');   // another board is another device: it starts from power-up
+};
+
 // Starts the device as the Supervisor does: 'ui' (at power-up, and when a
 // script ends or is stopped) or 'script' (Run), each in a fresh VM
 let starting = null;
@@ -233,9 +252,9 @@ async function boot(mode) {
     await startAudio();
     if (device) { device.stop(); synth.allOff(); amyAudio.reset(); device = null; }
     if (mode === 'script') log.textContent = '';
-    print(mode === 'ui' ? `[sim] UI mode (build ${BUILD})` : `[sim] running the script (build ${BUILD})`, 'sys');
+    print(`[sim] ${BOARDS[board].name}: ${mode === 'ui' ? 'UI mode' : 'running the script'} (build ${BUILD})`, 'sys');
     device = await MidoriDevice.start({
-      canvas: $('screen'), mode, script: code.value, onOutput: print, onMidiOut: midiOut,
+      canvas: $('screen'), board, mode, script: code.value, onOutput: print, onMidiOut: midiOut,
       webMidiPorts: midi.namedPorts, onWebMidiOut: webMidiOut, amyAudio,
       onScriptEnd: why => { print(why === 'stop' ? '[sim] stopped' : '[sim] script ended', 'sys'); boot('ui'); },
     });

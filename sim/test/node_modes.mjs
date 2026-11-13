@@ -1,7 +1,8 @@
 // Node test of the device's modes: UI mode (Home with the AMY tile, as the
 // Tab5), a script ending (the hook the page uses to go back to UI mode).
 //   node sim/test/node_modes.mjs [ui|script] [screenshot.png] [x,y ...]
-import createMidoriSim from '../web/wasm/midori-sim-tab5.js';
+const BOARD = process.env.BOARD || 'tab5';
+const { default: createMidoriSim } = await import(`../web/wasm/midori-sim-${BOARD}.js`);
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 
@@ -9,8 +10,8 @@ const [mode = 'ui', shot, ...taps] = process.argv.slice(2);
 const wasm = new URL('../web/wasm/', import.meta.url);
 const r = n => fs.readFileSync(new URL(n, wasm), 'utf8');
 const user = 'puts "hello from the script"';
-const src = mode === 'ui' ? `${r('sim_boot-tab5.rb')}\n${r('sim_ui.rb')}`
-  : `${r('sim_boot-tab5.rb')}\n${r('sim_script.rb')}\nbegin\n${user}\nrescue Exception => e\n  puts "Script error: #{e.message}"\nend\n${r('sim_tail.rb')}`;
+const src = mode === 'ui' ? `${r(`sim_boot-${BOARD}.rb`)}\n${r('sim_ui.rb')}`
+  : `${r(`sim_boot-${BOARD}.rb`)}\n${r('sim_script.rb')}\nbegin\n${user}\nrescue Exception => e\n  puts "Script error: #{e.message}"\nend\n${r('sim_tail.rb')}`;
 let ended = 0;
 globalThis.__midoriSim = { scriptEnded: () => { ended++; } };
 const M = await createMidoriSim({ print: s => { if (!/^[ID] \(/.test(s)) console.log('[out]', s); }, printErr: s => console.log('[err]', s) });

@@ -549,7 +549,7 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   ブロックに値が届く）、Layout DSL（`areas` + knob + 入れ子の grid の pad。タップで SAM2695 役へノート）、Keys
   （C++ 側の発音経路で SAM2695 役へ）、Sequencer の起動
 - **サイズ**: wasm 1.85 MB（gzip 前）、JS 132 KB。LovyanGFX と main/ui で約 0.3 MB、残りは PicoRuby
-- **まだ**: 仮想 `/sd` と Scripts、CoreS3、デザイナー、CI（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4）
+- **まだ**: 仮想 `/sd` と Scripts、デザイナー、CI（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4、CoreS3 は §12.5）
 
 ### 12.1 web_midi（2026-11-13）
 
@@ -615,3 +615,15 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 - `MIDI.on` / filter はチャンネルメッセージとリアルタイムだけで、SysEx は Ruby に届かない（実機も同じ。Ruby で受けるのは非推奨の
   `MIDI::Input` の `:sysex` だけ）
 - 試験: `node sim/test/node_sysex.mjs`（ルート経由の 1 KB のダンプ、`send_sysex` → 名前付きポート / USB-MIDI Device 役、3 バイトの SysEx）
+
+### 12.5 CoreS3（2026-11-14）
+
+- 画面の大きさと配置は main/ui のビルド時の定数（`ui_common.h`。CoreS3 は既定の分岐 = 320x240）なので、**ボードごとに wasm を作る**。
+  `sim/shim/board/cores3/sdkconfig.h`（`CONFIG_USB_MIDI_BOARD_M5STACK_CORES3`、USB は既定の host モード）と
+  `sim/mrblib/board_config_cores3.rb`（SAM2695 17 / 18、USB-MIDI Host あり・Device なし、AMY なし）を足しただけで、
+  main/ui・gem・Ruby は Tab5 と同じソース。libmruby.a（Ruby 側）は共有
+- `sim/build.sh` は既定で両方（`BOARDS="tab5 cores3"`）、`BOARDS=cores3 sim/build.sh` で 1 つ。wasm はどちらも約 2.37 MB
+  （CoreS3 にも AMY のエンジンは入っているが使わない。外せば小さくなる）
+- ページ: ボードの選択（ビューアごとに覚える）。切り替えると新しい VM で UI モードから起動し直す（別のデバイスなので）。CoreS3 は
+  最大 2 倍・`image-rendering: pixelated` で表示。CoreS3 の USB-MIDI Device 役は、実機の host モードと同じく使われない
+- 確認（Node）: Home（AMY のタイルなし）、Knobs（6 個 + バンク A〜D）、Layout の例（パッドのタップで SAM2695 役へ）が実機の配置で出る

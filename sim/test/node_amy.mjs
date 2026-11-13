@@ -22,7 +22,9 @@ loop do
   MIDI.sleep_ms 10
 end
 `;
-const src = `${boot}\nbegin\n${user}\nrescue Exception => e\n  puts "Script error: #{e.class}: #{e.message}"\nend\n${tail}`;
+const script = fs.readFileSync(new URL('sim_script.rb', wasm), 'utf8');
+globalThis.__midoriSim = { scriptEnded() {} };
+const src = `${boot}\n${script}\nbegin\n${user}\nrescue Exception => e\n  puts "Script error: #{e.class}: #{e.message}"\nend\n${tail}`;
 const M = await createMidoriSim({ print: s => { if (!/^[D] \(/.test(s)) console.log('[out]', s); }, printErr: s => console.log('[err]', s) });
 M.simPresent = () => {};
 let frames = 0, sumsq = 0, peak = 0;

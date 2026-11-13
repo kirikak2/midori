@@ -10,7 +10,13 @@
 
 import { toUsbPackets } from './usb_midi.js';
 
-const BOARD = 'tab5';
+// The boards there is a build for (sim/build.sh): the screen's size and
+// layout are compile-time, so each is a wasm of its own
+export const BOARDS = {
+  tab5:   { name: 'M5Stack Tab5',   width: 1280, height: 720 },
+  cores3: { name: 'M5Stack CoreS3', width: 320,  height: 240 },
+};
+export const DEFAULT_BOARD = 'tab5';
 const MRB_TICK_UNIT = 4;      // build_config: MRB_TICK_UNIT=4
 const RUBY_SLICE_MS = 8;      // Ruby runs this long per turn, then the page gets the thread back
 const MAX_CATCHUP_TICKS = 10;
@@ -34,28 +40,28 @@ function wasmUrl(name, id) {
   return new URL(`./wasm/${name}?v=${encodeURIComponent(id)}`, import.meta.url).href;
 }
 
-let modulePromise = null;
-function loadFactory(id) {
-  if (!modulePromise) {
-    modulePromise = import(wasmUrl(`midori-sim-${BOARD}.js`, id)).then(m => m.default);
+const modulePromises = {};
+function loadFactory(board, id) {
+  if (!modulePromises[board]) {
+    modulePromises[board] = import(wasmUrl(`midori-sim-${board}.js`, id)).then(m => m.default);
   }
-  return modulePromise;
+  return modulePromises[board];
 }
 
 // Ruby run before and after the user's script (sim/build.sh makes them from
 // sim/mrblib and the part of main_task_base.rb shared with the device)
-let rubyPromise = null;
-function loadRuby(id) {
-  if (!rubyPromise) {
+const rubyPromises = {};
+function loadRuby(board, id) {
+  if (!rubyPromises[board]) {
     const get = name => fetch(wasmUrl(name, id)).then(r => {
       if (!r.ok) throw new Error(`${name}: ${r.status}`);
       return r.text();
     });
-    rubyPromise = Promise.all([get(`sim_boot-${BOARD}.rb`), get('sim_ui.rb'),
-                               get('sim_script.rb'), get('sim_tail.rb')])
+    rubyPromises[board] = Promise.all([get(`sim_boot-${board}.rb`), get('sim_ui.rb'),
+                                       get('sim_script.rb'), get('sim_tail.rb')])
       .then(([boot, ui, script, tail]) => ({ boot, ui, script, tail }));
   }
-  return rubyPromise;
+  return rubyPromises[board];
 }
 
 // What the VM runs, as the device's main_task.rb: UI mode, or script mode
@@ -75,9 +81,11 @@ ${ruby.tail}`;
 
 export class MidoriDevice {
   static async start(opts) {
+    const board = BOARDS[opts.board] ? opts.board : DEFAULT_BOARD;
     const id = await loadBuild();
-    const [factory, ruby] = await Promise.all([loadFactory(id), loadRuby(id)]);
+    const [factory, ruby] = await Promise.all([loadFactory(board, id), loadRuby(board, id)]);
     const dev = new MidoriDevice(opts);
+    dev.board = board;
     dev.buildId = id;
     dev.ruby = ruby;
     await dev._boot(factory);

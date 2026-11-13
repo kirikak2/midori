@@ -2,16 +2,19 @@
 // the given points and saves a screenshot.
 //   node sim/test/run_script.mjs script.rb out.png [x,y ...]
 // PORTS='Keystation:i,IAC Driver Bus 1:io' adds fake Web MIDI ports.
-import createMidoriSim from '../web/wasm/midori-sim-tab5.js';
+const BOARD = process.env.BOARD || 'tab5';
+const { default: createMidoriSim } = await import(`../web/wasm/midori-sim-${BOARD}.js`);
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 
 const [scriptPath, shot, ...taps] = process.argv.slice(2);
 const wasm = new URL('../web/wasm/', import.meta.url);
-const boot = fs.readFileSync(new URL('sim_boot-tab5.rb', wasm), 'utf8');
+const boot = fs.readFileSync(new URL(`sim_boot-${BOARD}.rb`, wasm), 'utf8');
 const tail = fs.readFileSync(new URL('sim_tail.rb', wasm), 'utf8');
 const user = fs.readFileSync(scriptPath, 'utf8');
-const src = `${boot}\nbegin\n${user}\nrescue Exception => e\n  puts "Script error: #{e.class}: #{e.message}"\nend\n${tail}`;
+const script = fs.readFileSync(new URL('sim_script.rb', wasm), 'utf8');
+globalThis.__midoriSim = { scriptEnded() {} };
+const src = `${boot}\n${script}\nbegin\n${user}\nrescue Exception => e\n  puts "Script error: #{e.class}: #{e.message}"\nend\n${tail}`;
 
 const M = await createMidoriSim({
   print: s => { if (!/^[ID] \(/.test(s)) console.log('[out]', s); },
