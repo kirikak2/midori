@@ -17,3 +17,16 @@ def sim_script_ended
 rescue => e
   puts "[sim] #{e.message}"
 end
+
+# ScriptManager is midori-runtime's C class on the device (picoruby-esp32.c).
+# Scripts use it to stop when asked; here the page stops a script by
+# throwing its VM away, so it is never asked.
+unless Object.const_defined?(:ScriptManager)
+  class ScriptManager
+    def stop_requested?; false; end
+    def get_requested; nil; end
+    def clear_request; nil; end
+    def check_console; nil; end
+    def free_heap; 0; end
+  end
+end

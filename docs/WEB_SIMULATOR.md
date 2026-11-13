@@ -549,7 +549,7 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   ブロックに値が届く）、Layout DSL（`areas` + knob + 入れ子の grid の pad。タップで SAM2695 役へノート）、Keys
   （C++ 側の発音経路で SAM2695 役へ）、Sequencer の起動
 - **サイズ**: wasm 1.85 MB（gzip 前）、JS 132 KB。LovyanGFX と main/ui で約 0.3 MB、残りは PicoRuby
-- **まだ**: 仮想 `/sd` と Scripts、デザイナー、CI（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4、CoreS3 は §12.5）
+- **まだ**: 仮想 `/sd` と Scripts、CI（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4、CoreS3 は §12.5、デザイナーは §12.6）
 
 ### 12.1 web_midi（2026-11-13）
 
@@ -627,3 +627,29 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 - ページ: ボードの選択（ビューアごとに覚える）。切り替えると新しい VM で UI モードから起動し直す（別のデバイスなので）。CoreS3 は
   最大 2 倍・`image-rendering: pixelated` で表示。CoreS3 の USB-MIDI Device 役は、実機の host モードと同じく使われない
 - 確認（Node）: Home（AMY のタイルなし）、Knobs（6 個 + バンク A〜D）、Layout の例（パッドのタップで SAM2695 役へ）が実機の配置で出る
+
+### 12.6 デザイナー（最初の形、2026-11-14）
+
+[sim/web/designer.html](../sim/web/designer.html)（シミュレーターとは別のページ。§11.1）。
+
+- **モデル**（[designer/model.js](../sim/web/designer/model.js)）: プロジェクト = 名前・ボード・デバイス（id と種類: SAM2695 / AMY /
+  USB-MIDI Host / Device / Web MIDI のポート名）・レイアウト（タイトル・列・行・部品）。部品は pad / knob / keys / xypad / tombola / tempo。
+  pad / knob の動作はプリセット（ノート / CC / Program Change / Pitch bend / Ruby の本文 / なし）。部品の設定の項目は DSL と各クラスの
+  キーワード引数から 1 か所（`WIDGETS` / `ACTIONS`）に書き、インスペクタのフォームと生成の両方がそこを見る
+- **生成**（[designer/codegen.js](../sim/web/designer/codegen.js)）: §6.2 のプロジェクトスクリプト。1 行目にモデル（UTF-8 JSON の base64）、
+  プロジェクト名から作ったモジュールに、デバイス（`<id>_transport` / `<id>`）・XYPad / Tombola のインスタンス（プロジェクトで 1 つ）・
+  `layout_N`（`areas <<~GRID` の形。area の名前は部品の種類の接頭辞 + 番号、空きは `.`）・`setup` / `run`。文字列は Ruby の
+  エスケープ（`#{` も）。ファイル名はプロジェクト名から（`my_stage.rb`）
+- **画面**: レイアウトのタブ・タイトル・列 / 行・「最初に表示する」、部品のパレット、グリッド（空きセルをドラッグして置く。1 クリックは
+  部品の既定の大きさ。Delete で削除）、インスペクタ（位置・設定・動作）、デバイスの一覧、問題（はみ出し・重なり・1 つまでの部品の重複）、
+  生成されるスクリプト、プレビュー
+- **プレビュー**: 変更のたびに 350 ms 待ってから、生成したスクリプトを新しい VM のスクリプトモードで実行し直す（編集中のレイアウトを表示）。
+  ライブパッチ（§6.3）はまだ
+- **保存 / 読み込み**: 保存は `.rb` のダウンロード（`/sd` 直下に置けば Scripts 画面から実行できる）。開くは `.rb` を選ぶと 1 行目からモデルを
+  復元（無ければ「シミュレーターで開いて」と案内）。編集中のプロジェクトはブラウザに自動保存。「シミュレーターで開く」はスクリプトを
+  シミュレーターのエディタへ渡す
+- シミュレーターに `ScriptManager` の代わり（`stop_requested?` は常に false）を足した。生成スクリプトや examples の多くが使う
+- 試験: `node sim/test/node_designer.mjs [shot.png]`（モデルを組み、生成、ヘッダからの往復、シミュレーターで実行してタップ）
+- **まだ**: ライブパッチ（§6.3）、`/sd` への保存の 3 つの保存先と Scripts パネル（§7.3 / §7.4）、Envelope / Sequencer / 入れ子の grid・
+  トラックの比率、Knobs / Pads 画面の設定（§6.4 の画面ごとの設定）、ルートの編集、部品のドラッグでの移動・大きさ変更、
+  VM の検証エラーをグリッドのセルに出すこと（今はプレビューのログに出る）

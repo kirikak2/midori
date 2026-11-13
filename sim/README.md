@@ -13,6 +13,7 @@ thin layer that stands in for ESP-IDF, FreeRTOS and M5Unified.
 sim/build.sh                       # -> sim/web/wasm/midori-sim-{tab5,cores3}.{js,wasm} + sim_*.rb
 BOARDS=cores3 sim/build.sh         # one board
 ruby sim/serve.rb                  # http://localhost:8080/ (sends Cache-Control: no-store; gem install webrick)
+                                   # the designer: http://localhost:8080/designer.html
 ```
 
 Each build writes `web/wasm/build.json` (an id) and the page fetches the wasm,
@@ -39,6 +40,7 @@ node sim/test/node_amy.mjs                          # AMY: notes, sound level, r
 node sim/test/node_modes.mjs ui shot.png 385,350    # UI mode (Home -> AMY), taps, screenshot
 BOARD=cores3 node sim/test/node_modes.mjs ui shot.png   # the same on CoreS3 (also run_script.mjs)
 node sim/test/node_sysex.mjs                        # SysEx: routed dump, send_sysex, reassembly
+node sim/test/node_designer.mjs shot.png            # designer: model -> project script -> run, taps
 ```
 
 ## Layout
@@ -52,6 +54,7 @@ node sim/test/node_sysex.mjs                        # SysEx: routed dump, send_s
 | `port/` | Their implementations: framebuffer panel, M5GFX, esp_timer / queues (`rtos_sim.c`), NVS on localStorage, transports to the page (`sim_devices.c`), midori-runtime's C API (`sim_runtime.c`), page entry points (`platform_sim.cpp`) |
 | `mrblib/` | Boot Ruby: BoardConfig, then (by `build.sh`) the part of `main_task_base.rb` before its simulator marker, then `sim_boot.rb`; then `sim_ui.rb` (UI mode: devices, Sequencer, AMY panel) or `sim_script.rb` + the user's script + `sim_tail.rb` (script mode) |
 | `web/` | The page: `device.js` (one wasm instance = one boot), `usb_midi.js` (messages <-> USB-MIDI packets, SysEx included), `synth.js` (built-in synth = SAM2695), `amy_audio.js` (AMY's AudioWorklet), `webmidi.js` (Web MIDI ports in the device's roles and by name) |
+| `web/designer.html`, `web/designer/` | The designer (docs §12.6): `model.js` (project model, widget settings), `codegen.js` (project script), `app.js` (the page) |
 | `test/` | Node smoke tests |
 
 ## How the device's code runs on one thread
@@ -87,5 +90,7 @@ Stage 0 of docs/WEB_SIMULATOR.md §9: Tab5 and CoreS3 (§12.5); Home, Knobs, Pad
 Layout run with their Ruby; MIDI out to the built-in synth / Web MIDI; every
 Web MIDI port is also `MIDIDevices.web_midi("name")` and a MIDI Devices row /
 column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1); AMY plays
-through an AudioWorklet (§12.2). Not yet: virtual `/sd` and Scripts, the
-designer, CI. SysEx passes both ways (§12.4).
+through an AudioWorklet (§12.2). SysEx passes both ways (§12.4). The designer
+(`designer.html`, §12.6) builds layouts and generates the project script. Not
+yet: virtual `/sd` and Scripts, the designer's live patching and saving to
+/sd, CI.
