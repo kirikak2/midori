@@ -20,6 +20,7 @@ export const MAX_NAMED_PORTS = 8;   // WEB_MIDI_MAX_PORTS
 export class WebMidi {
   constructor() {
     this.access = null;
+    this.sysex = false;                     // granted SysEx
     this.roleInput = [null, null, null];    // MIDIInput id per role
     this.roleOutput = [null, null, null];   // MIDIOutput id per role
     this.onRoleInput = () => {};            // (role, bytes, timeStamp)
@@ -30,10 +31,18 @@ export class WebMidi {
 
   get supported() { return typeof navigator !== 'undefined' && !!navigator.requestMIDIAccess; }
 
-  // Asks for permission: call after a user gesture
+  // Asks for permission: call after a user gesture. With SysEx where the
+  // browser grants it (the device's SysEx: MIDI::Device#send_sysex, routes),
+  // else without (sysex says which it got).
   async enable() {
     if (!this.supported) throw new Error('Web MIDI is not available in this browser');
-    this.access = await navigator.requestMIDIAccess({ sysex: false });
+    try {
+      this.access = await navigator.requestMIDIAccess({ sysex: true });
+      this.sysex = true;
+    } catch (e) {
+      this.access = await navigator.requestMIDIAccess({ sysex: false });
+      this.sysex = false;
+    }
     this.access.onstatechange = () => { this._listen(); this.onChange(); };
     this._listen();
     this.onChange();
@@ -72,20 +81,27 @@ export class WebMidi {
   setRoleOutput(role, id) { this.roleOutput[role] = id || null; this.onChange(); }
   roleConnected(role) { return !!(this.roleInput[role] || this.roleOutput[role]); }
 
-  // Sends at a page time (performance.now() milliseconds)
+  // Sends at a page time (performance.now() milliseconds). true when the
+  // port took it (a port is there); a SysEx without the permission is dropped.
   sendRole(role, bytes, atMs) {
     const id = this.roleOutput[role];
     const out = id && this.access ? this.access.outputs.get(id) : null;
-    if (!out) return false;
-    out.send(bytes, atMs);
-    return true;
+    return out ? this._send(out, bytes, atMs) : false;
   }
 
   sendPort(slot, bytes, atMs) {
     const name = this._slots[slot];
     const out = this.outputPorts.find(p => p.name === name);
-    if (!out) return false;
-    out.send(bytes, atMs);
+    return out ? this._send(out, bytes, atMs) : false;
+  }
+
+  _send(out, bytes, atMs) {
+    try {
+      out.send(bytes, atMs);
+    } catch (e) {
+      // InvalidAccessError: SysEx without the permission (or a malformed message)
+      if (!this._warned) { console.warn(`Web MIDI: ${e.message}`); this._warned = true; }
+    }
     return true;
   }
 }

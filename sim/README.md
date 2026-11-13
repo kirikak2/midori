@@ -36,6 +36,7 @@ PORTS='Keystation:i,IAC Driver Bus 1:io' node sim/test/run_script.mjs ...   # wi
 node sim/test/node_web_midi.mjs                     # MIDIDevices.web_midi: route, MIDI.on, send
 node sim/test/node_amy.mjs                          # AMY: notes, sound level, render time
 node sim/test/node_modes.mjs ui shot.png 385,350    # UI mode (Home -> AMY), taps, screenshot
+node sim/test/node_sysex.mjs                        # SysEx: routed dump, send_sysex, reassembly
 ```
 
 ## Layout
@@ -48,7 +49,7 @@ node sim/test/node_modes.mjs ui shot.png 385,350    # UI mode (Home -> AMY), tap
 | `shim/` | Headers in place of ESP-IDF / FreeRTOS / M5Unified / SDL2, and `board/<board>/sdkconfig.h` |
 | `port/` | Their implementations: framebuffer panel, M5GFX, esp_timer / queues (`rtos_sim.c`), NVS on localStorage, transports to the page (`sim_devices.c`), midori-runtime's C API (`sim_runtime.c`), page entry points (`platform_sim.cpp`) |
 | `mrblib/` | Boot Ruby: BoardConfig, then (by `build.sh`) the part of `main_task_base.rb` before its simulator marker, then `sim_boot.rb`; then `sim_ui.rb` (UI mode: devices, Sequencer, AMY panel) or `sim_script.rb` + the user's script + `sim_tail.rb` (script mode) |
-| `web/` | The page: `device.js` (one wasm instance = one boot), `synth.js` (built-in synth = SAM2695), `webmidi.js` (Web MIDI ports in the device's roles) |
+| `web/` | The page: `device.js` (one wasm instance = one boot), `usb_midi.js` (messages <-> USB-MIDI packets, SysEx included), `synth.js` (built-in synth = SAM2695), `amy_audio.js` (AMY's AudioWorklet), `webmidi.js` (Web MIDI ports in the device's roles and by name) |
 | `test/` | Node smoke tests |
 
 ## How the device's code runs on one thread
@@ -85,4 +86,4 @@ Layout run with their Ruby; MIDI out to the built-in synth / Web MIDI; every
 Web MIDI port is also `MIDIDevices.web_midi("name")` and a MIDI Devices row /
 column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1); AMY plays
 through an AudioWorklet (§12.2). Not yet: virtual `/sd` and Scripts, the
-designer, SysEx, CI.
+designer, CI. SysEx passes both ways (§12.4).

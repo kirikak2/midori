@@ -27,7 +27,7 @@ EM_JS(void, sim_js_midi_out, (int role, int cin, int b1, int b2, int b3, double 
   if (Module.simMidiOut) Module.simMidiOut(role, cin, b1, b2, b3, t);
 });
 
-#define RING 1024   // bytes, a power of two
+#define RING 4096   // bytes, a power of two: a SysEx dump of ~3 KB fits
 static struct { uint8_t data[RING]; uint32_t head, tail; bool connected; } s_rx[ROLE_COUNT];
 
 EMSCRIPTEN_KEEPALIVE void sim_midi_connect(int role, int connected)

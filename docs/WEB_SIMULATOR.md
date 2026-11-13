@@ -212,7 +212,7 @@ picoruby-midi の登録表（16 ビット）はそのまま使う。ports/wasm �
 ### 5.4 権限とブラウザ
 
 - `navigator.requestMIDIAccess()` は Ports パネルを開いたとき（ユーザー操作の後）に呼ぶ。SysEx の権限は
-  スクリプトが SysEx を使うときだけ求める
+  最初から求め、断られたら SysEx なしで取り直す（§12.4。当初は「使うときだけ求める」案だった）
 - Web MIDI が無い・拒否されたときは内蔵音源と画面内デバイスだけで動く（エラーにしない）
 - `AudioContext` は最初のタッチ / Run で resume する（自動再生の制限）
 
@@ -549,7 +549,7 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   ブロックに値が届く）、Layout DSL（`areas` + knob + 入れ子の grid の pad。タップで SAM2695 役へノート）、Keys
   （C++ 側の発音経路で SAM2695 役へ）、Sequencer の起動
 - **サイズ**: wasm 1.85 MB（gzip 前）、JS 132 KB。LovyanGFX と main/ui で約 0.3 MB、残りは PicoRuby
-- **まだ**: 仮想 `/sd` と Scripts、SysEx、CoreS3、デザイナー、CI（ブラウザでの動作確認は済み。AMY は §12.2）
+- **まだ**: 仮想 `/sd` と Scripts、CoreS3、デザイナー、CI（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4）
 
 ### 12.1 web_midi（2026-11-13）
 
@@ -601,3 +601,17 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   Scripts 画面の Stop = `supervisor_stop_script()`）と、新しい VM で UI モードに戻る。終わりは Ruby の `sim_script_ended`
   （JS ブリッジで `globalThis.__midoriSim.scriptEnded`）でページへ知らせる
 - 試験: `node sim/test/node_modes.mjs ui shot.png 385,350 1200,92 150,92 640,600`（Home → AMY → + → FM → 鍵盤）
+
+### 12.4 SysEx（2026-11-14）
+
+- デバイスの中は実機と同じ USB-MIDI パケット（SysEx は CIN 4 で 3 バイトずつ、CIN 5 / 6 / 7 で終わり）。picoruby-midi はそれを
+  ルートでそのまま転送し、`MIDI::Device#send_sysex` も同じ形で送る。シミュレーターで足したのはページとの境目だけ
+- [sim/web/usb_midi.js](../sim/web/usb_midi.js): 受信は Web MIDI の 1 メッセージ（F0 ... F7 丸ごと）をパケットに分ける
+  （`toUsbPackets`）。送信はポートごと（役 3 つ・名前付きポート 8 つ）の `UsbMidiAssembler` で組み立て直してから `output.send`
+  （Web MIDI は SysEx を丸ごとでしか受けない）。途中にリアルタイムのバイトが挟まってもよい。64 KB を超えるものは捨てる
+- 受信のリング（役ごと・名前付きポートごと）を 1 KB から 4 KB にした（約 3 KB のダンプが入る。溢れたパケットは捨てる）
+- Web MIDI の権限は SysEx 付きで求め、断られたら SysEx なしで取り直す（ログに出す）。SysEx なしのときの SysEx の送信は捨てる
+- 内蔵音源（SAM2695 役）と AMY は SysEx を解釈しない（実機の AMY の port も CIN 4〜7 は渡さない）
+- `MIDI.on` / filter はチャンネルメッセージとリアルタイムだけで、SysEx は Ruby に届かない（実機も同じ。Ruby で受けるのは非推奨の
+  `MIDI::Input` の `:sysex` だけ）
+- 試験: `node sim/test/node_sysex.mjs`（ルート経由の 1 KB のダンプ、`send_sysex` → 名前付きポート / USB-MIDI Device 役、3 バイトの SysEx）

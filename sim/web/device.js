@@ -8,6 +8,8 @@
 // fresh VM per script (docs/WEB_SIMULATOR.md §3.1). The compiled module is
 // fetched once and reused.
 
+import { toUsbPackets } from './usb_midi.js';
+
 const BOARD = 'tab5';
 const MRB_TICK_UNIT = 4;      // build_config: MRB_TICK_UNIT=4
 const RUBY_SLICE_MS = 8;      // Ruby runs this long per turn, then the page gets the thread back
@@ -156,15 +158,13 @@ export class MidoriDevice {
   // Midi from the page into the device: role 0 = USB-MIDI Host, 1 = USB-MIDI Device
   midiIn(role, bytes) {
     if (!this.M) return;
-    const p = toUsbPacket(bytes);
-    if (p) this.M._sim_midi_in(role, p[0], p[1], p[2], p[3]);
+    for (const p of toUsbPackets(bytes)) this.M._sim_midi_in(role, p[0], p[1], p[2], p[3]);
   }
 
   // Midi from a named Web MIDI port (MIDIDevices.web_midi)
   webMidiIn(slot, bytes) {
     if (!this.M) return;
-    const p = toUsbPacket(bytes);
-    if (p) this.M._web_midi_in(slot, p[0], p[1], p[2], p[3]);
+    for (const p of toUsbPackets(bytes)) this.M._web_midi_in(slot, p[0], p[1], p[2], p[3]);
   }
 
   setWebMidiConnected(slot, on) {
@@ -290,28 +290,6 @@ export class MidoriDevice {
   get pinnedFingers() { return [...this.pinned.values()]; }
 }
 
-// A MIDI message (bytes) as a USB-MIDI event packet [cable|CIN, b1, b2, b3]
-export function toUsbPacket(bytes) {
-  const s = bytes[0];
-  if (s === undefined) return null;
-  if (s >= 0xF8) return [0x0F, s, 0, 0];
-  const hi = s & 0xF0;
-  if (hi >= 0x80 && hi <= 0xE0) {
-    const cin = hi >> 4;
-    return [cin, s, bytes[1] || 0, hi === 0xC0 || hi === 0xD0 ? 0 : (bytes[2] || 0)];
-  }
-  if (s === 0xF2) return [0x03, s, bytes[1] || 0, bytes[2] || 0];
-  if (s === 0xF3 || s === 0xF1) return [0x02, s, bytes[1] || 0, 0];
-  if (s === 0xF6) return [0x05, s, 0, 0];
-  return null;   // SysEx: not yet
-}
-
-// A USB-MIDI packet back to the MIDI message it carries
-export function fromUsbPacket(cin, b1, b2, b3) {
-  switch (cin & 0x0F) {
-    case 0x8: case 0x9: case 0xA: case 0xB: case 0xE: case 0x3: return [b1, b2, b3];
-    case 0xC: case 0xD: case 0x2: return [b1, b2];
-    case 0x5: case 0xF: return [b1];
-    default: return null;   // SysEx: not yet
-  }
-}
+// The packet helpers live in usb_midi.js (SysEx included); kept importable
+// from here for the page
+export { toUsbPackets, UsbMidiAssembler } from './usb_midi.js';

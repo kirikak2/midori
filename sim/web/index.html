@@ -69,8 +69,8 @@ const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
   .then(r => (r.ok ? r.json() : {})).then(j => String(j.id || Date.now()))
   .catch(() => String(Date.now()));
 const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
-const [{ MidoriDevice, fromUsbPacket }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES }] =
-  await Promise.all([load('device.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js')]);
+const [{ MidoriDevice }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES }] =
+  await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js')]);
 
 const EXAMPLES = {
   'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
@@ -204,8 +204,11 @@ function print(s, kind = 'out') {
 // Device -> outside. The C side stamps esp_timer microseconds (performance.now()
 // based), sent a little ahead so the page's timer jitter does not reach the notes.
 const LOOKAHEAD_MS = 10;
+// One assembler per port: a SysEx comes in several packets and leaves whole
+const roleAsm = [new UsbMidiAssembler(), new UsbMidiAssembler(), new UsbMidiAssembler()];
+const portAsm = [];
 function midiOut(role, cin, b1, b2, b3, timeUs) {
-  const bytes = fromUsbPacket(cin, b1, b2, b3);
+  const bytes = roleAsm[role].feed(cin, b1, b2, b3);
   if (!bytes) return;
   const at = timeUs / 1000 + LOOKAHEAD_MS;
   if (midi.sendRole(role, bytes, at)) return;
@@ -213,7 +216,7 @@ function midiOut(role, cin, b1, b2, b3, timeUs) {
 }
 // MIDIDevices.web_midi("name") -> that Web MIDI output
 function webMidiOut(slot, cin, b1, b2, b3, timeUs) {
-  const bytes = fromUsbPacket(cin, b1, b2, b3);
+  const bytes = (portAsm[slot] ||= new UsbMidiAssembler()).feed(cin, b1, b2, b3);
   if (bytes) midi.sendPort(slot, bytes, timeUs / 1000 + LOOKAHEAD_MS);
 }
 
@@ -295,7 +298,7 @@ $('midi').onclick = async () => {
   try {
     await midi.enable();
     $('midi').hidden = true;
-    print('[sim] Web MIDI を有効にしました。ポートを Ruby から使うには Run し直してください', 'sys');
+    print(`[sim] Web MIDI を有効にしました（SysEx ${midi.sysex ? 'あり' : 'なし: ブラウザが許可しませんでした'}）。ポートを Ruby から使うには Run し直してください`, 'sys');
   } catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
 };
 if (!midi.supported) $('midi').disabled = true;
