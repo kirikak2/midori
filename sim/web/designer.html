@@ -94,6 +94,7 @@
       </div>
       <div class="row">
         <label><input type="radio" name="start" id="start"> 最初に表示する</label>
+        <label><input type="checkbox" id="send-initial"> 起動時にノブとエンベロープの初期値を送る</label>
       </div>
     </section>
     <section class="card">
@@ -121,6 +122,12 @@
       <h2>デバイス</h2>
       <div id="devices"></div>
       <button class="small" id="add-device">デバイスを追加</button>
+    </section>
+    <section class="card" id="parts-card">
+      <h2>AMY パート（Tab5）</h2>
+      <div id="parts"></div>
+      <button class="small" id="add-part">パートを追加</button>
+      <p class="hint">Keys などでパートを鳴らすときは、デバイスに AMY を足して、そのパートのチャンネルで送ります。Envelope の送り先にもなります。</p>
     </section>
     <section class="card" id="problems-card" hidden>
       <h2>問題</h2>

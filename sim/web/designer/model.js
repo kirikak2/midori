@@ -5,6 +5,7 @@
 //   project = {
 //     v: 1, name, board,
 //     devices: [{ id, kind, port? }],          // kind: sam2695 | amy | usb_midi_host | usb_midi_device | web_midi
+//     parts: [{ id, type, channel, voices, patch }],   // AMY parts (Tab5): type fm | synth
 //     start: 0,                                // the layout shown first
 //     layouts: [{ title, cols, rows, widgets: [widget] }],
 //   }
@@ -23,8 +24,9 @@ export const DEVICE_KINDS = {
   web_midi:        { label: 'Web MIDI port (simulator only)', ruby: null },
 };
 
-// One field of a widget's settings: type is int | float | text | color |
-// choice | bool | notes (a list of note numbers) | device
+// One field of a widget's settings: type is int | float | optnum (a number or
+// blank) | text | color | choice | bool | notes (a list of note numbers) |
+// device | part (an AMY part or none)
 const f = (key, label, type, def, extra = {}) => ({ key, label, type, def, ...extra });
 
 export const WIDGETS = {
@@ -81,6 +83,32 @@ export const WIDGETS = {
     ],
   },
   tempo: { label: 'Tempo', size: [2, 1], single: true, props: [] },
+  // An ADSR editor (docs/ENVELOPE.md): on an AMY part (Synth: amp / filter,
+  // FM: an operator), or only its Ruby block. Blank stages start from the part.
+  envelope: {
+    label: 'Envelope', size: [2, 1],
+    props: [
+      f('label', 'Label', 'text', 'Env'),
+      f('color', 'Color', 'color', 'cyan'),
+      f('to', 'AMY part', 'part', ''),
+      f('stage', 'Envelope', 'choice', 'amp', { choices: ['amp', 'filter', 'op1', 'op2', 'op3', 'op4', 'op5', 'op6'] }),
+      f('max_time', 'Max time (ms)', 'int', 2000, { min: 100, max: 20000 }),
+      f('attack', 'Attack (ms)', 'optnum', ''),
+      f('decay', 'Decay (ms)', 'optnum', ''),
+      f('sustain', 'Sustain (0-1)', 'optnum', ''),
+      f('release', 'Release (ms)', 'optnum', ''),
+    ],
+    actions: ['none', 'ruby'],
+  },
+  // The Sequencer screen in the cell (docs/SEQUENCER.md): the song as it is
+  sequencer: { label: 'Sequencer', size: [4, 2], single: true, props: [] },
+};
+
+// AMY parts (docs/AMY_SYNTH.md §6): played on their MIDI channel through the
+// amy device; FM presets are DX7 128..255, Synth (Juno) 0..127
+export const PART_TYPES = {
+  fm:    { label: 'FM', patch: [128, 255], def: 128 },
+  synth: { label: 'Synth', patch: [0, 127], def: 0 },
 };
 
 // What a pad or knob does (the block's body)
@@ -102,7 +130,9 @@ export function newProject(board = 'tab5') {
     v: 1,
     name: 'My Stage',
     board,
-    devices: [{ id: 'synth', kind: board === 'tab5' ? 'sam2695' : 'sam2695' }],
+    devices: [{ id: 'synth', kind: 'sam2695' }],
+    parts: [],
+    sendInitial: true,      // knobs / envelopes send their starting values at start
     start: 0,
     layouts: [newLayout('Perform')],
   };
@@ -154,10 +184,21 @@ export function problems(project) {
       }
     }
   });
+  // Envelopes on AMY parts
+  project.layouts.forEach((l, li) => l.widgets.forEach(w => {
+    if (w.kind !== 'envelope' || !w.props.to) return;
+    const part = (project.parts || []).find(p => p.id === w.props.to);
+    if (!part) out.push({ layout: li, widget: w.id, message: `Envelope: there is no AMY part "${w.props.to}"` });
+    else if (part.type === 'synth' && /^op/.test(w.props.stage)) out.push({ layout: li, widget: w.id, message: 'Envelope: a Synth part has amp / filter, not operators' });
+    else if (part.type === 'fm' && !/^op/.test(w.props.stage)) out.push({ layout: li, widget: w.id, message: 'Envelope: an FM part has operator envelopes (op1-op6)' });
+  }));
+  if ((project.parts || []).length && project.board !== 'tab5') {
+    out.push({ layout: 0, widget: null, message: 'AMY parts play on the Tab5 only (this board has no AMY)' });
+  }
   // XYPad / Tombola / Keys: one model on the device, so one in the whole project
   const kinds = {};
   project.layouts.forEach((l, li) => l.widgets.forEach(w => {
-    if (!WIDGETS[w.kind].single || w.kind === 'tempo') return;
+    if (!WIDGETS[w.kind].single || w.kind === 'tempo' || w.kind === 'sequencer') return;   // one clock / one song, shown anywhere
     if (kinds[w.kind] !== undefined && kinds[w.kind] !== li) {
       out.push({ layout: li, widget: w.id, message: `${WIDGETS[w.kind].label} is already in another layout (one per project)` });
     }

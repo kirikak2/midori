@@ -650,6 +650,16 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   シミュレーターのエディタへ渡す
 - シミュレーターに `ScriptManager` の代わり（`stop_requested?` は常に false）を足した。生成スクリプトや examples の多くが使う
 - 試験: `node sim/test/node_designer.mjs [shot.png]`（モデルを組み、生成、ヘッダからの往復、シミュレーターで実行してタップ）
-- **まだ**: ライブパッチ（§6.3）、`/sd` への保存の 3 つの保存先と Scripts パネル（§7.3 / §7.4）、Envelope / Sequencer / 入れ子の grid・
+- **Envelope / Sequencer / AMY パート**（2026-11-14 追加）:
+  - プロジェクトに **AMY パート**（id・FM / Synth・チャンネル・ボイス数・プリセット。Tab5 のみ）。生成は
+    `@part ||= MIDIDevices.amy&.add_fm / add_synth(...)` のメソッドで、`setup` が最初に作る（鍵盤などはデバイスに AMY を足し、
+    パートのチャンネルで送る）
+  - **Envelope**: 送り先は AMY パート（Synth は `to: part, env: :amp / :filter`、FM は `to: part.op(n)`）か、なし（Ruby の
+    ブロックだけ。ブロックは `|e|` = `{ attack:, decay:, sustain:, release: }`）。A / D / S / R は空欄ならパートの値から始まる
+  - **Sequencer**: 今のソングを表示する（`sequencer area:`）。Tempo と同じく、どのレイアウトに置いてもよい
+  - 生成する `setup` は既定で全レイアウトの `send_all` を呼ぶ（ノブとエンベロープの初期値を送る。DSL は定義しただけでは送らない。
+    レイアウトの「起動時に初期値を送る」で切れる）
+  - 試験: `node sim/test/node_designer_amy.mjs [shot.png]`（`SHOW=1` で 2 枚目のレイアウト）
+- **まだ**: ライブパッチ（§6.3）、`/sd` への保存の 3 つの保存先と Scripts パネル（§7.3 / §7.4）、入れ子の grid・
   トラックの比率、Knobs / Pads 画面の設定（§6.4 の画面ごとの設定）、ルートの編集、部品のドラッグでの移動・大きさ変更、
   VM の検証エラーをグリッドのセルに出すこと（今はプレビューのログに出る）

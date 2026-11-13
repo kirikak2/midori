@@ -41,6 +41,7 @@ node sim/test/node_modes.mjs ui shot.png 385,350    # UI mode (Home -> AMY), tap
 BOARD=cores3 node sim/test/node_modes.mjs ui shot.png   # the same on CoreS3 (also run_script.mjs)
 node sim/test/node_sysex.mjs                        # SysEx: routed dump, send_sysex, reassembly
 node sim/test/node_designer.mjs shot.png            # designer: model -> project script -> run, taps
+node sim/test/node_designer_amy.mjs shot.png        # designer: AMY parts, envelopes, sequencer (Tab5)
 ```
 
 ## Layout

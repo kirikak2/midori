@@ -13,13 +13,14 @@ export async function startDesigner(build) {
     import(`./model.js${v}`), import(`./codegen.js${v}`), import(`../device.js${v}`),
     import(`../usb_midi.js${v}`), import(`../synth.js${v}`), import(`../amy_audio.js${v}`),
   ]);
-  const { WIDGETS, ACTIONS, COLORS, DEVICE_KINDS } = model;
+  const { WIDGETS, ACTIONS, COLORS, DEVICE_KINDS, PART_TYPES } = model;
   const { MidoriDevice, BOARDS, DEFAULT_BOARD } = dev;
 
   // ---- state
 
   let project = loadSaved() || model.newProject(DEFAULT_BOARD);
   if (!BOARDS[project.board]) project.board = DEFAULT_BOARD;
+  project.parts ||= [];   // projects from before AMY parts
   let current = Math.min(project.start || 0, project.layouts.length - 1);   // layout being edited
   let selected = null;     // widget id
   let paletteKind = 'pad';
@@ -71,6 +72,7 @@ export async function startDesigner(build) {
       return;
     }
     project = m;
+    project.parts ||= [];
     current = Math.min(project.start || 0, project.layouts.length - 1);
     selected = null;
     changed();
@@ -110,6 +112,7 @@ export async function startDesigner(build) {
     $('cols').value = l.cols;
     $('rows').value = l.rows;
     $('start').checked = project.start === current;
+    $('send-initial').checked = project.sendInitial !== false;
     $('del-layout').disabled = project.layouts.length <= 1;
   }
   $('title').oninput = () => { layout().title = $('title').value; save(); renderTabs(); $('title').focus(); schedulePreview(); };
@@ -121,6 +124,7 @@ export async function startDesigner(build) {
   $('cols').onchange = resize;
   $('rows').onchange = resize;
   $('start').onchange = () => { project.start = current; changed({ preview: false }); };
+  $('send-initial').onchange = () => { project.sendInitial = $('send-initial').checked; changed(); };
   $('del-layout').onclick = () => {
     if (project.layouts.length <= 1 || !confirm(`レイアウト「${layout().title}」を削除しますか？`)) return;
     project.layouts.splice(current, 1);
@@ -225,7 +229,7 @@ export async function startDesigner(build) {
 
   const RGB = { gray: '#7b7b7b', red: '#d83b3b', green: '#2e9e4e', blue: '#3456d6', yellow: '#c9a90c', cyan: '#1aa7b8',
                 magenta: '#c43bbf', orange: '#e0821b', purple: '#7c3aa8', white: '#bdbdbd' };
-  const KIND_RGB = { keys: '#555b66', xypad: '#2d6a8a', tombola: '#6a4a8a', tempo: '#244f9e' };
+  const KIND_RGB = { keys: '#555b66', xypad: '#2d6a8a', tombola: '#6a4a8a', tempo: '#244f9e', sequencer: '#3d5a3a' };
   const widgetColor = w => (w.props.color ? RGB[w.props.color] : KIND_RGB[w.kind]) || '#666';
   const widgetCaption = w => (w.props.label !== undefined ? `${w.props.label}` : WIDGETS[w.kind].label);
 
@@ -283,6 +287,21 @@ export async function startDesigner(build) {
   function field(fld, value, set) {
     switch (fld.type) {
       case 'int': return numberField(fld.label, value, fld.min ?? -99999, fld.max ?? 99999, set);
+      case 'optnum': {
+        // A number, or blank for "as the target has it"
+        const i = document.createElement('input');
+        i.type = 'number'; i.step = 'any'; i.value = value ?? ''; i.placeholder = '(from the part)';
+        i.onchange = () => set(i.value === '' ? '' : Number(i.value));
+        return labeled(fld.label, i);
+      }
+      case 'part': {
+        const s = document.createElement('select');
+        s.add(new Option('(none: only the Ruby block)', ''));
+        for (const p of project.parts) s.add(new Option(`${p.id} (${PART_TYPES[p.type].label}, ch ${p.channel + 1})`, p.id));
+        s.value = value || '';
+        s.onchange = () => set(s.value);
+        return labeled(fld.label, s);
+      }
       case 'float': return numberField(fld.label, value, -1000, 1000, set, true);
       case 'bool': {
         const i = document.createElement('input');
@@ -330,7 +349,7 @@ export async function startDesigner(build) {
       id.type = 'text'; id.value = d.id; id.style.width = '7em'; id.title = 'Ruby の名前（英小文字・数字・_）';
       id.onchange = () => {
         const nid = id.value.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, '') || d.id;
-        if (project.devices.some(o => o !== d && o.id === nid)) { id.value = d.id; return; }
+        if (project.devices.some(o => o !== d && o.id === nid) || project.parts.some(p => p.id === nid)) { id.value = d.id; return; }
         renameDevice(d.id, nid);
         changed();
       };
@@ -362,6 +381,63 @@ export async function startDesigner(build) {
       if (w.action && w.action.device === from) w.action.device = to;
     }
   }
+  // ---- AMY parts (Tab5)
+
+  function renderParts() {
+    const box = $('parts');
+    box.textContent = '';
+    $('parts-card').hidden = project.board !== 'tab5' && project.parts.length === 0;
+    project.parts.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const id = document.createElement('input');
+      id.type = 'text'; id.value = p.id; id.style.width = '6em'; id.title = 'Ruby の名前';
+      id.onchange = () => {
+        const nid = id.value.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, '') || p.id;
+        if (nid === p.id || project.parts.some(o => o.id === nid) || project.devices.some(d => d.id === nid)) { id.value = p.id; return; }
+        for (const l of project.layouts) for (const w of l.widgets) if (w.props.to === p.id) w.props.to = nid;
+        p.id = nid;
+        changed();
+      };
+      const type = document.createElement('select');
+      for (const [k, t] of Object.entries(PART_TYPES)) type.add(new Option(t.label, k));
+      type.value = p.type;
+      type.onchange = () => { p.type = type.value; p.patch = PART_TYPES[p.type].def; changed(); };
+      const num = (label, key, lo, hi, show = v => v, store = v => v) => {
+        const l = document.createElement('label');
+        l.textContent = `${label} `;
+        const i = document.createElement('input');
+        i.type = 'number'; i.min = show(lo); i.max = show(hi); i.value = show(p[key]); i.style.width = '4.5em';
+        i.onchange = () => { const n = parseInt(i.value, 10); if (Number.isFinite(n)) { p[key] = clamp(store(n), lo, hi); changed(); } };
+        l.append(i);
+        return l;
+      };
+      const [plo, phi] = PART_TYPES[p.type].patch;
+      row.append(id, type,
+        num('ch', 'channel', 0, 15, v => v + 1, v => v - 1),
+        num('voices', 'voices', 1, 16),
+        num('patch', 'patch', plo, phi));
+      const del = document.createElement('button');
+      del.className = 'small'; del.textContent = '×';
+      del.onclick = () => {
+        for (const l of project.layouts) for (const w of l.widgets) if (w.props.to === p.id) w.props.to = '';
+        project.parts.splice(i, 1);
+        changed();
+      };
+      row.append(del);
+      box.append(row);
+    });
+  }
+  $('add-part').onclick = () => {
+    let n = project.parts.length + 1;
+    while (project.parts.some(p => p.id === `part${n}`)) n++;
+    const used = new Set(project.parts.map(p => p.channel));
+    let ch = 0;
+    while (used.has(ch) && ch < 15) ch++;
+    project.parts.push({ id: `part${n}`, type: 'fm', channel: ch, voices: 6, patch: PART_TYPES.fm.def });
+    changed();
+  };
+
   $('add-device').onclick = () => {
     let n = project.devices.length + 1;
     while (project.devices.some(d => d.id === `dev${n}`)) n++;
@@ -377,7 +453,7 @@ export async function startDesigner(build) {
     $('problems').innerHTML = '';
     for (const p of ps) {
       const li = document.createElement('li');
-      li.textContent = `${project.layouts[p.layout].title}: ${p.message}`;
+      li.textContent = p.widget ? `${project.layouts[p.layout].title}: ${p.message}` : p.message;
       $('problems').append(li);
     }
   }
@@ -390,6 +466,7 @@ export async function startDesigner(build) {
     renderGrid();
     renderInspector();
     renderDevices();
+    renderParts();
     renderProblems();
     $('code').textContent = codegen.generate(project);
   }

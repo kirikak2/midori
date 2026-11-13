@@ -3,7 +3,7 @@
 // (/sd/<name>.rb). Its first line carries the project model, so the designer
 // can open the file again; the device ignores the comment.
 
-import { WIDGETS, DEVICE_KINDS } from './model.js';
+import { WIDGETS, DEVICE_KINDS, PART_TYPES } from './model.js';
 
 export const HEADER = '# midori-designer: ';
 
@@ -67,6 +67,25 @@ function deviceMethods(project, M) {
       ``,
       `  def self.${d.id}`,
       `    @${d.id} ||= (t = ${d.id}_transport) && MIDI::Device.new(t)`,
+      `  end`,
+      ``,
+    );
+  }
+  return out;
+}
+
+// AMY parts: made once, the first time anything asks (setup does, so they
+// play from the start); nil where there is no AMY
+function partMethods(project) {
+  const out = [];
+  for (const p of project.parts || []) {
+    const t = PART_TYPES[p.type] || PART_TYPES.fm;
+    const patch = int(p.patch ?? t.def, t.patch[0], t.patch[1]);
+    out.push(
+      `  # AMY ${t.label} part on channel ${int(p.channel, 0, 15) + 1}`,
+      `  def self.${p.id}`,
+      `    @${p.id} ||= (amy = MIDIDevices.amy) && amy.add_${p.type === 'synth' ? 'synth' : 'fm'}(` +
+        `channel: ${int(p.channel, 0, 15)}, voices: ${int(p.voices, 1, 16)}, patch: ${patch})`,
       `  end`,
       ``,
     );
@@ -140,6 +159,23 @@ function widgetLines(project, M, w, area) {
       return [`tombola ${at}, tombola: ${M}.tombola`];
     case 'tempo':
       return [`tempo ${at}`];
+    case 'sequencer':
+      return [`sequencer ${at}`];
+    case 'envelope': {
+      const args = [at, `label: ${rubyStr(p.label)}`, `color: ${sym(p.color || 'cyan')}`, `max_time: ${int(p.max_time, 100, 20000)}`];
+      for (const k of ['attack', 'decay', 'sustain', 'release']) {
+        if (p[k] !== '' && p[k] !== null && p[k] !== undefined && Number.isFinite(Number(p[k]))) args.push(`${k}: ${num(p[k])}`);
+      }
+      const part = (project.parts || []).find(x => x.id === p.to);
+      if (part) {
+        const op = /^op([1-6])$/.exec(p.stage || '');
+        if (part.type === 'fm') args.push(`to: ${M}.${part.id}&.op(${op ? op[1] : 1})`);
+        else args.push(`to: ${M}.${part.id}`, `env: ${sym(p.stage === 'filter' ? 'filter' : 'amp')}`);
+      }
+      const a = w.action || { type: 'none' };
+      if (a.type !== 'ruby') return [`envelope ${args.join(', ')}`];
+      return [`envelope ${args.join(', ')} do |e|`, ...String(a.body || '').split('\n').map(l => `  ${l}`), 'end'];
+    }
     default:
       return [`# unknown widget: ${w.kind}`];
   }
@@ -221,10 +257,15 @@ export function generate(project, opts = {}) {
     ``,
     `module ${M}`,
     ...deviceMethods(project, M),
+    ...partMethods(project),
     ...instanceMethods(project, M),
     ...project.layouts.flatMap((l, i) => layoutMethod(project, M, l, i)),
     `  def self.setup`,
+    ...((project.parts || []).length ? [`    ${project.parts.map(p => p.id).join('; ')}   # the AMY parts`] : []),
     `    @layouts = [${project.layouts.map((_, i) => `layout_${i + 1}`).join(', ')}]`,
+    ...(project.sendInitial === false ? [] : [
+      `    # Knobs and envelopes send their starting values (defining them sends nothing)`,
+      `    @layouts.each { |l| l.send_all }`]),
     `    UI.show(@layouts[${show}]) if @layouts[${show}]`,
     `  end`,
     ``,
