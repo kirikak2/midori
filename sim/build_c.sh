@@ -15,6 +15,15 @@ INC=(-Isim/shim/board/$BOARD -Isim/shim -Isim/port -I$GFX -Imain/ui -Imain/platf
      -Imrbgems/picoruby-amy/include -Icomponents/midori-runtime
      -DLGFX_USE_V1 -DMIDORI_SIM=1 -DMIDI_INPUT_POLLED=1)
 OPT="${OPT:--O2} -fwasm-exceptions"
+# AMY (picoruby-amy's engine): the device's list (components/amy/CMakeLists.txt)
+# with i2s.c -- the device's audio loop -- replaced by sim/port/amy_platform_sim.c
+AMY_DIR=mrbgems/picoruby-amy/lib/amy/src
+AMY_SRCS=()
+for f in algorithms amy envelope examples parse filters oscillators pcm interp_partials custom \
+         delay log2_exp2 patches transfer sequencer instrument amy_midi api midi_mappings \
+         cv_trigger note_output; do AMY_SRCS+=("$AMY_DIR/$f.c"); done
+INC+=(-I$AMY_DIR -Imrbgems/picoruby-amy/include -DAMY_NO_MINIAUDIO
+      -DAMY_GEM_ENABLED=1 -DAMY_GEM_POLLED=1 -DAMY_GEM_OVERLOAD_THRESHOLD=0.9f)
 SRCS=(
   $GFX/lgfx/v1/LGFXBase.cpp $GFX/lgfx/v1/LGFX_Sprite.cpp $GFX/lgfx/v1/LGFX_Button.cpp
   $GFX/lgfx/v1/lgfx_fonts.cpp
@@ -24,12 +33,15 @@ SRCS=(
   mrbgems/picoruby-midi/ports/esp32/midi.c mrbgems/picoruby-midi/ports/esp32/midi_timed_ring.c
   mrbgems/picoruby-ui/ports/esp32/ui.c
   sim/port/*.c sim/port/*.cpp
+  mrbgems/picoruby-amy/ports/esp32/amy_port.c
+  "${AMY_SRCS[@]}"
 )
 OBJS=()
 for s in "${SRCS[@]}"; do
   o="$OUT/obj/$(echo "$s" | sed 's|[/.]|_|g').o"
   if [[ ! -f "$o" || "$s" -nt "$o" ]]; then
-    if [[ "$s" == *.c ]]; then emcc -std=gnu11 $OPT "${INC[@]}" -c "$s" -o "$o"
+    if [[ "$s" == $AMY_DIR/* ]]; then emcc -std=gnu11 $OPT -w "${INC[@]}" -c "$s" -o "$o"   # third party: its own warnings
+    elif [[ "$s" == *.c ]]; then emcc -std=gnu11 $OPT "${INC[@]}" -c "$s" -o "$o"
     else em++ -std=gnu++17 $OPT "${INC[@]}" -c "$s" -o "$o"; fi
   fi
   OBJS+=("$o")

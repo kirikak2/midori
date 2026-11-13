@@ -10,11 +10,14 @@ thin layer that stands in for ESP-IDF, FreeRTOS and M5Unified.
 ## Build and run
 
 ```bash
-source ~/emsdk/emsdk_env.sh
 sim/build.sh                       # -> sim/web/wasm/midori-sim-tab5.{js,wasm} + sim_*.rb
-cd sim/web && python3 -m http.server 8080
-# open http://localhost:8080/
+ruby sim/serve.rb                  # http://localhost:8080/ (sends Cache-Control: no-store; gem install webrick)
 ```
+
+Each build writes `web/wasm/build.json` (an id) and the page fetches the wasm,
+its JS and the boot Ruby with `?v=<id>`, so a browser never mixes files of two
+builds. `serve.rb` keeps the page's own scripts fresh too; with another server,
+reload with the cache bypassed after changing `web/*.js`.
 
 `sim/build.sh` runs rake for PicoRuby (`build_config/midori-sim.rb` →
 `components/midori-runtime/picoruby/build/midori-sim/lib/libmruby.a`), then
@@ -31,6 +34,8 @@ node sim/test/node_knob.mjs                         # a Ruby knob turned by a dr
 node sim/test/run_script.mjs script.rb shot.png 400,400   # run, tap, screenshot
 PORTS='Keystation:i,IAC Driver Bus 1:io' node sim/test/run_script.mjs ...   # with fake Web MIDI ports
 node sim/test/node_web_midi.mjs                     # MIDIDevices.web_midi: route, MIDI.on, send
+node sim/test/node_amy.mjs                          # AMY: notes, sound level, render time
+node sim/test/node_modes.mjs ui shot.png 385,350    # UI mode (Home -> AMY), taps, screenshot
 ```
 
 ## Layout
@@ -42,7 +47,7 @@ node sim/test/node_web_midi.mjs                     # MIDIDevices.web_midi: rout
 | `build.sh` | Both, linked into the page's wasm; also writes the boot Ruby |
 | `shim/` | Headers in place of ESP-IDF / FreeRTOS / M5Unified / SDL2, and `board/<board>/sdkconfig.h` |
 | `port/` | Their implementations: framebuffer panel, M5GFX, esp_timer / queues (`rtos_sim.c`), NVS on localStorage, transports to the page (`sim_devices.c`), midori-runtime's C API (`sim_runtime.c`), page entry points (`platform_sim.cpp`) |
-| `mrblib/` | Boot Ruby: BoardConfig, then (by `build.sh`) the part of `main_task_base.rb` before its simulator marker, then `sim_boot.rb`; `sim_tail.rb` after the user's script |
+| `mrblib/` | Boot Ruby: BoardConfig, then (by `build.sh`) the part of `main_task_base.rb` before its simulator marker, then `sim_boot.rb`; then `sim_ui.rb` (UI mode: devices, Sequencer, AMY panel) or `sim_script.rb` + the user's script + `sim_tail.rb` (script mode) |
 | `web/` | The page: `device.js` (one wasm instance = one boot), `synth.js` (built-in synth = SAM2695), `webmidi.js` (Web MIDI ports in the device's roles) |
 | `test/` | Node smoke tests |
 
@@ -59,17 +64,25 @@ node sim/test/node_web_midi.mjs                     # MIDIDevices.web_midi: rout
   - esp_timer → a table run by `sim_rtos_poll()`;
   - picoruby-midi's input task → `MIDI_Input_poll()` (`MIDI_INPUT_POLLED`);
   - the Sequencer task → a step draining its queue (`MIDORI_SIM` in `ui_sequencer.cpp`).
+- **Modes**: as the device's Supervisor. The page opens in UI mode (Home,
+  with the AMY panel); Run starts the script in a fresh VM; when it ends or is
+  stopped, UI mode starts again in a fresh VM.
 - **Ruby**: picoruby-wasm's scheduler, pumped by the page between frames
   (`sleep_ms` yields to the browser).
 - **MIDI**: the USB-MIDI Host / Device and UART (SAM2695) gems' C functions
   are `port/sim_devices.c`: sending calls the page (Web MIDI output or the
   built-in synth, stamped with the C side's time), receiving is a ring the
   page fills from Web MIDI input. BLE-MIDI is absent.
+- **AMY**: its engine (the device's sources, with `port/amy_platform_sim.c` in
+  place of `i2s.c`) and picoruby-amy's port with `AMY_GEM_POLLED`: the page
+  asks for blocks (`sim_amy_render`) to keep ~60 ms queued in an AudioWorklet
+  (`web/amy_audio.js`). 48 kHz, as AMY's web build.
 
 ## Status
 
 Stage 0 of docs/WEB_SIMULATOR.md §9: Tab5 only; Home, Knobs, Pads, Keys,
 Layout run with their Ruby; MIDI out to the built-in synth / Web MIDI; every
 Web MIDI port is also `MIDIDevices.web_midi("name")` and a MIDI Devices row /
-column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1). Not yet:
-virtual `/sd` and Scripts, AMY, the designer, SysEx, CI.
+column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1); AMY plays
+through an AudioWorklet (§12.2). Not yet: virtual `/sd` and Scripts, the
+designer, SysEx, CI.

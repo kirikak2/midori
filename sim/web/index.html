@@ -62,9 +62,15 @@
   </section>
 </main>
 <script type="module">
-import { MidoriDevice, fromUsbPacket } from './device.js';
-import { BuiltinSynth } from './synth.js';
-import { WebMidi, ROLES } from './webmidi.js';
+// The page's own modules are loaded with the build's id (wasm/build.json,
+// written by sim/build.sh), like the wasm and the boot Ruby (device.js): a
+// browser holding a module from an earlier build cannot run it with new files.
+const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
+  .then(r => (r.ok ? r.json() : {})).then(j => String(j.id || Date.now()))
+  .catch(() => String(Date.now()));
+const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
+const [{ MidoriDevice, fromUsbPacket }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES }] =
+  await Promise.all([load('device.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js')]);
 
 const EXAMPLES = {
   'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
@@ -100,6 +106,16 @@ if port
 else
   puts "Web MIDI のポートがありません"
 end
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'AMY': `# Tab5 の UI モードと同じ AMY パネル（Home の「AMY」タイル）をスクリプトから開く。
+# 「+」でパートを足し、タブごとにプリセット・チャンネル・エンベロープ・ノブ・鍵盤
+panel = UI::AMYPanel.new(engine: Proc.new { MIDIDevices.amy })
+panel.show
 
 loop do
   UI.process
@@ -145,6 +161,18 @@ end
 const $ = id => document.getElementById(id);
 const code = $('code'), log = $('log');
 const synth = new BuiltinSynth();
+// One context for the built-in synth and AMY, at AMY's rate (48 kHz in its web build)
+let audioCtx = null;
+let amyAudio = null;
+function startAudio() {
+  if (!audioCtx) {
+    audioCtx = new AudioContext({ sampleRate: 48000 });
+    amyAudio = new AmyAudio(audioCtx);
+  }
+  synth.resume(audioCtx);
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return amyAudio.init().catch(e => print(`[sim] AMY audio: ${e.message}`, 'err'));
+}
 const midi = new WebMidi();
 let device = null;
 
@@ -192,22 +220,35 @@ function webMidiOut(slot, cin, b1, b2, b3, timeUs) {
 midi.onRoleInput = (role, bytes) => { if (device) device.midiIn(role, bytes); };
 midi.onPortInput = (slot, bytes) => { if (device) device.webMidiIn(slot, bytes); };
 
-async function run() {
-  synth.resume();
-  if (device) { device.stop(); synth.allOff(); }
-  log.textContent = '';
-  print('[sim] starting', 'sys');
-  device = await MidoriDevice.start({
-    canvas: $('screen'), script: code.value, onOutput: print, onMidiOut: midiOut,
-    webMidiPorts: midi.namedPorts, onWebMidiOut: webMidiOut,
-  });
-  device.M.simVolume = (out, percent) => { if (out === 0) synth.setVolume(percent); };
-  for (const r of [0, 1]) device.setConnected(r, midi.roleConnected(r));
-  knownPorts = portNames();
+// Starts the device as the Supervisor does: 'ui' (at power-up, and when a
+// script ends or is stopped) or 'script' (Run), each in a fresh VM
+let starting = null;
+async function boot(mode) {
+  // One start at a time: a script that ends while another start is under way waits for it
+  while (starting) await starting;
+  starting = (async () => {
+    await startAudio();
+    if (device) { device.stop(); synth.allOff(); amyAudio.reset(); device = null; }
+    if (mode === 'script') log.textContent = '';
+    print(mode === 'ui' ? `[sim] UI mode (build ${BUILD})` : `[sim] running the script (build ${BUILD})`, 'sys');
+    device = await MidoriDevice.start({
+      canvas: $('screen'), mode, script: code.value, onOutput: print, onMidiOut: midiOut,
+      webMidiPorts: midi.namedPorts, onWebMidiOut: webMidiOut, amyAudio,
+      onScriptEnd: why => { print(why === 'stop' ? '[sim] stopped' : '[sim] script ended', 'sys'); boot('ui'); },
+    });
+  device.M.simVolume = (out, percent) => { if (out === 0) { synth.setVolume(percent); amyAudio.setVolume(percent); } };
+    for (const r of [0, 1]) device.setConnected(r, midi.roleConnected(r));
+    knownPorts = portNames();
+  })();
+  try { await starting; } finally { starting = null; }
 }
+const run = () => boot('script');
 
 $('run').onclick = run;
-$('stop').onclick = () => { if (device) { device.stop(); device = null; synth.allOff(); print('[sim] stopped', 'sys'); } };
+// Stop: back to UI mode, as the device's Stop does
+$('stop').onclick = () => { if (device && device.mode === 'script') { print('[sim] stopped', 'sys'); boot('ui'); } };
+// The page starts a device before any gesture; audio may only start with one
+document.addEventListener('pointerdown', () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }, true);
 
 // The named ports the running device was started with: a new one needs a Run
 let knownPorts = '';
@@ -259,7 +300,7 @@ $('midi').onclick = async () => {
 };
 if (!midi.supported) $('midi').disabled = true;
 
-run();
+boot('ui');   // as at power-up
 </script>
 </body>
 </html>

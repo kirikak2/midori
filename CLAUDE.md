@@ -1146,6 +1146,8 @@ Tab5 / CrowPanel の内蔵スピーカーから [AMY](https://github.com/shorepi
   読み込んだプリセットを `AMY._synth_state` で読み戻してノブに反映する。2026-10-04、実機未確認）。
   トランスポートは `AMY::Transport`（旧名 `AMY::Synth`、`fm.transport` / `syn.transport`）。
   サンプル: [examples/amy_fm.rb](examples/amy_fm.rb) / [examples/amy_synth.rb](examples/amy_synth.rb)
+- Web シミュレーター（`sim/`）では port を `AMY_GEM_POLLED` でビルドする（オーディオタスク・I2S なし、ホストが
+  `AMY_GEM_render(n)` で描いて `amy_gem_polled_sink()` へ）。docs/WEB_SIMULATOR.md §12.2
 - エコーは有効（`features.echo = 1`）。ディレイライン（約 512 KB、PSRAM）はレベルを
   初めて 0 より上げたときに確保される
 - アプリが 2 MB を超えたので `partitions.csv` の factory を 0x3F0000 に拡張し、

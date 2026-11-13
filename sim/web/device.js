@@ -1,6 +1,7 @@
 // The MIDoRI device in a page: one wasm instance = one boot of the device.
 //
-//   const dev = await MidoriDevice.start({ canvas, script, onOutput, onMidiOut });
+//   const dev = await MidoriDevice.start({ canvas, mode: 'ui' });             // as at power-up
+//   const dev = await MidoriDevice.start({ canvas, script, onScriptEnd });    // a script
 //   dev.stop();
 //
 // Running a script makes a new instance, as the device's Supervisor opens a
@@ -13,10 +14,28 @@ const RUBY_SLICE_MS = 8;      // Ruby runs this long per turn, then the page get
 const MAX_CATCHUP_TICKS = 10;
 const MAX_FINGERS = 5;
 
+// sim/build.sh writes wasm/build.json with an id per build. Every file of a
+// build is fetched with ?v=<id>: a browser that kept a file from an earlier
+// build (a plain static server sends no cache headers) cannot mix it in --
+// an old boot script with a new wasm said "AMY not available on this board".
+let buildPromise = null;
+function loadBuild() {
+  if (!buildPromise) {
+    buildPromise = fetch(new URL('./wasm/build.json', import.meta.url), { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : {}))
+      .then(j => String(j.id || Date.now()))
+      .catch(() => String(Date.now()));
+  }
+  return buildPromise;
+}
+function wasmUrl(name, id) {
+  return new URL(`./wasm/${name}?v=${encodeURIComponent(id)}`, import.meta.url).href;
+}
+
 let modulePromise = null;
-function loadFactory() {
+function loadFactory(id) {
   if (!modulePromise) {
-    modulePromise = import(new URL(`./wasm/midori-sim-${BOARD}.js`, import.meta.url)).then(m => m.default);
+    modulePromise = import(wasmUrl(`midori-sim-${BOARD}.js`, id)).then(m => m.default);
   }
   return modulePromise;
 }
@@ -24,46 +43,56 @@ function loadFactory() {
 // Ruby run before and after the user's script (sim/build.sh makes them from
 // sim/mrblib and the part of main_task_base.rb shared with the device)
 let rubyPromise = null;
-function loadRuby() {
+function loadRuby(id) {
   if (!rubyPromise) {
-    const get = name => fetch(new URL(`./wasm/${name}`, import.meta.url)).then(r => {
+    const get = name => fetch(wasmUrl(name, id)).then(r => {
       if (!r.ok) throw new Error(`${name}: ${r.status}`);
       return r.text();
     });
-    rubyPromise = Promise.all([get(`sim_boot-${BOARD}.rb`), get('sim_tail.rb')]);
+    rubyPromise = Promise.all([get(`sim_boot-${BOARD}.rb`), get('sim_ui.rb'),
+                               get('sim_script.rb'), get('sim_tail.rb')])
+      .then(([boot, ui, script, tail]) => ({ boot, ui, script, tail }));
   }
   return rubyPromise;
 }
 
-// The script the VM runs. The user's part is wrapped so an error is reported
-// and the device stays up, as the Supervisor does on the device.
-function wrapScript(boot, user, tail) {
-  return `${boot}
+// What the VM runs, as the device's main_task.rb: UI mode, or script mode
+// with the user's script, wrapped so an error is reported and the device
+// goes back to UI mode, as the Supervisor does on the device.
+function vmSource(ruby, mode, user) {
+  if (mode === 'ui') return `${ruby.boot}\n${ruby.ui}`;
+  return `${ruby.boot}
+${ruby.script}
 begin
 ${user}
 rescue Exception => e
   puts "Script error: #{e.class}: #{e.message}"
 end
-${tail}`;
+${ruby.tail}`;
 }
 
 export class MidoriDevice {
   static async start(opts) {
-    const [factory, ruby] = await Promise.all([loadFactory(), loadRuby()]);
+    const id = await loadBuild();
+    const [factory, ruby] = await Promise.all([loadFactory(id), loadRuby(id)]);
     const dev = new MidoriDevice(opts);
+    dev.buildId = id;
     dev.ruby = ruby;
     await dev._boot(factory);
     return dev;
   }
 
-  constructor({ canvas, script, onOutput, onMidiOut, webMidiPorts, onWebMidiOut }) {
+  constructor({ canvas, script, mode, onScriptEnd, onOutput, onMidiOut, webMidiPorts, onWebMidiOut, amyAudio }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.script = script || '';
+    this.mode = mode === 'ui' ? 'ui' : 'script';
+    this.onScriptEnd = onScriptEnd || (() => {});   // ('end' | 'stop') -> the page starts UI mode
     this.onOutput = onOutput || (s => console.log(s));
     this.onMidiOut = onMidiOut || (() => {});
     this.webMidiPorts = webMidiPorts || [];          // [{ slot, name, input, output, connected }]
     this.onWebMidiOut = onWebMidiOut || (() => {});
+    this.amyAudio = amyAudio || null;               // AmyAudio (amy_audio.js), or none
     this.running = false;
     this.fingers = new Map();     // pointerId -> { id, x, y }
     this.pinned = new Map();      // Alt+click fingers that stay down
@@ -72,6 +101,7 @@ export class MidoriDevice {
 
   async _boot(factory) {
     const M = await factory({
+      locateFile: name => wasmUrl(name, this.buildId),
       print: s => this.onOutput(s, 'out'),
       printErr: s => this.onOutput(s, 'err'),
     });
@@ -84,8 +114,11 @@ export class MidoriDevice {
 
     M.simPresent = (ptr, stride, x, y, w, h) => this._present(ptr, stride, x, y, w, h);
     M.simMidiOut = (role, cin, b1, b2, b3, timeUs) => this.onMidiOut(role, cin, b1, b2, b3, timeUs);
+    M.amyOut = (ptr, frames) => { if (this.amyAudio) this.amyAudio.push(M, ptr, frames); };
+    if (this.amyAudio) this.amyAudio.reset();
     M.webMidiOut = (slot, cin, b1, b2, b3, timeUs) => this.onWebMidiOut(slot, cin, b1, b2, b3, timeUs);
-    M.simStopScript = () => this.onOutput('[sim] stop requested', 'sys');
+    // The Scripts screen's Stop: back to UI mode, as on the device
+    M.simStopScript = () => { if (this.mode === 'script') this.onScriptEnd('stop'); };
     M.simRequestScript = path => this.onOutput(`[sim] script requested: ${path}`, 'sys');
 
     this._touchBuf = M._malloc(MAX_FINGERS * 12);
@@ -101,7 +134,9 @@ export class MidoriDevice {
       return;
     }
     M.ccall('picorb_create_task_with_filename', 'number', ['string', 'string'],
-            [wrapScript(this.ruby[0], this.script, this.ruby[1]), 'script.rb']);
+            [vmSource(this.ruby, this.mode, this.script), 'script.rb']);
+    // Ruby's sim_script_ended (sim/mrblib/sim_boot.rb) calls this
+    globalThis.__midoriSim = { scriptEnded: () => { if (this.running) this.onScriptEnd('end'); } };
     this._attachPointer();
     this.running = true;
     this._lastTick = performance.now();
@@ -162,6 +197,8 @@ export class MidoriDevice {
     }
     // Timers, the sequencer and MIDI input run between Ruby's turns too
     M._sim_rtos_poll();
+    // AMY renders here too, to keep its audio queued ahead
+    if (this.amyAudio) this.amyAudio.pump(M);
     const idle = !progressed && M._mrb_gc_scheduler_pending_wasm() !== 1;
     this._timer = setTimeout(() => this._runRuby(), idle ? 2 : 0);
   }

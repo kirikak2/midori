@@ -17,7 +17,7 @@ module BoardConfig
   HAS_SAM2695 = true
   HAS_USB_MIDI_HOST = true
   HAS_USB_MIDI_DEVICE = true
-  HAS_AMY = false          # AMY in the browser: later (docs/WEB_SIMULATOR.md §5.1)
+  HAS_AMY = true           # rendered by the page (sim/port/amy_platform_sim.c, sim/web/amy_audio.js)
   HAS_BLE_MIDI = false
   HAS_PRIMARY_I2C = false
   PRIMARY_I2C_SDA_PIN = -1

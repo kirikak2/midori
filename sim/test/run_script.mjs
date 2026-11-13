@@ -31,6 +31,8 @@ M._sim_boot();
   M.ccall('web_midi_port', null, ['number', 'string', 'number', 'number'], [slot, name, io.includes('i') ? 1 : 0, io.includes('o') ? 1 : 0]);
   M._web_midi_connected(slot, 1);
 });
+let amyFrames = 0, amyPeak = 0;
+M.amyOut = (ptr, n) => { const a = M.HEAP16.subarray(ptr >> 1, (ptr >> 1) + n * 2); for (const v of a) amyPeak = Math.max(amyPeak, Math.abs(v)); amyFrames += n; };
 M.webMidiOut = (slot, cin, b1, b2, b3) => midi.push(['port' + slot, b1.toString(16), b2, b3].join(' '));
 M.ccall('picorb_init', 'number', [], []);
 M.ccall('picorb_create_task_with_filename', 'number', ['string', 'string'], [src, 'script.rb']);
@@ -44,6 +46,7 @@ async function run(ms) {
     while (now - lastTick >= 4) { M._mrb_tick_wasm(); lastTick += 4; }
     for (let i = 0; i < 200; i++) if (M._mrb_run_step_status() <= 0) break;
     M._sim_rtos_poll();
+    if (M._sim_amy_running()) M._sim_amy_render(2);
     M._sim_frame();
     await sleep(5);
   }
@@ -56,6 +59,7 @@ for (const t of taps) {
   M._sim_touch(tp, 1); await run(120); M._sim_touch(tp, 0); await run(300);
 }
 console.log('midi out:', midi.length, midi.slice(0, 8));
+console.log('amy frames:', amyFrames, 'peak:', amyPeak);
 const rgb = Buffer.alloc(W * H * 3);
 for (let i = 0; i < W * H; i++) {
   let v = fb[i]; v = ((v & 0xff) << 8) | (v >> 8);

@@ -2,9 +2,23 @@
 # Builds the simulator: PicoRuby (libmruby.a) + the C/C++ half
 # (libmidori_sim.a) -> web/wasm/midori-sim-<board>.{js,wasm}
 #
-#   source ~/emsdk/emsdk_env.sh
-#   sim/build.sh            # BOARD=tab5 (default)
+#   sim/build.sh            # BOARD=tab5 (default); loads emsdk itself if emcc is not on PATH
 set -euo pipefail
+
+# Emscripten: use the one on PATH, else load emsdk ($EMSDK, then ~/emsdk)
+if ! command -v emcc >/dev/null 2>&1; then
+  for d in "${EMSDK:-}" "$HOME/emsdk"; do
+    if [[ -n "$d" && -f "$d/emsdk_env.sh" ]]; then
+      # shellcheck disable=SC1091
+      source "$d/emsdk_env.sh" >/dev/null 2>&1
+      break
+    fi
+  done
+  command -v emcc >/dev/null 2>&1 || {
+    echo "emcc not found: install emsdk (https://emscripten.org) or set EMSDK" >&2
+    exit 1
+  }
+fi
 SIM=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$SIM/.." && pwd)
 BOARD=${BOARD:-tab5}
@@ -30,11 +44,11 @@ OUT=$SIM/web/wasm
 mkdir -p "$OUT"
 EXPORTS='["_picorb_init","_picorb_create_task","_picorb_create_task_with_filename","_mrb_tick_wasm","_mrb_run_step","_mrb_run_step_status","_mrb_gc_scheduler_pending_wasm","_malloc","_free",
 "_sim_boot","_sim_frame","_sim_touch","_sim_rtos_poll","_sim_screen_width","_sim_screen_height",
-"_sim_midi_in","_sim_midi_connect","_web_midi_port","_web_midi_connected","_web_midi_in","_sim_scripts_clear","_sim_scripts_add","_sim_scripts_done","_sim_set_current_script"]'
+"_sim_midi_in","_sim_midi_connect","_web_midi_port","_web_midi_connected","_web_midi_in","_sim_amy_render","_sim_amy_running","_sim_amy_sample_rate","_sim_amy_block_size","_sim_scripts_clear","_sim_scripts_add","_sim_scripts_done","_sim_set_current_script"]'
 em++ -g0 -O2 \
   -fwasm-exceptions -sSUPPORT_LONGJMP=wasm \
   -sWASM=1 -sEXPORT_ES6=1 -sMODULARIZE=1 -sEXPORT_NAME=createMidoriSim \
-  -sEXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","stringToUTF8","lengthBytesUTF8","HEAPU8","HEAPU16","HEAP32","FS"]' \
+  -sEXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","stringToUTF8","lengthBytesUTF8","HEAPU8","HEAPU16","HEAP16","HEAP32","FS"]' \
   -sEXPORTED_FUNCTIONS="$(echo $EXPORTS | tr -d '\n ')" \
   -sINITIAL_MEMORY=64MB -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=2MB \
   -sENVIRONMENT=web,node -sWASM_ASYNC_COMPILATION=1 \
@@ -50,6 +64,8 @@ MARK='# ---- The MIDoRI simulator (sim/build.sh) takes this file up to here'
   sed "/^$(printf '%s' "$MARK" | sed 's/[][\/.*^$]/\\&/g')/q" "$ROOT/components/midori-runtime/mrblib/main_task_base.rb"
   cat "$SIM/mrblib/sim_boot.rb"
 } > "$OUT/sim_boot-$BOARD.rb"
-cp "$SIM/mrblib/sim_tail.rb" "$OUT/sim_tail.rb"
+for f in sim_ui.rb sim_script.rb sim_tail.rb; do cp "$SIM/mrblib/$f" "$OUT/$f"; done
+# The page fetches every file with ?v=<this id> (web/device.js)
+printf '{"id":"%s"}\n' "$(date +%Y%m%d%H%M%S)-$$" > "$OUT/build.json"
 grep -q "$MARK" "$OUT/sim_boot-$BOARD.rb" || { echo "marker not found in main_task_base.rb" >&2; exit 1; }
 ls -la "$OUT/midori-sim-$BOARD".* "$OUT"/sim_*.rb

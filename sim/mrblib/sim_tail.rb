@@ -1,6 +1,7 @@
 
-# After the script: as on the device, the screen stays and handlers keep running
+# After the script: back to UI mode, as on the device
 puts "Script finished"
+sim_script_ended
 loop do
   UI.process
   MIDI.sleep_ms 50

@@ -11,10 +11,11 @@ export class BuiltinSynth {
     this.volume = 0.7;
   }
 
-  // AudioContext starts suspended until a user gesture: call from one
-  resume() {
+  // AudioContext starts suspended until a user gesture: call from one.
+  // `ctx` shares the page's context (AMY renders at 48 kHz in it).
+  resume(ctx) {
     if (!this.ctx) {
-      this.ctx = new AudioContext();
+      this.ctx = ctx || new AudioContext();
       this.master = this.ctx.createGain();
       this.master.gain.value = this.volume * 0.3;
       this.master.connect(this.ctx.destination);

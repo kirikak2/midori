@@ -549,7 +549,7 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   ブロックに値が届く）、Layout DSL（`areas` + knob + 入れ子の grid の pad。タップで SAM2695 役へノート）、Keys
   （C++ 側の発音経路で SAM2695 役へ）、Sequencer の起動
 - **サイズ**: wasm 1.85 MB（gzip 前）、JS 132 KB。LovyanGFX と main/ui で約 0.3 MB、残りは PicoRuby
-- **まだ**: 仮想 `/sd` と Scripts、AMY、SysEx、CoreS3、デザイナー、CI（ブラウザでの動作確認は済み）
+- **まだ**: 仮想 `/sd` と Scripts、SysEx、CoreS3、デザイナー、CI（ブラウザでの動作確認は済み。AMY は §12.2）
 
 ### 12.1 web_midi（2026-11-13）
 
@@ -569,3 +569,35 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   （`MIDI_INPUT_POLLED` では false）を足し、待てないホストでは VM の中で 5 ms ずつ寝てからキューを見る
 - **シミュレーターのビルド**: rake は gem の mrblib の変更に気付かない（実機と同じ）。`sim/build.sh` は libmruby.a より
   新しい mrblib / src を持つ MIDoRI の gem のビルドを消してから rake を呼ぶ
+
+### 12.2 AMY（2026-11-14）
+
+**AMY のエンジンを midori-sim の wasm に入れ、ページのスレッドで描く**（`MIDIDevices.amy` / `AMY.add_fm` / パネル / Settings の音量が
+実機のコードのまま動く）。AMY 付属の Web ビルドは使わない: AudioWorklet + WASM Workers（SharedArrayBuffer = COOP/COEP が要り、
+GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscripten` で、picoruby-wasm（`-fwasm-exceptions`）と同じ wasm に入らない。
+
+- エンジンは実機の `components/amy` と同じソースを `sim/build_c.sh` でビルドし、`i2s.c`（実機の描画ループ）の代わりに
+  [sim/port/amy_platform_sim.c](../sim/port/amy_platform_sim.c)（`amy_render_audio()` = `amy_simple_fill_buffer()`、
+  AMY の Web 用ロックは 1 スレッドなので空実装）。`__EMSCRIPTEN__` なので AMY は **48 kHz**（ページの AudioContext も 48 kHz で作る）
+- **picoruby-amy の port に `AMY_GEM_POLLED`**: オーディオタスクと I2S を持たず、ホストが `AMY_GEM_render(n)` で n ブロック描く。
+  描いたブロックは出力ゲインを掛けて `amy_gem_polled_sink()`（ホストが定義）へ。`AMY.perf` は µs で測る（表示の「CPU 1 MHz」
+  「I2S wait」は実機向けの文言のまま）。実機（`AMY_GEM_POLLED` = 0）は従来どおり
+- ページ（[sim/web/amy_audio.js](../sim/web/amy_audio.js)）: デバイスのループのたびに、約 60 ms 先まで溜まるだけブロックを描かせ、
+  ヒープから写して AudioWorklet へ postMessage。Worklet は取り出したフレーム数を返し、ページはそれで残量を数える。
+  内蔵音源（SAM2695 役）と同じ AudioContext。Settings 画面のスピーカー音量は両方に効く
+- 計測（Node の V8）: FM 12 音で 1 ブロック平均 111 µs / 最大 611 µs（予算 5.33 ms の 2.1% / 11.5%）。wasm は 1.85 → 2.37 MB
+- 確認: `AMY.add_fm` / `add_synth` のノート、レイアウトのパッド、画面の鍵盤（C++ の発音経路）から AMY が鳴る（Node で波形の振幅を確認。
+  ブラウザで聞く確認はまだ）。例は「AMY」（ページ）、試験は `node sim/test/node_amy.mjs`
+- 先読みの 60 ms ぶん遅れる。ページのスレッドが止まると（GC、重い描画、裏のタブ）音が途切れ得る
+
+### 12.3 UI モードとスクリプトモード（2026-11-14）
+
+実機の Supervisor と同じ流れにした（それまではページを開くとエディタのスクリプトを実行し、AMY パネルが無かった）。
+
+- **ページを開くと UI モード**（電源投入と同じ）。`sim/mrblib/sim_ui.rb` が main_task_base.rb の UI モードと同じく
+  `setup_midi_devices` → `setup_sequencer` → `setup_amy_panel` → `UI.process` のループ（レイアウト表示中は 10 ms）。
+  Home に「AMY」タイルが出て、Tab5 と同じ AMY パネル（UI::AMYPanel）が動く。SD カード・コンソール・PicoModem は無い
+- **Run = スクリプトモード**（`sim_script.rb` + スクリプト + `sim_tail.rb`）。スクリプトが終わる・例外で止まる・Stop（ページのボタン、
+  Scripts 画面の Stop = `supervisor_stop_script()`）と、新しい VM で UI モードに戻る。終わりは Ruby の `sim_script_ended`
+  （JS ブリッジで `globalThis.__midoriSim.scriptEnded`）でページへ知らせる
+- 試験: `node sim/test/node_modes.mjs ui shot.png 385,350 1200,92 150,92 640,600`（Home → AMY → + → FM → 鍵盤）
