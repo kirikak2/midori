@@ -67,8 +67,8 @@ function loadRuby(board, id) {
 // What the VM runs, as the device's main_task.rb: UI mode, or script mode
 // with the user's script, wrapped so an error is reported and the device
 // goes back to UI mode, as the Supervisor does on the device.
-function vmSource(ruby, mode, user) {
-  if (mode === 'ui') return `${ruby.boot}\n${ruby.ui}`;
+function vmSource(ruby, mode, user, bootAutorun) {
+  if (mode === 'ui') return `${bootAutorun ? '$sim_boot_autorun = true\n' : ''}${ruby.boot}\n${ruby.ui}`;
   return `${ruby.boot}
 ${ruby.script}
 begin
@@ -92,7 +92,21 @@ export class MidoriDevice {
     return dev;
   }
 
-  constructor({ canvas, script, mode, onScriptEnd, onOutput, onMidiOut, webMidiPorts, onWebMidiOut, amyAudio }) {
+  // files: [{ path, data }] put in the device's FS before Ruby starts (the
+  // connected MIDoRI's /plugins, /sd/plugins and /app.rb: the start-up reads
+  // them as on the device); bootAutorun: UI mode runs /app.rb (the first
+  // start, as after power-up), through onRequestScript(path)
+  // scripts: the names the Scripts screen lists (the connected MIDoRI's
+  // /sd/*.rb), or null for none; scriptPath: the running script's path (its
+  // [Running] badge); onSdRefresh: the Scripts screen's reload
+  constructor({ canvas, script, mode, onScriptEnd, onOutput, onMidiOut, webMidiPorts, onWebMidiOut, amyAudio,
+                files, bootAutorun, onRequestScript, scripts, scriptPath, onSdRefresh }) {
+    this.files = files || [];
+    this.scripts = scripts || [];
+    this.scriptPath = scriptPath || '';
+    this.onSdRefresh = onSdRefresh || (() => {});
+    this.bootAutorun = !!bootAutorun;
+    this.onRequestScript = onRequestScript || (() => {});
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.script = script || '';
@@ -129,7 +143,9 @@ export class MidoriDevice {
     M.webMidiOut = (slot, cin, b1, b2, b3, timeUs) => this.onWebMidiOut(slot, cin, b1, b2, b3, timeUs);
     // The Scripts screen's Stop: back to UI mode, as on the device
     M.simStopScript = () => { if (this.mode === 'script') this.onScriptEnd('stop'); };
-    M.simRequestScript = path => this.onOutput(`[sim] script requested: ${path}`, 'sys');
+    // The Scripts screen: run a script (the page fetches it), reload the list
+    M.simRequestScript = path => { if (this.running) this.onRequestScript(String(path)); };
+    M.simRequestSdRefresh = () => { if (this.running) this.onSdRefresh(); };
 
     this._touchBuf = M._malloc(MAX_FINGERS * 12);
     M._sim_boot();
@@ -139,14 +155,25 @@ export class MidoriDevice {
               [p.slot, p.name, p.input ? 1 : 0, p.output ? 1 : 0]);
       M._web_midi_connected(p.slot, p.connected ? 1 : 0);
     }
+    this.setScripts(this.scripts);
+    if (this.scriptPath) M.ccall('sim_set_current_script', null, ['string'], [this.scriptPath]);
+    for (const f of this.files) {
+      try {
+        M.FS.mkdirTree(f.path.slice(0, f.path.lastIndexOf('/')) || '/');
+        M.FS.writeFile(f.path, f.data);
+      } catch (e) { this.onOutput(`[sim] ${f.path}: ${e.message}`, 'err'); }
+    }
     if (M.ccall('picorb_init', 'number', [], []) !== 0) {
       this.onOutput('[sim] PicoRuby failed to start', 'err');
       return;
     }
     M.ccall('picorb_create_task_with_filename', 'number', ['string', 'string'],
-            [vmSource(this.ruby, this.mode, this.script), 'script.rb']);
-    // Ruby's sim_script_ended (sim/mrblib/sim_boot.rb) calls this
-    globalThis.__midoriSim = { scriptEnded: () => { if (this.running) this.onScriptEnd('end'); } };
+            [vmSource(this.ruby, this.mode, this.script, this.bootAutorun), 'script.rb']);
+    // Ruby's sim_script_ended / sim_request_script (sim/mrblib/sim_boot.rb) call these
+    globalThis.__midoriSim = {
+      scriptEnded: () => { if (this.running) this.onScriptEnd('end'); },
+      requestScript: path => { if (this.running) this.onRequestScript(String(path)); },
+    };
     this._attachPointer();
     this.running = true;
     this._lastTick = performance.now();
@@ -177,6 +204,15 @@ export class MidoriDevice {
 
   setWebMidiConnected(slot, on) {
     if (this.M) this.M._web_midi_connected(slot, on ? 1 : 0);
+  }
+
+  // The Scripts screen's list (names under /sd); it redraws when it changes
+  setScripts(names) {
+    if (!this.M) return;
+    this.scripts = names || [];
+    this.M._sim_scripts_clear();
+    for (const n of this.scripts) this.M.ccall('sim_scripts_add', null, ['string'], [n]);
+    this.M._sim_scripts_done();
   }
 
   setConnected(role, on) {

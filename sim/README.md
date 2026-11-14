@@ -43,6 +43,9 @@ node sim/test/node_sysex.mjs                        # SysEx: routed dump, send_s
 node sim/test/node_designer.mjs shot.png            # designer: model -> project script -> run, taps
 node sim/test/node_designer_amy.mjs shot.png        # designer: AMY parts, envelopes, sequencer (Tab5)
 node sim/test/node_designer_screens.mjs shot.png    # designer: Pads / Knobs screens, routes, Home's menu
+node sim/test/node_link.mjs                         # midori_link.js against a fake MIDoRI (console, PicoModem)
+node sim/test/node_startup.mjs                      # start-up shared with the device: /app.rb, /plugins then /sd/plugins
+node sim/test/node_scripts.mjs shot.png 200,108 640,690   # the Scripts screen with a device's list: pick, Run
 ```
 
 ## Layout
@@ -56,6 +59,7 @@ node sim/test/node_designer_screens.mjs shot.png    # designer: Pads / Knobs scr
 | `port/` | Their implementations: framebuffer panel, M5GFX, esp_timer / queues (`rtos_sim.c`), NVS on localStorage, transports to the page (`sim_devices.c`), midori-runtime's C API (`sim_runtime.c`), page entry points (`platform_sim.cpp`) |
 | `mrblib/` | Boot Ruby: BoardConfig, then (by `build.sh`) the part of `main_task_base.rb` before its simulator marker, then `sim_boot.rb`; then `sim_ui.rb` (UI mode: devices, Sequencer, AMY panel) or `sim_script.rb` + the user's script + `sim_tail.rb` (script mode) |
 | `web/` | The page: `device.js` (one wasm instance = one boot), `usb_midi.js` (messages <-> USB-MIDI packets, SysEx included), `synth.js` (built-in synth = SAM2695), `amy_audio.js` (AMY's AudioWorklet), `webmidi.js` (Web MIDI ports in the device's roles and by name) |
+| `web/midori_link.js`, `web/device_panel.js` | The real MIDoRI over USB CDC (Web Serial): console commands, PicoModem, the page's panel (docs §13) |
 | `web/designer.html`, `web/designer/` | The designer (docs §12.6): `model.js` (project model, widget settings), `codegen.js` (project script), `app.js` (the page) |
 | `test/` | Node smoke tests |
 
@@ -93,6 +97,6 @@ Layout run with their Ruby; MIDI out to the built-in synth / Web MIDI; every
 Web MIDI port is also `MIDIDevices.web_midi("name")` and a MIDI Devices row /
 column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1); AMY plays
 through an AudioWorklet (§12.2). SysEx passes both ways (§12.4). The designer
-(`designer.html`, §12.6) builds layouts and generates the project script. Not
-yet: virtual `/sd` and Scripts, the designer's live patching and saving to
-/sd, CI.
+(`designer.html`, §12.6) builds layouts and generates the project script. A connected MIDoRI (USB CDC) gives the page its scripts, and the
+simulator its plugins and /app.rb (§13). Not yet: the designer's live
+patching and device panel, CI.

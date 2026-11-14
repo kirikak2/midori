@@ -1,8 +1,16 @@
-# UI mode (main_task_base.rb's UI branch, without the SD card, the console
-# and PicoModem): the built-in devices, the Sequencer's song and the AMY
-# panel, then UI.process until the page runs a script.
+# UI mode (main_task_base.rb's UI branch, without the console and PicoModem):
+# the startup script once (the page sets $sim_boot_autorun on the first start
+# with the device's files), else the built-in devices and plugins, the
+# Sequencer's song and the AMY panel, then UI.process until the page runs a
+# script.
 puts "Board: #{BoardConfig::BOARD_NAME}"
 $midori_mode = :ui
+if $sim_boot_autorun && File.file?(APP_SCRIPT)
+  puts "Startup script: #{APP_SCRIPT}"
+  sim_request_script(APP_SCRIPT)
+  loop { MIDI.sleep_ms 100 }   # the page starts script mode
+end
+SDLoader.scan(PLUGIN_DIRS)
 setup_midi_devices
 setup_sequencer
 setup_amy_panel

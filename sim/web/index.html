@@ -40,6 +40,17 @@
   fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; }
   fieldset label { display: grid; grid-template-columns: 9em 1fr 1fr; gap: 8px; align-items: center; margin: 4px 0; }
   fieldset select { width: 100%; min-width: 0; }
+  #midori-panel { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; background: var(--panel); }
+  #midori-panel h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  #midori-panel .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  #midori-panel input[type=text] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); color: var(--fg); }
+  #midori-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #midori-panel th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 0 2px; }
+  #midori-panel td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); }
+  #midori-panel td:first-child { font-family: ui-monospace, monospace; word-break: break-all; }
+  #midori-panel td:nth-child(2) { color: var(--muted); white-space: nowrap; }
+  #midori-panel td:last-child { text-align: right; white-space: nowrap; }
+  button.small { padding: 1px 8px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -56,6 +67,10 @@
   <section>
     <textarea id="code" spellcheck="false" aria-label="Ruby script"></textarea>
     <p class="hint">Run のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。</p>
+    <section id="midori-panel" aria-label="MIDoRI">
+      <h2>MIDoRI 実機（USB-C / Web Serial）</h2>
+      <div id="midori-panel-body"></div>
+    </section>
   </section>
   <section>
     <div class="device" id="device"><canvas id="screen" width="1280" height="720" aria-label="MIDoRI screen"></canvas></div>
@@ -74,8 +89,10 @@ const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
   .then(r => (r.ok ? r.json() : {})).then(j => String(j.id || Date.now()))
   .catch(() => String(Date.now()));
 const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
-const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES }] =
-  await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js')]);
+const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES },
+       { MidoriLink }, { mountDevicePanel }] =
+  await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js'),
+                     load('midori_link.js'), load('device_panel.js')]);
 
 const EXAMPLES = {
   'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
@@ -245,18 +262,36 @@ $('board').onchange = () => {
 
 // Starts the device as the Supervisor does: 'ui' (at power-up, and when a
 // script ends or is stopped) or 'script' (Run), each in a fresh VM
+// The connected MIDoRI's plugins and /app.rb (device_panel.js): the
+// simulator starts with them as the device does. bootAutorun: the next UI
+// mode is a "power-up" and runs /app.rb.
+let deviceFiles = [];
+let bootAutorun = false;
+// The connected MIDoRI's /sd/*.rb: the simulator's Scripts screen lists them
+// and runs the one picked (the page reads it from the device)
+let deviceScripts = [];
+const dec = new TextDecoder();
+
 let starting = null;
-async function boot(mode) {
+async function boot(mode, scriptText = null, scriptPath = '') {
   // One start at a time: a script that ends while another start is under way waits for it
   while (starting) await starting;
   starting = (async () => {
     await startAudio();
     if (device) { device.stop(); synth.allOff(); amyAudio.reset(); device = null; }
-    if (mode === 'script') log.textContent = '';
+    if (mode === 'script' && scriptText === null) log.textContent = '';
+    const autorun = mode === 'ui' && bootAutorun;
+    bootAutorun = false;
     print(`[sim] ${BOARDS[board].name}: ${mode === 'ui' ? 'UI mode' : 'running the script'} (build ${BUILD})`, 'sys');
     device = await MidoriDevice.start({
-      canvas: $('screen'), board, mode, script: code.value, onOutput: print, onMidiOut: midiOut,
+      canvas: $('screen'), board, mode, script: scriptText ?? code.value, onOutput: print, onMidiOut: midiOut,
       webMidiPorts: midi.namedPorts, onWebMidiOut: webMidiOut, amyAudio,
+      files: deviceFiles, bootAutorun: autorun,
+      scripts: deviceScripts, scriptPath,
+      // The startup script (/app.rb), or one picked on the Scripts screen
+      onRequestScript: path => { setTimeout(() => runDeviceScript(path), 0); },
+      // The Scripts screen's reload: the device's list again
+      onSdRefresh: () => { if (link.connected) panel.refresh(); else print('[sim] 実機に接続すると、実機の /sd のスクリプトが出ます', 'sys'); },
       onScriptEnd: why => { print(why === 'stop' ? '[sim] stopped' : '[sim] script ended', 'sys'); boot('ui'); },
     });
   device.M.simVolume = (out, percent) => { if (out === 0) { synth.setVolume(percent); amyAudio.setVolume(percent); } };
@@ -266,6 +301,24 @@ async function boot(mode) {
   try { await starting; } finally { starting = null; }
 }
 const run = () => boot('script');
+
+// A script the simulated device asks for, as the Supervisor runs it: from the
+// start-up files (/app.rb) or read from the connected MIDoRI
+async function runDeviceScript(path) {
+  const f = deviceFiles.find(x => x.path === path);
+  try {
+    let text;
+    if (f) text = dec.decode(f.data);
+    else if (link.connected) {
+      print(`[sim] 実機から ${path} を読み込んでいます`, 'sys');
+      text = await panel.readText(path);
+    } else throw new Error('実機に接続していません');
+    print(`[sim] ${path} を実行します`, 'sys');
+    await boot('script', text, path);
+  } catch (e) {
+    print(`[sim] ${path}: ${e.message}`, 'err');
+  }
+}
 
 $('run').onclick = run;
 // Stop: back to UI mode, as the device's Stop does
@@ -322,6 +375,28 @@ $('midi').onclick = async () => {
   } catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
 };
 if (!midi.supported) $('midi').disabled = true;
+
+// The real MIDoRI over USB CDC: its scripts, and its start-up files for the simulator
+// Its console in the log, without the page's own traffic (framed answers,
+// their entries, the echo of the commands) and ESP-IDF's logs
+const quiet = /^(#[<>]|#info |[fd]\t\d+\t|(info|ls|rm|rescan)( |$)|[IWD] \(|\[PicoModem\])/;
+const link = new MidoriLink({ onLine: line => { if (line.trim() && !quiet.test(line)) print(`[MIDoRI] ${line}`, 'sys'); } });
+const panel = mountDevicePanel($('midori-panel-body'), {
+  link, print,
+  getCode: () => code.value,
+  setCode: text => { code.value = text; },
+  onDeviceFiles: files => {
+    deviceFiles = files || [];
+    // As after power-up: the plugins load and /app.rb runs once
+    bootAutorun = true;
+    print(files ? '[sim] 実機のファイルで起動し直します（電源を入れたときと同じ）' : '[sim] 実機のファイルなしで起動し直します', 'sys');
+    boot('ui');
+  },
+  onScriptList: names => {
+    deviceScripts = names || [];
+    if (device) device.setScripts(deviceScripts);
+  },
+});
 
 boot('ui');   // as at power-up
 </script>
