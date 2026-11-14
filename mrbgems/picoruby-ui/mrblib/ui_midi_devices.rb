@@ -155,12 +155,14 @@ module UI
 
       # The firmware's devices (main_task.rb, at every start). The block gives
       # the transport; it runs now, or for bit 0 (standby: AMY) the first time
-      # something needs the device.
-      def register_builtin(key, name, bit = 0, color: nil, &factory)
+      # something needs the device. output: false for one that only sends
+      # (no MIDI OUT column).
+      def register_builtin(key, name, bit = 0, color: nil, output: true, &factory)
         k = key.to_s
         $ui_mididev_factories[k] = factory if factory
         UI._mididev_register(k, name.to_s, bit, _color(color), true)
         _start(k) if bit != 0 && factory
+        UI._mididev_no_out(k) unless output   # after _start, which registers again
         nil
       end
 

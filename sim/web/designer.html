@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDoRI Designer</title>
+<style>
+  :root {
+    --bg: #f6f7f6; --fg: #1d211e; --muted: #5b625d; --panel: #ffffff; --line: #d7dcd8;
+    --accent: #1f8a4c; --accent-fg: #ffffff; --code-bg: #fbfcfb; --err: #b3261e;
+    --cell: #eef1ef; --cell-hover: #dfe6e1; --sel: #1f8a4c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
+      --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+      --cell: #202622; --cell-hover: #29312c; --sel: #3fbf73;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
+    --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+    --cell: #202622; --cell-hover: #29312c; --sel: #3fbf73;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  header input[type=text] { width: 14em; }
+  button, select, input, textarea { font: inherit; color: var(--fg); }
+  button, select { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button.small { padding: 1px 8px; font-size: 12px; }
+  input[type=text], input[type=number], textarea { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); min-width: 0; }
+  main { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 1.3fr) minmax(260px, 0.9fr); gap: 16px; padding: 16px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr 1fr; } #inspector-col { grid-column: 1 / -1; } }
+  @media (max-width: 720px) { main { grid-template-columns: 1fr; } }
+  section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  section.card h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .palette { display: flex; flex-wrap: wrap; gap: 4px; }
+  .palette label { border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; cursor: pointer; user-select: none; }
+  .palette input { display: none; }
+  .palette input:checked + span { color: var(--accent); font-weight: 700; }
+  #grid { display: grid; gap: 4px; user-select: none; touch-action: none; margin-top: 8px; aspect-ratio: 16 / 9; }
+  #grid[data-board="cores3"] { aspect-ratio: 4 / 3; }
+  .cell { background: var(--cell); border-radius: 4px; min-height: 18px; }
+  .cell.pending { outline: 2px dashed var(--sel); }
+  .widget { border-radius: 6px; border: 2px solid transparent; display: flex; align-items: center; justify-content: center;
+            font-size: 12px; text-align: center; padding: 2px; overflow: hidden; cursor: grab; position: relative; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .widget.sel { border-color: var(--fg); box-shadow: 0 0 0 2px var(--sel); }
+  .widget.bad { outline: 3px solid var(--err); }
+  .widget.dragging { cursor: grabbing; opacity: .85; z-index: 1; }
+  .widget.blocked { outline: 3px dashed var(--err); opacity: .6; }
+  .widget .resize { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
+                    background: linear-gradient(135deg, transparent 50%, var(--fg) 50%); opacity: .8; border-bottom-right-radius: 4px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .device { background: #000; border-radius: 14px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); margin: 0 auto; }
+  .device[data-board="cores3"] { max-width: 664px; border-radius: 22px; padding: 20px; }
+  .device[data-board="cores3"] canvas { image-rendering: pixelated; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; border-radius: 4px; background: #000; }
+  #log { height: 120px; overflow: auto; margin: 10px 0 0; padding: 6px 8px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+  #log .err { color: var(--err); }
+  #log .sys { color: var(--muted); }
+  .field { display: grid; grid-template-columns: 9em 1fr; gap: 6px; align-items: center; margin: 4px 0; }
+  .field textarea { width: 100%; min-height: 70px; font: 12px/1.4 ui-monospace, monospace; }
+  .field input[type=text], .field input[type=number], .field select { width: 100%; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+  #problems li { color: var(--err); }
+  .menu-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 2px 8px; }
+  .tabs .sep { width: 1px; background: var(--line); margin: 0 4px; }
+  .tabs button.screen { font-style: italic; }
+  .slot-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; cursor: pointer; }
+  .slot-empty:hover { background: var(--cell-hover); }
+  .widget.target, .cell.target { outline: 2px dashed var(--sel); outline-offset: 1px; }
+  details summary { cursor: pointer; color: var(--muted); }
+  #midori-panel .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  #midori-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #midori-panel th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 0 2px; }
+  #midori-panel td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); }
+  #midori-panel td:first-child { font-family: ui-monospace, monospace; word-break: break-all; }
+  #midori-panel td:nth-child(2) { color: var(--muted); white-space: nowrap; }
+  #midori-panel td:last-child { text-align: right; white-space: nowrap; }
+  #code { width: 100%; height: 320px; font: 12px/1.45 ui-monospace, monospace; white-space: pre; overflow: auto; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MIDoRI Designer</h1>
+  <input type="text" id="name" aria-label="Project name">
+  <select id="board" aria-label="Board"></select>
+  <button id="new" data-en="New">新規</button>
+  <button id="open" data-en="Open…">開く…</button>
+  <button id="save" class="primary" data-en="Save (.rb)">保存（.rb）</button>
+  <button id="to-sim" data-en="Open in the simulator">シミュレーターで開く</button>
+  <input type="file" id="file" accept=".rb,text/plain" hidden>
+  <a href="./index.html" style="margin-left:auto" id="to-simulator" data-en="Simulator →">シミュレーター →</a>
+  <a href="./licenses.txt" target="_blank" data-en="Licenses">ライセンス</a>
+  <a data-lang-switch href="#"></a>
+</header>
+<main>
+  <div>
+    <section class="card">
+      <h2 data-en="Screens and layouts">画面とレイアウト</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="row" id="layout-fields">
+        <label><span data-en="Title">タイトル</span> <input type="text" id="title" style="width:10em"></label>
+        <label><span data-en="Columns">列</span> <input type="number" id="cols" min="1" max="12" style="width:4em"></label>
+        <label><span data-en="Rows">行</span> <input type="number" id="rows" min="1" max="12" style="width:4em"></label>
+        <button class="small" id="del-layout" data-en="Delete">削除</button>
+      </div>
+      <div class="row" id="screen-fields" hidden>
+        <span id="screen-info"></span>
+        <span class="tabs" id="banks" style="margin:0"></span>
+      </div>
+      <div class="row">
+        <label><input type="radio" name="start" id="start"> <span data-en="Show first">最初に表示する</span></label>
+        <label><input type="checkbox" id="send-initial"> <span data-en="Send the knobs' and envelopes' starting values at start">起動時にノブとエンベロープの初期値を送る</span></label>
+      </div>
+    </section>
+    <section class="card">
+      <h2 data-en="Widgets">部品</h2>
+      <div class="palette" id="palette"></div>
+      <div id="grid" aria-label="Layout grid"></div>
+      <p class="hint" id="slot-hint" hidden data-en="Click an empty place to put a pad / knob there. Drag to swap, arrow keys swap with the neighbour, Delete removes.">空いたところをクリックしてパッド / ノブを置く。ドラッグで入れ替え、矢印キーで隣と入れ替え、Delete で削除。</p>
+      <p class="hint" id="layout-hint" data-en="Drag over empty cells to put a widget there. Drag a widget to move it, its corner to resize it (arrow keys move, Shift + arrows resize, Delete removes).">空いたセルをドラッグして部品を置く。部品はドラッグで移動、選んだ部品の右下の角をドラッグで大きさを変える（矢印キーで移動、Shift + 矢印で大きさ、Delete で削除）。</p>
+    </section>
+  </div>
+  <div>
+    <div class="device" id="device"><canvas id="screen" width="1280" height="720" aria-label="Preview"></canvas></div>
+    <p class="hint" data-en="The preview draws as the device does and can be played. A change to widgets goes into it as it runs (knobs keep their values); devices, parts, routes, the menu or a layout's title start it again.">プレビューは実機と同じ描画で、そのまま操作できます。部品の変更は動かしたまま反映します（ノブの値はそのまま）。デバイス・パート・ルート・メニュー・レイアウトのタイトルを変えると作り直します。</p>
+    <div id="log" role="log" aria-live="polite"></div>
+    <section class="card" id="midori-panel" style="margin-top:12px">
+      <h2 data-en="Your MIDoRI (USB-C / Web Serial)">MIDoRI 実機（USB-C / Web Serial）</h2>
+      <div id="midori-panel-body"></div>
+      <p class="hint" data-en="Saves the project to the device as /sd/&lt;name&gt;.rb (run from the Scripts screen) or /app.rb (runs at power-up). Only files made by the designer open here.">プロジェクトを実機の /sd/&lt;名前&gt;.rb（Scripts 画面から実行）か /app.rb（電源を入れたときに実行）に保存します。開けるのはデザイナーで作ったファイルだけです。</p>
+    </section>
+    <details>
+      <summary data-en="The script it makes">生成されるスクリプト</summary>
+      <pre id="code"></pre>
+    </details>
+  </div>
+  <div id="inspector-col">
+    <section class="card">
+      <h2 data-en="Inspector">インスペクタ</h2>
+      <div id="inspector"><p class="hint" data-en="Select a widget for its settings.">部品を選ぶと設定が出ます。</p></div>
+    </section>
+    <section class="card">
+      <h2 data-en="Devices">デバイス</h2>
+      <div id="devices"></div>
+      <button class="small" id="add-device" data-en="Add a device">デバイスを追加</button>
+    </section>
+    <section class="card" id="parts-card">
+      <h2 data-en="AMY parts (Tab5)">AMY パート（Tab5）</h2>
+      <div id="parts"></div>
+      <button class="small" id="add-part" data-en="Add a part">パートを追加</button>
+      <p class="hint" data-en="To play a part from Keys and the like, add an AMY device and send on the part's channel. Envelopes can go to a part too.">Keys などでパートを鳴らすときは、デバイスに AMY を足して、そのパートのチャンネルで送ります。Envelope の送り先にもなります。</p>
+    </section>
+    <section class="card">
+      <h2 data-en="Routes (MIDI.route)">ルート（MIDI.route）</h2>
+      <div id="routes"></div>
+      <button class="small" id="add-route" data-en="Add a route">ルートを追加</button>
+      <p class="hint" data-en="Forwards what a device receives to another, in C (MIDI Thru). Clock is Tempo's clock (MIDI::Clock). Routes with a device the board lacks are skipped.">受けた MIDI を C で別のデバイスへ流します（MIDI Thru）。Clock は Tempo のクロック（MIDI::Clock）。そのボードに無いデバイスのルートは飛ばします。</p>
+    </section>
+    <section class="card">
+      <h2 data-en="Home's menu">Home のメニュー</h2>
+      <div id="menu" class="menu-list"></div>
+      <p class="hint" data-en="A screen left out is not on Home and UI.show cannot open it (UI.menu(hide:)). Home and Scripts always stay. It is undone when the script ends.">外した画面は Home に出ず、UI.show でも開けません（UI.menu(hide:)）。Home と Scripts は常に出ます。スクリプトが終われば元に戻ります。</p>
+    </section>
+    <section class="card" id="problems-card" hidden>
+      <h2 data-en="Problems">問題</h2>
+      <ul id="problems"></ul>
+    </section>
+  </div>
+</main>
+<script type="module">
+const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
+  .then(r => (r.ok ? r.json() : {})).then(j => String(j.id || Date.now()))
+  .catch(() => String(Date.now()));
+const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
+const [{ startDesigner }] = await Promise.all([load('designer/app.js')]);
+startDesigner(BUILD);
+</script>
+</body>
+</html>

@@ -524,10 +524,16 @@ configure_file(
 )
 
 # Concatenate board_config.rb and main_task_base.rb into main_task.rb
-# This ensures BoardConfig module is defined before main_task uses it
+# This ensures BoardConfig module is defined before main_task uses it.
+# It happens when CMake configures, so main_task_base.rb is a configure
+# dependency: without it `idf.py build` kept the old main_task.rb after
+# main_task_base.rb changed, until something else reconfigured (2026-11-14).
+# Written only when it changes, so a reconfigure does not recompile it.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${COMPONENT_DIR}/mrblib/main_task_base.rb)
 file(READ ${COMPONENT_DIR}/mrblib/board_config.rb BOARD_CONFIG_CONTENT)
 file(READ ${COMPONENT_DIR}/mrblib/main_task_base.rb MAIN_TASK_CONTENT)
-file(WRITE ${COMPONENT_DIR}/mrblib/main_task.rb "${BOARD_CONFIG_CONTENT}\n${MAIN_TASK_CONTENT}")
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/main_task.rb.new "${BOARD_CONFIG_CONTENT}\n${MAIN_TASK_CONTENT}")
+configure_file(${CMAKE_CURRENT_BINARY_DIR}/main_task.rb.new ${COMPONENT_DIR}/mrblib/main_task.rb COPYONLY)
 
 # Compile Ruby files
 set(RUBY_FILES main_task)

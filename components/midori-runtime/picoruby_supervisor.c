@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 
 #include "picoruby_supervisor.h"
 #include "picoruby-esp32.h"
@@ -889,6 +890,32 @@ static mrb_value c_sm_get_autorun_script(mrb_state *mrb, mrb_value self)
     return mrb_nil_value();
 }
 
+/* ScriptManager#boot_autorun? -- whether UI mode should run the startup
+ * script (/app.rb): true the first time it asks after a reset, and never
+ * after a crash (panic or watchdog), so a script that brings the device
+ * down cannot restart it forever. Later UI modes (after every script) get
+ * false, so stopping the startup script leaves the device in UI mode. */
+static bool s_boot_autorun_asked = false;
+
+static mrb_value c_sm_boot_autorun(mrb_state *mrb, mrb_value self)
+{
+    (void)mrb; (void)self;
+    if (s_boot_autorun_asked) {
+        return mrb_false_value();
+    }
+    s_boot_autorun_asked = true;
+    switch (esp_reset_reason()) {
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+        ESP_LOGW(TAG, "Last reset was a crash: not running the startup script");
+        return mrb_false_value();
+    default:
+        return mrb_true_value();
+    }
+}
+
 static mrb_value c_sm_request_script(mrb_state *mrb, mrb_value self)
 {
     mrb_value path = mrb_nil_value();
@@ -947,6 +974,7 @@ static void register_script_manager_class(mrb_state *mrb)
     mrb_define_method(mrb, cls, "add_log", c_sm_add_log, MRB_ARGS_REQ(1));
     mrb_define_method(mrb, cls, "get_autorun_script", c_sm_get_autorun_script, MRB_ARGS_NONE());
     mrb_define_method(mrb, cls, "request_script", c_sm_request_script, MRB_ARGS_OPT(1));
+    mrb_define_method(mrb, cls, "boot_autorun?", c_sm_boot_autorun, MRB_ARGS_NONE());
     mrb_define_method(mrb, cls, "irb_requested?", c_sm_irb_requested, MRB_ARGS_NONE());
     mrb_define_method(mrb, cls, "irb_begin", c_sm_irb_begin, MRB_ARGS_NONE());
     mrb_define_method(mrb, cls, "irb_end", c_sm_irb_end, MRB_ARGS_NONE());

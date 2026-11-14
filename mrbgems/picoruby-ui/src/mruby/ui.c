@@ -1587,6 +1587,16 @@ mrb_ui_mididev_register(mrb_state *mrb, mrb_value self)
                                                          mrb_test(builtin)));
 }
 
+/* UI._mididev_no_out(key): the built-in only sends (no MIDI OUT column) */
+static mrb_value
+mrb_ui_mididev_no_out(mrb_state *mrb, mrb_value self)
+{
+    mrb_value key;
+    mrb_get_args(mrb, "o", &key);
+    picoruby_ui_mididev_set_no_out(str_arg(mrb, key));
+    return mrb_nil_value();
+}
+
 /* UI._mididev_unregister(bit) -> bool */
 static mrb_value
 mrb_ui_mididev_unregister(mrb_state *mrb, mrb_value self)
@@ -1858,6 +1868,7 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
 
     /* MIDI Devices */
     DEF(_mididev_register,       mrb_ui_mididev_register,       MRB_ARGS_REQ(5));
+    DEF(_mididev_no_out,         mrb_ui_mididev_no_out,         MRB_ARGS_REQ(1));
     DEF(_mididev_unregister,     mrb_ui_mididev_unregister,     MRB_ARGS_REQ(1));
     DEF(_mididev_activate,       mrb_ui_mididev_activate,       MRB_ARGS_REQ(2));
     DEF(_mididev_count,          mrb_ui_mididev_count,          MRB_ARGS_NONE());

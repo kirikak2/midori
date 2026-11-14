@@ -30,6 +30,7 @@
       <a href="../#boards" class="hide-sm">Boards</a>
       <a href="../install/">Install</a>
       <a href="./" aria-current="page">Reference</a>
+      <a href="../simulator/" class="nav-sim">Simulator</a>
       <a href="https://github.com/kirikak2/midori" class="hide-sm">GitHub</a>
       <a href="../ja/reference/" class="lang" hreflang="ja">日本語</a>
     </nav>
@@ -128,7 +129,7 @@ UI.show(:pads)</pre></div>
 UI.knob(2, bank: 2, label: "Pan", origin: :center, value: 64) { |v| dev.control_change(10, v.to_i) }
 UI.knob(3, label: "BPM", min: 40, max: 240) { |v| UI::Tempo.bpm = v }
 UI.knob_send_all(bank: :all)
-UI.knobs</pre></div>
+UI.knobs</pre><a class="sim-link" href="../simulator/#code=jZBBT8IwFMfv_RQvetmSWQEnxiYcVGKyAwlROS_deIOFtm9py4SI390Wglw8eOt7_ff3a_7X8GpJg18jzIopvRVgsUGLpkYOS-zhFpoddEruj5lq2yp_0xpwe-PXkMTd-9NsNH68TzmL-UnkFEJMsW8Dw-BnEhen0XEn9THMAnUSBWxR8I2hKhlmoGSFSsDVy9ZT01xlUJMiK0DUe2ky6KXaooBxnsIXHPpDfM5rMt6SKuu1NCtMHvKQ457KNoXvX_Yog0qajYDRRTKXJhjItqvWRAUaj_Z_kuHgL8ndhf08nwW2juA8ZLXcBXU-OCMXoZ8P1B3xqtOhhv5CKR2aZSmVSk4fFuGYni8dY4qogyUxCBDeWQqdujDEirlTiF2pHQwHLFDYDw&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p>Options: <code>min:</code> / <code>max:</code> (0–127), <code>step:</code> (1; 0 for continuous), <code>origin: :center</code>
           for a gauge that grows both ways, <code>sensitivity:</code> (1.0).</p>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/KNOBS.md">docs/KNOBS.md</a> (Japanese)</p>
@@ -155,7 +156,7 @@ UI.knobs</pre></div>
                     glide_range: 2, y_cc: 74, device: dev)
 pad.slot(5, x_mode: :cc, x_cc: 70, y_cc: 71, device: fx)   # the 5th finger only
 UI.pad(1, label: "Hold", type: :toggle) { |on| pad.hold = on }
-pad.show</pre></div>
+pad.show</pre><a class="sim-link" href="../simulator/#code=bVBNa8MwDL37V4j2kkCWpd-doYdBGcuhMDYKG2MEN1Y-wLFCkrUN6_775BS2ywwPW_LTe5LG8NBQBV2BsIu39BxDgxk2aFMMQeMRbiE7Q21UP3AOn6XpbkoLbW-7AjyXe7nfTZd3Cz8Ujr9xOrGUWzyWrGHx5LnENWzDVlUDWbDqxhmIWml-7bnk9e1J6aGiTZVBCe-zZQCzdQDziDFhzBgLxoqx_ggE_HNyU2pMGmVzlpgG0CdpKmE1D5wdNyHd7TvfsDXUeax3TirS_CHT1AUDP_qtnPxVZmefHcbDLha8gKxklwbIml7s45A1PWYbdUAjYfRIRo8C6PraaXeU5wZ9-IIL2Qs4_4IJPDxZ-L72U9BJCENUgyYezkk2xHtrOXBr5I4R66RqYRIJtFr8AA&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p>XYPad also appears in MIDI Devices, so you can send what it plays to more gear by patching it there.</p>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/XYPAD.md">docs/XYPAD.md</a> (Japanese)</p>
       </section>
@@ -184,7 +185,7 @@ pad.show</pre></div>
         <div class="code-card"><pre>keys = UI::Keys.new(octaves: 2, low: 48, velocity: :position, device: MIDIDevices.amy)
 MIDI.route(MIDIDevices.usb_midi_host, keys)   # light keys from an external keyboard
 keys.set_color([48, 52, 55], :blue)           # show a chord or scale
-keys.show</pre></div>
+keys.show</pre><a class="sim-link" href="../simulator/#code=VZBBS8QwEIXv-RUP9rILtepiRQN7EBZhkb0onkRK2k5tMM2UJO1u_71JVdCcZl5mvveSFR4d9wgd4XjY8_MBjlpyZGvK0dCES7RnDEbNy0w1ahMutIWfbeiwTtrLw3F7e19scpHmd4lzkHJPk44MS6d1Er5bn3vVL8MiUnfJQHzS7GP5GneeYrlscB3URF5im8HwSeLmLsNEhmsdZgk5sNdBs80SIXIl_nqoft6IJOSOx0D__Edflb1udNmxDxmS-QbACkZ_dGHp0aYfURZ0DuSsMkmtWLlmyZp7CmXNht36LcUqYsaieM8gKzNSgv2eFXzHJyjUHbsG7OBrZeiHEq-EMMwDGhaI788HxzGij80S3huioew9rq8E2UZ8AQ&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/KEYS.md">docs/KEYS.md</a> (Japanese)</p>
       </section>
 
@@ -248,7 +249,7 @@ keys.show</pre></div>
         <h3>From a script</h3>
         <div class="code-card"><pre>seq = UI::Sequencer.current        # the song on screen
 seq.on_pattern { |e| UI.log("pattern #{e[:pattern]}") }
-seq.show</pre></div>
+seq.show</pre><a class="sim-link" href="../simulator/#code=NU5Na8JAEL3vrxjMJR66tYUWGvAgSCEHL0pPpUiajCawmVl3NlpR_3t3UjuneY_3lcF74B5ii7Aql7wuIeAOA1KNFho8wiPsfsC76jxqvofOxYeOQM4UW8iV2yxWz69vL1NrVD_XnLIolnjsUgbhKVfiD4qVqh_FJqXOtcAIHtL3kSwbPAxaHGw9hDQhwv2ysVuY9sCpug6IpD7LtPVVjBgILnDFa4qxjvf55J_NLvhZ3MHXbTKF2-iTlk_GOGYPDRtQmw-c9kkCOteKQ_TbXuBpZpAa8ws&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/SEQUENCER.md">docs/SEQUENCER.md</a> (Japanese)</p>
       </section>
 
@@ -279,7 +280,7 @@ t.scale = [36, 38, 42, 45, 46, 49]   # side N plays scale[N % size]
 t.add_ball(color: :red)
 UI.pad(1, label: "Faster") { t.rotation += 4 }
 t.start
-t.show</pre></div>
+t.show</pre><a class="sim-link" href="../simulator/#code=NZBfa8IwFMXf8ykOyqBlXeafKjPgw0CEPujDNp9EJG2us5A2Jcl0buy7L-nY0-Uczvnl5g6xtqaBPxM2xcq8FLB0IkttRRyKLnjE6ROdlrc-U37U2j_ULdyt9Wck0Xt93kzmi1nKWcwvI6cQYkWXOjBauibR-JOOO9n0YRaoy_gA82HuQuHNNKXRsm-4WpETmGewxktfm1ZgPMnwbuWl9jeBEZ9lsR2YIs6Uee4qqSnA9tPQmz5lyEMjD7k86HxxADBEJGPbf8ihb-y3uAv2Fx0CQyp1LKXWSWW0sQLCkkrZruCdVMk4g5YlaYHBWjpPdpDiG57_74j7JXL8xFW8tD7Os7kypo3poAwDIsiacAcXRDwLd5qoOzYO4xGjVrFf&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p>Also: <code>gravity_mode</code> (<code>:down</code> / <code>:center</code> / <code>:none</code>), <code>bounce</code>, <code>friction</code>, <code>ball_size</code>, <code>channel</code>, <code>duration</code>, <code>on_hit</code>.</p>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/TOMBOLA.md">docs/TOMBOLA.md</a> (Japanese)</p>
       </section>
@@ -305,7 +306,7 @@ t.show</pre></div>
         <div class="code-card"><pre>MIDI.route(UI::Tempo, MIDIDevices.usb_midi_device)   # clock to the DAW
 UI::Tempo.bpm = 128
 UI::Tempo.start                                      # .stop / .tap / .sync = true
-UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre></div>
+UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre><a class="sim-link" href="../simulator/#code=jZBPS8NAEMXv-yke5JJCXW1BsYEeCkXIoRe1eAz5MzGhyU7Y3VSL9bs7G0FydC_LvH3zm3kb4clyD98QDumen1NYqsmSKUmjojNuUX9i6PLL5CnGtvM3rYG7GN8gDtrL7rB-2NwvtAr-beCkSbKncysMQx9xEH5Lp13eT2Yl1G0YoMKrtjx6io_S90r9wEvMe0ZXZH1btVk1CQsAEcqOyxM8T2vtd2_qr1kXQy_s1fpxpjmfW49_nQji5kGSa59Pl4QthejtSDMkm6xscvNO-MJVZl5xTPXJcJE58vFqCdGWMOzb-pKgzjsnq38r1bHAK1YI_sGyRHRSTP_gOqIh6x1Wd4pMpX4A&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/TEMPO.md">docs/TEMPO.md</a> (Japanese)</p>
       </section>
 
@@ -339,7 +340,7 @@ UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre></div>
 fm  = amy.add_fm(channel: 0, patch: 128)      # DX7 preset
 syn = amy.add_synth(channel: 1, patch: 5)     # Juno-60 preset
 syn.cutoff = 900
-MIDI.route(MIDIDevices.usb_midi_host, amy)    # play it from a keyboard</pre></div>
+MIDI.route(MIDIDevices.usb_midi_host, amy)    # play it from a keyboard</pre><a class="sim-link" href="../simulator/#code=VZDLasMwEEX3-oqBbGxIVDuQtDFkUTAFF7JpKXRnZGuETa0HkpzWf19JSdtUK83l3jOPFTxZLcEPCKem1i8NWBRoUfVIgeMZ7kB8gZnYkjzdPE5-Mypwi_IDZFF7fTxt94ddTkn0HyOnqaoaz2NgKPzMonApHXVMJjMJ1GNsQJhcrqEfT1CIkBDU8KOM81bIrB-YUjhVUKzBMN8PFZTbhxzSW0H9fg_GokNPwmg30TToX7r8Te_ya_R5VnqzL27itJ-9FiJQDkVB4mjU6tnjv01m17Vy5GM7aOfXsV9-4aVjjR5EPCyDD1w6zSwnZNLaANcE4K2hxupAcaFIfDchmlY6KAuCipNv&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_SYNTH.md">docs/AMY_SYNTH.md</a> ·
           <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_PANEL.md">docs/AMY_PANEL.md</a> (Japanese)</p>
       </section>
@@ -387,7 +388,7 @@ md.patch(MIDIDevices.usb_midi_host, MIDIDevices.amy)
 md.patch(MIDIDevices.usb_midi_device, MIDIDevices.sam2695, channel: [0, 9, :clock])
 out = md.output            # play into Script: goes wherever Script is patched
 md.input.on(:note_on) { |m| out.note_on(m.note + 12, m.velocity) }
-md.save                    # patches made by a script last until it ends, unless saved</pre></div>
+md.save                    # patches made by a script last until it ends, unless saved</pre><a class="sim-link" href="../simulator/#code=hVHLSgQxELznKwr2soNjfICCAx4EEfbgRfEkssRJ6wTzGKazo4P673Zm97CCYJ-qK13VRWeBmyEF5I5wu7pOdysM9EIDxZY0LI04wssHem-meeZ543w-dBE8xdxhWbj7q9vT84uzSqsyf1l8Vk1zTaMTj0jvy0JsW9ZswjysxPWyLFDBCngQxd6YkLo3ue1-aTf8vA7OunWXONfYfzJhqv4R2Zn4LdulqdF2JkbyDR6Pa1zUaFqf2renSqVNlnjiLKAXvFeL7VlczAn37eD63OA1EeO9kwOONOxYOMaci2yJ6KL46BSXTUyZ1ilW-MRX-IJs0DtqGWaEA5yc1gh6JInj8lThu1iwGQl_1GK3hxGMlc-aYMDbDN5wxiZm5-EyKFqupfXEjOJmlfIp9bBJQT5D90OS-7A05VyaPVG_DoyTYyVa9QM&amp;board=tab5" target="_blank" rel="noopener">Open in the simulator ▶</a></div>
         <p class="ref-more">Details: <a href="https://github.com/kirikak2/midori/blob/main/docs/UI_MIDI_DEVICES.md">docs/UI_MIDI_DEVICES.md</a> ·
           <a href="https://github.com/kirikak2/midori/blob/main/docs/MIDI_FILTER_REGISTRY.md">docs/MIDI_FILTER_REGISTRY.md</a> (Japanese)</p>
       </section>

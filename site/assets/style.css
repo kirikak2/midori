@@ -614,3 +614,10 @@ section.ref-sec:first-child { border-top: 0; }
   .nav { gap: 2px; }
   .nav a { padding: 6px 6px; font-size: .88rem; }
 }
+
+/* "Open in the simulator" under a reference code card (tools/site_sim_links.rb) */
+.code-card .sim-link {
+  display: block; padding: 8px 20px 12px; font-size: .85rem; font-weight: 600;
+  color: var(--code-key); text-decoration: none; border-top: 1px solid rgba(255,255,255,.08);
+}
+.code-card .sim-link:hover { text-decoration: underline; }

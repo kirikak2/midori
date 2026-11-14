@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDoRI Simulator</title>
+<style>
+  :root {
+    --bg: #f6f7f6; --fg: #1d211e; --muted: #5b625d; --panel: #ffffff; --line: #d7dcd8;
+    --accent: #1f8a4c; --accent-fg: #ffffff; --code-bg: #fbfcfb; --err: #b3261e;
+    /* The editor's colours (vendor/codemirror.js reads --cm-*) */
+    --cm-keyword: #8a2f9e; --cm-string: #3b7a12; --cm-number: #a3530b; --cm-symbol: #0b6f8a; --cm-comment: #6f7771;
+    --cm-name: #1d211e; --cm-def: #1f5fbf; --cm-type: #9c5d00; --cm-ivar: #b33a3a; --cm-punct: #4d5550;
+    --cm-active: rgba(31,138,76,.06); --cm-selection: rgba(31,138,76,.22); --cm-match: rgba(201,169,12,.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
+      --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+      --cm-keyword: #d49cf0; --cm-string: #9ad27a; --cm-number: #f0b27a; --cm-symbol: #7ad0e6; --cm-comment: #7f8a82;
+      --cm-name: #e3e8e4; --cm-def: #8fb8ff; --cm-type: #f2c46d; --cm-ivar: #f19a9a; --cm-punct: #aab3ac;
+      --cm-active: rgba(63,191,115,.08); --cm-selection: rgba(63,191,115,.28); --cm-match: rgba(242,196,109,.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
+    --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+    --cm-keyword: #d49cf0; --cm-string: #9ad27a; --cm-number: #f0b27a; --cm-symbol: #7ad0e6; --cm-comment: #7f8a82;
+    --cm-name: #e3e8e4; --cm-def: #8fb8ff; --cm-type: #f2c46d; --cm-ivar: #f19a9a; --cm-punct: #aab3ac;
+    --cm-active: rgba(63,191,115,.08); --cm-selection: rgba(63,191,115,.28); --cm-match: rgba(242,196,109,.25);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  button, select { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  /* The editor (CodeMirror): its box can be resized from the corner */
+  #code { height: 60vh; min-height: 280px; resize: vertical; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); }
+  #code:focus-within { border-color: var(--accent); }
+  .device { background: #000; border-radius: 14px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); margin: 0 auto; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; border-radius: 4px; background: #000; }
+  /* CoreS3: a 2" panel, drawn at up to 2x with its pixels kept sharp */
+  .device[data-board="cores3"] { max-width: 664px; border-radius: 22px; padding: 20px; }
+  .device[data-board="cores3"] canvas { image-rendering: pixelated; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  #log { height: 22vh; min-height: 120px; overflow: auto; margin: 12px 0 0; padding: 8px 10px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+  #log .err { color: var(--err); }
+  #log .sys { color: var(--muted); }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; }
+  fieldset label { display: grid; grid-template-columns: 9em 1fr 1fr; gap: 8px; align-items: center; margin: 4px 0; }
+  fieldset select { width: 100%; min-width: 0; }
+  #midori-panel { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; background: var(--panel); }
+  #midori-panel h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  #midori-panel .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  #midori-panel input[type=text] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); color: var(--fg); }
+  #midori-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #midori-panel th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 0 2px; }
+  #midori-panel td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); }
+  #midori-panel td:first-child { font-family: ui-monospace, monospace; word-break: break-all; }
+  #midori-panel td:nth-child(2) { color: var(--muted); white-space: nowrap; }
+  #midori-panel td:last-child { text-align: right; white-space: nowrap; }
+  button.small { padding: 1px 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MIDoRI Simulator</h1>
+  <select id="board" aria-label="Board"></select>
+  <button id="run" class="primary">▶ Run</button>
+  <button id="stop">■ Stop</button>
+  <select id="examples" aria-label="Examples"></select>
+  <button id="midi" data-en="Use Web MIDI">Web MIDI を使う</button>
+  <button id="share" title="このスクリプトを開くリンクをコピーします（スクリプトは URL の # の後ろに入り、サーバーには送られません）" data-en-title="Copies a link that opens this script (it goes after the # of the URL and is never sent to a server)" data-en="Share link">共有リンク</button>
+  <a href="./designer.html" style="margin-left:auto" id="to-designer" data-en="Designer →">デザイナー →</a>
+  <a href="./licenses.txt" target="_blank" data-en="Licenses">ライセンス</a>
+  <a data-lang-switch href="#"></a>
+</header>
+<main>
+  <section>
+    <div id="code"></div>
+    <p class="hint" data-en="Every Run (Ctrl/⌘+Enter) starts the script in a fresh VM, as the device does. Ctrl/⌘+F searches.">Run（Ctrl/⌘+Enter）のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。Ctrl/⌘+F で検索。</p>
+    <section id="midori-panel" aria-label="MIDoRI">
+      <h2 data-en="Your MIDoRI (USB-C / Web Serial)">MIDoRI 実機（USB-C / Web Serial）</h2>
+      <div id="midori-panel-body"></div>
+    </section>
+  </section>
+  <section>
+    <div class="device" id="device"><canvas id="screen" width="1280" height="720" aria-label="MIDoRI screen"></canvas></div>
+    <p class="hint" data-en="Click / drag = a finger. Alt+click leaves a finger down (Alt+click again lifts it).">クリック / ドラッグ = 指。Alt+クリックで指を置いたままにできます（もう一度 Alt+クリックで離す）。</p>
+    <fieldset id="ports" hidden>
+      <legend data-en="MIDI ports">MIDI ポートの割り当て</legend>
+    </fieldset>
+    <div id="log" role="log" aria-live="polite"></div>
+  </section>
+</main>
+<script type="module">
+// The page's own modules are loaded with the build's id (wasm/build.json,
+// written by sim/build.sh), like the wasm and the boot Ruby (device.js): a
+// browser holding a module from an earlier build cannot run it with new files.
+const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
+  .then(r => (r.ok ? r.json() : {})).then(j => String(j.id || Date.now()))
+  .catch(() => String(Date.now()));
+const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
+const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES },
+       { MidoriLink }, { mountDevicePanel }, { createEditor }, { shareFragment, readFragment }, { t, localizePage, LANG }] =
+  await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js'),
+                     load('midori_link.js'), load('device_panel.js'), load('vendor/codemirror.js'), load('share.js'), load('i18n.js')]);
+localizePage();
+// The designer in the same language
+document.getElementById('to-designer').href = `./designer.html?lang=${LANG}`;
+
+const EXAMPLES = {
+  'Knobs': `# ${t('1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす', 'Knob 1 moves the built-in synth\'s (the SAM2695\'s) filter')}
+dev = MIDI::Device.new(MIDIDevices.sam2695)
+
+UI.knob(1, label: "Cutoff", color: :cyan, value: 64) do |v|
+  dev.control_change(74, v.to_i)
+end
+UI.pad(1, label: "C4") { dev.trigger(60, 110, duration: 400) }
+UI.pad(2, label: "E4") { dev.trigger(64, 110, duration: 400) }
+UI.pad(3, label: "G4") { dev.trigger(67, 110, duration: 400) }
+UI.knobs
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'Web MIDI': `# ${t('「Web MIDI を使う」を押してから Run。ポートは名前（の一部）で選ぶ', 'Press "Use Web MIDI", then Run. A port is picked by (part of) its name')}
+unless MIDIDevices.respond_to?(:web_midi)
+  raise "${t('MIDIDevices.web_midi はシミュレーターだけの機能です', 'MIDIDevices.web_midi is the simulator\'s only')}"
+end
+MIDIDevices.web_midis.each { |p| puts p.inspect }
+
+port = MIDIDevices.web_midis.first
+if port
+  # ${t('ポートで弾いた音を内蔵音源（SAM2695 役）で鳴らし、鍵盤も光らせる', 'What is played on the port sounds on the built-in synth (the SAM2695) and lights the keys')}
+  keys = UI::Keys.new(octaves: 2, low: 48, device: port)   # ${t('画面の鍵盤 → ポートへ', 'the screen\'s keys -> the port')}
+  MIDI.route(port, MIDIDevices.sam2695)
+  MIDI.route(port, keys)
+  MIDI.on(port, :note_on) { |m| puts "note #{m.note} vel #{m.velocity}" }
+  keys.show
+else
+  puts "${t('Web MIDI のポートがありません', 'No Web MIDI port')}"
+end
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'AMY': `# ${t('Tab5 の UI モードと同じ AMY パネル（Home の「AMY」タイル）をスクリプトから開く。', 'The AMY panel of the Tab5\'s UI mode (Home\'s "AMY" tile), opened from a script.')}
+# ${t('「+」でパートを足し、タブごとにプリセット・チャンネル・エンベロープ・ノブ・鍵盤', '"+" adds a part; each tab has a preset, a channel, envelopes, knobs and keys')}
+raise "${t('AMY は Tab5 / CrowPanel だけです（ボードを Tab5 にしてください）', 'AMY is on the Tab5 / CrowPanel only (choose the Tab5)')}" unless BoardConfig::HAS_AMY
+panel = UI::AMYPanel.new(engine: Proc.new { MIDIDevices.amy })
+panel.show
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'Keys': `keys = UI::Keys.new(octaves: 2, low: 48, device: MIDIDevices.sam2695)
+keys.set_color([48, 52, 55, 60, 64, 67], :blue)
+keys.show
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+  'Layout': `dev = MIDI::Device.new(MIDIDevices.sam2695)
+
+layout = UI.layout("Perform", cols: 4, rows: 3) do
+  areas <<~GRID
+    k1 k2 k3 k4
+    p  p  p  p
+    p  p  p  p
+  GRID
+  knob area: :k1, label: "Cutoff", value: 64 do |v| dev.control_change(74, v.to_i) end
+  knob area: :k2, label: "Volume", value: 100 do |v| dev.control_change(7, v.to_i) end
+  knob area: :k3, label: "Pan", origin: :center, value: 64 do |v| dev.control_change(10, v.to_i) end
+  knob area: :k4, label: "Prog", value: 0 do |v| dev.program_change(v.to_i) end
+  grid(area: :p, cols: 4, rows: 2) do
+    8.times do |i|
+      pad col: i % 4, row: i / 4, label: "N#{60 + i * 2}" do dev.trigger(60 + i * 2, 110, duration: 300) end
+    end
+  end
+end
+layout.show
+
+loop do
+  UI.process
+  MIDI.sleep_ms 10
+end
+`,
+};
+
+const $ = id => document.getElementById(id);
+const log = $('log');
+// The editor (CodeMirror, vendor/codemirror.js): code.value as a textarea's;
+// what it holds is kept for this viewer
+const code = createEditor($('code'), { label: 'Ruby script', onChange: () => save(), onRun: () => run() });
+const synth = new BuiltinSynth();
+// One context for the built-in synth and AMY, at AMY's rate (48 kHz in its web build)
+let audioCtx = null;
+let amyAudio = null;
+function startAudio() {
+  if (!audioCtx) {
+    audioCtx = new AudioContext({ sampleRate: 48000 });
+    amyAudio = new AmyAudio(audioCtx);
+  }
+  synth.resume(audioCtx);
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return amyAudio.init().catch(e => print(`[sim] AMY audio: ${e.message}`, 'err'));
+}
+const midi = new WebMidi();
+let device = null;
+
+const STORE = 'midori-sim/script';
+function loadSaved() { try { return localStorage.getItem(STORE); } catch (e) { return null; } }
+function save() { try { localStorage.setItem(STORE, code.value); } catch (e) {} }
+
+// The Examples menu: the page's own, then the repository's examples/ (copied
+// with an index by sim/build.sh; absent, the menu has only the first)
+{
+  const sel = $('examples');
+  sel.add(new Option(t('サンプル…', 'Examples…'), ''));
+  const quick = document.createElement('optgroup');
+  quick.label = t('すぐ試せるもの', 'Quick');
+  for (const name of Object.keys(EXAMPLES)) quick.append(new Option(name, name));
+  sel.append(quick);
+  fetch(`./examples/index.json?v=${encodeURIComponent(BUILD)}`).then(r => (r.ok ? r.json() : [])).then(list => {
+    if (!list.length) return;
+    const g = document.createElement('optgroup');
+    g.label = 'examples/';
+    for (const e of list) g.append(new Option(`${e.file.replace(/\.rb$/, '')} — ${e.title}`, `file:${e.file}`));
+    sel.append(g);
+  }).catch(() => {});
+  sel.value = '';
+  sel.onchange = async e => {
+    const v = e.target.value;
+    e.target.value = '';
+    if (!v) return;
+    if (v.startsWith('file:')) {
+      try {
+        const r = await fetch(`./examples/${v.slice(5)}?v=${encodeURIComponent(BUILD)}`);
+        if (!r.ok) throw new Error(String(r.status));
+        code.value = await r.text();
+      } catch (err) { print(`[sim] ${v.slice(5)}: ${err.message}`, 'err'); return; }
+    } else code.value = EXAMPLES[v];
+    save();
+    run();
+  };
+}
+code.value = loadSaved() || EXAMPLES['Knobs'];
+
+// A share link (#code=...): its script in the editor (not run: Run is the
+// viewer's), and the fragment dropped so a reload keeps their edits
+let shared = null;
+try { shared = await readFragment(); } catch (e) { shared = { error: e }; }
+if (shared && !shared.error) {
+  code.value = shared.script;
+  history.replaceState(null, '', location.pathname + location.search);
+}
+$('share').onclick = async () => {
+  try {
+    const url = `${location.origin}${location.pathname}${await shareFragment(code.value, board)}`;
+    await navigator.clipboard.writeText(url).catch(() => {});
+    print(`[sim] ${t(`共有リンクをコピーしました（${url.length} 文字）`, `Share link copied (${url.length} characters)`)}: ${url.length > 160 ? url.slice(0, 160) + '…' : url}`, 'sys');
+  } catch (e) { print(`[sim] ${t('共有リンク', 'Share link')}: ${e.message}`, 'err'); }
+};
+
+function print(s, kind = 'out') {
+  if (kind === 'out' && /^[IWD] \(/.test(s)) return;   // ESP-IDF style C logs: kept out of the way
+  const line = document.createElement('div');
+  if (kind !== 'out' || /^E \(/.test(s)) line.className = kind === 'sys' ? 'sys' : 'err';
+  line.textContent = s;
+  log.append(line);
+  while (log.childElementCount > 500) log.firstChild.remove();
+  log.scrollTop = log.scrollHeight;
+}
+
+// Device -> outside. The C side stamps esp_timer microseconds (performance.now()
+// based), sent a little ahead so the page's timer jitter does not reach the notes.
+const LOOKAHEAD_MS = 10;
+// One assembler per port: a SysEx comes in several packets and leaves whole
+const roleAsm = [new UsbMidiAssembler(), new UsbMidiAssembler(), new UsbMidiAssembler()];
+const portAsm = [];
+function midiOut(role, cin, b1, b2, b3, timeUs) {
+  const bytes = roleAsm[role].feed(cin, b1, b2, b3);
+  if (!bytes) return;
+  const at = timeUs / 1000 + LOOKAHEAD_MS;
+  if (midi.sendRole(role, bytes, at)) return;
+  if (role === 2 && synth.ctx) synth.message(bytes, synth.ctx.currentTime + (at - performance.now()) / 1000);
+}
+// MIDIDevices.web_midi("name") -> that Web MIDI output
+function webMidiOut(slot, cin, b1, b2, b3, timeUs) {
+  const bytes = (portAsm[slot] ||= new UsbMidiAssembler()).feed(cin, b1, b2, b3);
+  if (bytes) midi.sendPort(slot, bytes, timeUs / 1000 + LOOKAHEAD_MS);
+}
+
+midi.onRoleInput = (role, bytes) => { if (device) device.midiIn(role, bytes); };
+midi.onPortInput = (slot, bytes) => { if (device) device.webMidiIn(slot, bytes); };
+
+// The board (one wasm each, sim/build.sh), remembered for this viewer
+const BOARD_STORE = 'midori-sim/board';
+let board = DEFAULT_BOARD;
+try { const b = localStorage.getItem(BOARD_STORE); if (BOARDS[b]) board = b; } catch (e) {}
+for (const [id, b] of Object.entries(BOARDS)) $('board').add(new Option(`${b.name} (${b.width}x${b.height})`, id));
+$('board').value = board;
+$('device').dataset.board = board;
+$('board').onchange = () => {
+  board = $('board').value;
+  try { localStorage.setItem(BOARD_STORE, board); } catch (e) {}
+  $('device').dataset.board = board;
+  boot('ui');   // another board is another device: it starts from power-up
+};
+
+// Starts the device as the Supervisor does: 'ui' (at power-up, and when a
+// script ends or is stopped) or 'script' (Run), each in a fresh VM
+// The connected MIDoRI's plugins and /app.rb (device_panel.js): the
+// simulator starts with them as the device does. bootAutorun: the next UI
+// mode is a "power-up" and runs /app.rb.
+let deviceFiles = [];
+let bootAutorun = false;
+// The connected MIDoRI's /sd/*.rb: the simulator's Scripts screen lists them
+// and runs the one picked (the page reads it from the device)
+let deviceScripts = [];
+const dec = new TextDecoder();
+
+let starting = null;
+async function boot(mode, scriptText = null, scriptPath = '') {
+  // One start at a time: a script that ends while another start is under way waits for it
+  while (starting) await starting;
+  starting = (async () => {
+    await startAudio();
+    if (device) { device.stop(); synth.allOff(); amyAudio.reset(); device = null; }
+    if (mode === 'script' && scriptText === null) log.textContent = '';
+    const autorun = mode === 'ui' && bootAutorun;
+    bootAutorun = false;
+    print(`[sim] ${BOARDS[board].name}: ${mode === 'ui' ? 'UI mode' : 'running the script'} (build ${BUILD})`, 'sys');
+    device = await MidoriDevice.start({
+      canvas: $('screen'), board, mode, script: scriptText ?? code.value, onOutput: print, onMidiOut: midiOut,
+      webMidiPorts: midi.namedPorts, onWebMidiOut: webMidiOut, amyAudio,
+      files: deviceFiles, bootAutorun: autorun,
+      scripts: deviceScripts, scriptPath,
+      // The startup script (/app.rb), or one picked on the Scripts screen
+      onRequestScript: path => { setTimeout(() => runDeviceScript(path), 0); },
+      // The Scripts screen's reload: the device's list again
+      onSdRefresh: () => { if (link.connected) panel.refresh(); else print(t('[sim] 実機に接続すると、実機の /sd のスクリプトが出ます', '[sim] Connect your MIDoRI to list its /sd scripts here'), 'sys'); },
+      onScriptEnd: why => { print(why === 'stop' ? '[sim] stopped' : '[sim] script ended', 'sys'); boot('ui'); },
+    });
+  device.M.simVolume = (out, percent) => { if (out === 0) { synth.setVolume(percent); amyAudio.setVolume(percent); } };
+    for (const r of [0, 1]) device.setConnected(r, midi.roleConnected(r));
+    knownPorts = portNames();
+  })();
+  try { await starting; } finally { starting = null; }
+}
+const run = () => boot('script');
+
+// A script the simulated device asks for, as the Supervisor runs it: from the
+// start-up files (/app.rb) or read from the connected MIDoRI
+async function runDeviceScript(path) {
+  const f = deviceFiles.find(x => x.path === path);
+  try {
+    let text;
+    if (f) text = dec.decode(f.data);
+    else if (link.connected) {
+      print(t(`[sim] 実機から ${path} を読み込んでいます`, `[sim] Reading ${path} from the device`), 'sys');
+      text = await panel.readText(path);
+    } else throw new Error(t('実機に接続していません', 'No MIDoRI connected'));
+    print(t(`[sim] ${path} を実行します`, `[sim] Running ${path}`), 'sys');
+    await boot('script', text, path);
+  } catch (e) {
+    print(`[sim] ${path}: ${e.message}`, 'err');
+  }
+}
+
+$('run').onclick = run;
+// Stop: back to UI mode, as the device's Stop does
+$('stop').onclick = () => { if (device && device.mode === 'script') { print('[sim] stopped', 'sys'); boot('ui'); } };
+// The page starts a device before any gesture; audio may only start with one
+document.addEventListener('pointerdown', () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }, true);
+
+// The named ports the running device was started with: a new one needs a Run
+let knownPorts = '';
+function portNames() { return midi.namedPorts.map(p => p.name).join('\n'); }
+
+function renderPorts() {
+  const fs = $('ports');
+  fs.hidden = false;
+  fs.querySelectorAll('label, p').forEach(l => l.remove());
+  for (const role of ROLES) {
+    const label = document.createElement('label');
+    label.append(role.name);
+    const inSel = document.createElement('select');
+    const outSel = document.createElement('select');
+    inSel.add(new Option(role.id === 2 ? t('（入力なし）', '(no input)') : t('入力: なし', 'In: none'), ''));
+    outSel.add(new Option(role.id === 2 ? t('出力: 内蔵音源', 'Out: built-in synth') : t('出力: なし', 'Out: none'), ''));
+    if (role.id !== 2) for (const p of midi.inputPorts) inSel.add(new Option(`${t('入力', 'In')}: ${p.name}`, p.id));
+    for (const p of midi.outputPorts) outSel.add(new Option(`${t('出力', 'Out')}: ${p.name}`, p.id));
+    inSel.disabled = role.id === 2;
+    inSel.value = midi.roleInput[role.id] || '';
+    outSel.value = midi.roleOutput[role.id] || '';
+    const sync = () => { if (device && role.id < 2) device.setConnected(role.id, midi.roleConnected(role.id)); };
+    inSel.onchange = () => { midi.setRoleInput(role.id, inSel.value); sync(); };
+    outSel.onchange = () => { midi.setRoleOutput(role.id, outSel.value); sync(); };
+    label.append(inSel, outSel);
+    fs.append(label);
+  }
+  const ports = midi.namedPorts;
+  const names = document.createElement('p');
+  names.className = 'hint';
+  names.textContent = ports.length
+    ? `${t('MIDIDevices.web_midi で使えるポート', 'Ports for MIDIDevices.web_midi')}: ${ports.map(p => `"${p.name}"${p.connected ? '' : t('（未接続）', ' (closed)')}`).join(', ')}`
+    : t('Web MIDI のポートが見つかりません', 'No Web MIDI ports found');
+  fs.append(names);
+  // A port opening or closing reaches the running device at once
+  if (device) for (const p of ports) device.setWebMidiConnected(p.slot, p.connected);
+  if (device && portNames() !== knownPorts) {
+    print(t('[sim] MIDI ポートが変わりました。Run し直すと MIDIDevices.web_midi と MIDI Devices 画面に反映されます', '[sim] The MIDI ports changed. Run again for MIDIDevices.web_midi and the MIDI Devices screen to have them'), 'sys');
+    knownPorts = portNames();
+  }
+}
+midi.onChange = () => { if (midi.access) renderPorts(); };
+$('midi').onclick = async () => {
+  try {
+    await midi.enable();
+    $('midi').hidden = true;
+    print(t(`[sim] Web MIDI を有効にしました（SysEx ${midi.sysex ? 'あり' : 'なし: ブラウザが許可しませんでした'}）。ポートを Ruby から使うには Run し直してください`, `[sim] Web MIDI is on (SysEx ${midi.sysex ? 'allowed' : 'not allowed by the browser'}). Run again to use the ports from Ruby`), 'sys');
+  } catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
+};
+if (!midi.supported) $('midi').disabled = true;
+
+// The real MIDoRI over USB CDC: its scripts, and its start-up files for the simulator
+// Its console in the log, without the page's own traffic (framed answers,
+// their entries, the echo of the commands) and ESP-IDF's logs
+const quiet = /^(#[<>]|#info |[fd]\t\d+\t|(info|ls|rm|rescan)( |$)|[IWD] \(|\[PicoModem\])/;
+const link = new MidoriLink({ onLine: line => { if (line.trim() && !quiet.test(line)) print(`[MIDoRI] ${line}`, 'sys'); } });
+const panel = mountDevicePanel($('midori-panel-body'), {
+  link, print,
+  getCode: () => code.value,
+  setCode: text => { code.value = text; },
+  onDeviceFiles: files => {
+    deviceFiles = files || [];
+    // As after power-up: the plugins load and /app.rb runs once
+    bootAutorun = true;
+    print(files ? t('[sim] 実機のファイルで起動し直します（電源を入れたときと同じ）', '[sim] Starting again with the device\'s files (as at power-up)') : t('[sim] 実機のファイルなしで起動し直します', '[sim] Starting again without the device\'s files'), 'sys');
+    boot('ui');
+  },
+  onScriptList: names => {
+    deviceScripts = names || [];
+    if (device) device.setScripts(deviceScripts);
+  },
+});
+
+if (shared && shared.error) print(`[sim] ${t('共有リンクを読めませんでした', 'Could not read the share link')}: ${shared.error.message}`, 'err');
+else if (shared) {
+  if (shared.board && BOARDS[shared.board] && shared.board !== board) {
+    board = shared.board;
+    $('board').value = board;
+    $('device').dataset.board = board;
+  }
+  print(t('[sim] 共有リンクのスクリプトを開きました。▶ Run で実行します', '[sim] Opened the shared script. ▶ Run runs it'), 'sys');
+}
+
+boot('ui');   // as at power-up
+</script>
+</body>
+</html>

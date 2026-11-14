@@ -15,16 +15,9 @@ conf.gem core: 'picoruby-shell'
 conf.gem core: 'picoruby-picoline'
 conf.gem core: 'picoruby-vim'
 
-# mruby's own standard library. mruby/c has most of these methods built in,
-# so scripts written for it expect them.
-mruby_gems = File.expand_path('../picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems', __dir__)
-%w[
-  mruby-kernel-ext mruby-object-ext mruby-string-ext mruby-symbol-ext
-  mruby-array-ext mruby-hash-ext mruby-range-ext mruby-numeric-ext
-  mruby-proc-ext mruby-enum-ext mruby-compar-ext mruby-toplevel-ext
-  mruby-class-ext mruby-struct mruby-objectspace mruby-metaprog
-  mruby-error mruby-sprintf mruby-math
-].each { |g| conf.gem gemdir: "#{mruby_gems}/#{g}" }
+# mruby's own standard library (shared with the web simulator)
+# (by MRUBY_ROOT: this file is eval'ed, where __dir__ is rake's directory)
+eval File.read(File.expand_path('../build_config/mruby_stdlib.rb', MRUBY_ROOT))
 
 # stdlib
 conf.gem core: 'picoruby-rng'

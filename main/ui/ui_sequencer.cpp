@@ -26,6 +26,9 @@
 extern "C" {
 #include "midi_transport.h"
 #include "midi_route.h"
+#if defined(MIDORI_SIM)
+#include "sim_rtos.h"
+#endif
 }
 
 static const char* TAG = "UI_SEQ";
@@ -296,26 +299,43 @@ static void handle_packet(const Item& it)
     }
 }
 
+// One item of the queue: the body of the task's loop
+static void handle_item(const Item& it)
+{
+    if (it.kind == ITEM_SUBTICK) {
+        if (it.gen != s_clockGen) return;   // A clock came first and played it
+        s_lastTick = it.time;
+        bool more;
+        {
+            Lock lock;
+            more = seq_engine_subtick(s_eng);
+        }
+        if (more) arm_subtick();
+    } else {
+        handle_packet(it);
+    }
+}
+
+#if defined(MIDORI_SIM)
+// The simulator has no tasks: its loop drains the queue (sim/port/sim_rtos.h)
+static bool seq_step(void* arg)
+{
+    (void)arg;
+    Item it;
+    while (xQueueReceive(s_queue, &it, 0) == pdTRUE) handle_item(it);
+    return true;
+}
+#else
 static void seq_task(void* arg)
 {
     (void)arg;
     Item it;
     for (;;) {
         if (xQueueReceive(s_queue, &it, portMAX_DELAY) != pdTRUE) continue;
-        if (it.kind == ITEM_SUBTICK) {
-            if (it.gen != s_clockGen) continue;   // A clock came first and played it
-            s_lastTick = it.time;
-            bool more;
-            {
-                Lock lock;
-                more = seq_engine_subtick(s_eng);
-            }
-            if (more) arm_subtick();
-        } else {
-            handle_packet(it);
-        }
+        handle_item(it);
     }
 }
+#endif
 
 // --- C API -------------------------------------------------------------------
 
@@ -331,9 +351,15 @@ void ui_seq_init(void)
     esp_timer_create_args_t targs = {};
     targs.callback = subtick_timer_cb;
     targs.name = "seq_subtick";
+#if defined(MIDORI_SIM)
+    bool started = s_eng && esp_timer_create(&targs, &s_timer) == ESP_OK;
+    if (started) sim_rtos_add_step("sequencer", seq_step, nullptr);
+    if (!started) {
+#else
     if (!s_eng || esp_timer_create(&targs, &s_timer) != ESP_OK ||
         xTaskCreatePinnedToCore(seq_task, "sequencer", TASK_STACK, nullptr, TASK_PRIO,
                                 nullptr, TASK_CORE) != pdPASS) {
+#endif
         ESP_LOGE(TAG, "cannot start the sequencer");
         if (s_eng) seq_engine_free(s_eng);
         s_eng = nullptr;

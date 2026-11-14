@@ -789,6 +789,11 @@ bool ui_mididev_activate(const char *key, midi_tmask_t bit)
     return false;
 }
 
+void ui_mididev_set_no_out(const char *key)
+{
+    (void)key;
+}
+
 int ui_mididev_count(void)
 {
     return 0;
