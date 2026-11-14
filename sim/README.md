@@ -60,6 +60,7 @@ node sim/test/node_scripts.mjs shot.png 200,108 640,690   # the Scripts screen w
 | `mrblib/` | Boot Ruby: BoardConfig, then (by `build.sh`) the part of `main_task_base.rb` before its simulator marker, then `sim_boot.rb`; then `sim_ui.rb` (UI mode: devices, Sequencer, AMY panel) or `sim_script.rb` + the user's script + `sim_tail.rb` (script mode) |
 | `web/` | The page: `device.js` (one wasm instance = one boot), `usb_midi.js` (messages <-> USB-MIDI packets, SysEx included), `synth.js` (built-in synth = SAM2695), `amy_audio.js` (AMY's AudioWorklet), `webmidi.js` (Web MIDI ports in the device's roles and by name) |
 | `web/midori_link.js`, `web/device_panel.js` | The real MIDoRI over USB CDC (Web Serial): console commands, PicoModem, the page's panel (docs §13) |
+| `vendor/codemirror/` | The editor: CodeMirror 6 (pinned versions, `package-lock.json`) bundled by `npm install && npm run build` into `web/vendor/codemirror.js` (checked in, so the page needs no npm); colours from the page's `--cm-*` variables |
 | `web/designer.html`, `web/designer/` | The designer (docs §12.6): `model.js` (project model, widget settings), `codegen.js` (project script), `app.js` (the page) |
 | `test/` | Node smoke tests |
 

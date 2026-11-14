@@ -747,3 +747,16 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 - **まだ**: 実機での確認（接続・転送・`/app.rb` の自動実行・`/plugins` の順序）、デザイナーへのパネルの組み込み（§7.4）、
   `.mrb` のプラグインをシミュレーターで読めるか（ビルド設定が違う: 実機は `MRB_INT64`、シミュレーターは `MRB_INT32`）
 
+## 14. エディタ（CodeMirror 6、2026-11-14）
+
+- シミュレーターのエディタを textarea から **CodeMirror 6** にした。§8 のとおり CDN は使わず、
+  `sim/vendor/codemirror/`（`package.json` で版を固定、`package-lock.json`。入れるのは公開から 2 週間以上たった版:
+  `npm install --before=<日付>`）を esbuild で 1 本の ES モジュール `sim/web/vendor/codemirror.js`（343 KB、gzip 114 KB）に
+  まとめ、それをリポジトリに入れる（ページの表示に npm は要らない）。先頭のコメントに入っているパッケージと版・ライセンス
+  （すべて MIT）を書く（`build.mjs`）
+- 入っているもの: Ruby のハイライト（`@codemirror/legacy-modes` の ruby）、行番号、折りたたみ、履歴、括弧の対応と自動で閉じる、
+  検索（Ctrl/⌘+F）、Tab でインデント（2 文字）、**Ctrl/⌘+Enter で Run**。補完は入れていない
+- 色はページの CSS 変数（`--cm-keyword` など、ライト / ダークそれぞれ）を読むので、ページのテーマに従う
+- ページからは `createEditor(parent, { onChange, onRun })` が返す `value`（textarea と同じ読み書き）だけを使う
+- 更新するには `sim/vendor/codemirror` で版を書き換えて `npm install --before=<日付> && npm run build`
+

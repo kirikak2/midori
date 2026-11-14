@@ -8,16 +8,26 @@
   :root {
     --bg: #f6f7f6; --fg: #1d211e; --muted: #5b625d; --panel: #ffffff; --line: #d7dcd8;
     --accent: #1f8a4c; --accent-fg: #ffffff; --code-bg: #fbfcfb; --err: #b3261e;
+    /* The editor's colours (vendor/codemirror.js reads --cm-*) */
+    --cm-keyword: #8a2f9e; --cm-string: #3b7a12; --cm-number: #a3530b; --cm-symbol: #0b6f8a; --cm-comment: #6f7771;
+    --cm-name: #1d211e; --cm-def: #1f5fbf; --cm-type: #9c5d00; --cm-ivar: #b33a3a; --cm-punct: #4d5550;
+    --cm-active: rgba(31,138,76,.06); --cm-selection: rgba(31,138,76,.22); --cm-match: rgba(201,169,12,.28);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
       --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+      --cm-keyword: #d49cf0; --cm-string: #9ad27a; --cm-number: #f0b27a; --cm-symbol: #7ad0e6; --cm-comment: #7f8a82;
+      --cm-name: #e3e8e4; --cm-def: #8fb8ff; --cm-type: #f2c46d; --cm-ivar: #f19a9a; --cm-punct: #aab3ac;
+      --cm-active: rgba(63,191,115,.08); --cm-selection: rgba(63,191,115,.28); --cm-match: rgba(242,196,109,.25);
     }
   }
   :root[data-theme="dark"] {
     --bg: #111412; --fg: #e3e8e4; --muted: #9aa39c; --panel: #1a1e1b; --line: #2c322e;
     --accent: #3fbf73; --accent-fg: #0b130e; --code-bg: #141815; --err: #f2b8b5;
+    --cm-keyword: #d49cf0; --cm-string: #9ad27a; --cm-number: #f0b27a; --cm-symbol: #7ad0e6; --cm-comment: #7f8a82;
+    --cm-name: #e3e8e4; --cm-def: #8fb8ff; --cm-type: #f2c46d; --cm-ivar: #f19a9a; --cm-punct: #aab3ac;
+    --cm-active: rgba(63,191,115,.08); --cm-selection: rgba(63,191,115,.28); --cm-match: rgba(242,196,109,.25);
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
@@ -27,7 +37,9 @@
   button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
   main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 16px; padding: 16px; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  textarea { width: 100%; height: 60vh; min-height: 280px; resize: vertical; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--fg); tab-size: 2; }
+  /* The editor (CodeMirror): its box can be resized from the corner */
+  #code { height: 60vh; min-height: 280px; resize: vertical; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); }
+  #code:focus-within { border-color: var(--accent); }
   .device { background: #000; border-radius: 14px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.25); margin: 0 auto; }
   canvas { display: block; width: 100%; height: auto; touch-action: none; border-radius: 4px; background: #000; }
   /* CoreS3: a 2" panel, drawn at up to 2x with its pixels kept sharp */
@@ -65,8 +77,8 @@
 </header>
 <main>
   <section>
-    <textarea id="code" spellcheck="false" aria-label="Ruby script"></textarea>
-    <p class="hint">Run のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。</p>
+    <div id="code"></div>
+    <p class="hint">Run（Ctrl/⌘+Enter）のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。Ctrl/⌘+F で検索。</p>
     <section id="midori-panel" aria-label="MIDoRI">
       <h2>MIDoRI 実機（USB-C / Web Serial）</h2>
       <div id="midori-panel-body"></div>
@@ -90,9 +102,9 @@ const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
   .catch(() => String(Date.now()));
 const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
 const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES },
-       { MidoriLink }, { mountDevicePanel }] =
+       { MidoriLink }, { mountDevicePanel }, { createEditor }] =
   await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js'),
-                     load('midori_link.js'), load('device_panel.js')]);
+                     load('midori_link.js'), load('device_panel.js'), load('vendor/codemirror.js')]);
 
 const EXAMPLES = {
   'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
@@ -182,7 +194,10 @@ end
 };
 
 const $ = id => document.getElementById(id);
-const code = $('code'), log = $('log');
+const log = $('log');
+// The editor (CodeMirror, vendor/codemirror.js): code.value as a textarea's;
+// what it holds is kept for this viewer
+const code = createEditor($('code'), { label: 'Ruby script', onChange: () => save(), onRun: () => run() });
 const synth = new BuiltinSynth();
 // One context for the built-in synth and AMY, at AMY's rate (48 kHz in its web build)
 let audioCtx = null;
@@ -208,11 +223,6 @@ $('examples').add(new Option('Examples…', ''), 0);
 $('examples').value = '';
 $('examples').onchange = e => { if (e.target.value) { code.value = EXAMPLES[e.target.value]; save(); run(); } e.target.value = ''; };
 code.value = loadSaved() || EXAMPLES['Knobs'];
-code.addEventListener('input', save);
-code.addEventListener('keydown', e => {
-  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
-});
 
 function print(s, kind = 'out') {
   if (kind === 'out' && /^[IWD] \(/.test(s)) return;   // ESP-IDF style C logs: kept out of the way
