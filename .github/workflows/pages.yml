@@ -1,6 +1,9 @@
 # Publishes site/ to GitHub Pages, with the images of the latest release
 # under firmware/ for the web installer (release assets are served without
-# CORS headers, so the browser cannot fetch them from the release itself).
+# CORS headers, so the browser cannot fetch them from the release itself),
+# and the simulator and designer (sim/, docs/WEB_SIMULATOR.md) built to wasm
+# under simulator/. A failed simulator build or smoke test fails the job, so
+# nothing is deployed and the site as it was stays up.
 #
 # One-time setup: Settings -> Pages -> Source: "GitHub Actions".
 name: Pages
@@ -8,7 +11,17 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', 'tools/release/make_manifests.py', '.github/workflows/pages.yml']
+    paths:
+      - 'site/**'
+      - 'tools/release/make_manifests.py'
+      - 'tools/site_sim_links.rb'
+      - '.github/workflows/pages.yml'
+      # The simulator: its own files and the device code it is built from
+      - 'sim/**'
+      - 'main/ui/**'
+      - 'mrbgems/**'
+      - 'components/midori-runtime/**'
+      - 'examples/**'
   workflow_dispatch:
     inputs:
       tag:
@@ -31,6 +44,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Check out submodules
+        run: git submodule update --init --recursive --depth 1 --jobs 8
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      # The simulator (sim/build.sh): Emscripten at the version it is built
+      # and tested with, and M5GFX (LovyanGFX) at the version the firmware's
+      # component manager locks (dependencies.lock), where the build looks for it
+      - name: Emscripten 6.0.12
+        run: |
+          git clone --depth 1 --branch 6.0.12 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install 6.0.12
+          "$HOME/emsdk/emsdk" activate 6.0.12
+      - name: M5GFX 0.2.24
+        run: git clone --depth 1 --branch 0.2.24 https://github.com/m5stack/M5GFX.git managed_components/m5stack__m5gfx
+
+      - name: Build the simulator
+        run: |
+          gem install rake --no-document
+          sim/build.sh
+
+      # Each board's wasm, gzipped, against the 3 MB target (docs §8)
+      - name: Simulator size
+        run: |
+          echo "| file | raw | gzip |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-----|------|" >> "$GITHUB_STEP_SUMMARY"
+          over=0
+          for f in sim/web/wasm/midori-sim-*.wasm; do
+            raw=$(stat -c%s "$f"); gz=$(gzip -9 -c "$f" | wc -c)
+            echo "| $(basename "$f") | $raw | $gz |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$gz" -gt 3145728 ]; then echo "::error file=$f::$(basename "$f") is $gz bytes gzipped (target: 3 MB)"; over=1; fi
+          done
+          exit $over
+
+      - name: Simulator smoke tests
+        run: |
+          node sim/test/node_knob.mjs
+          node sim/test/node_designer.mjs
+          node sim/test/node_designer_live.mjs
+          node sim/test/node_startup.mjs
+          node sim/test/node_link.mjs
+          node sim/test/node_share.mjs
+          node sim/test/node_reference.mjs
+
+      - name: Put the simulator on the site
+        run: |
+          mkdir -p site/simulator
+          cp -r sim/web/. site/simulator/
 
       # The installer serves the latest stable release. Until there is one,
       # it serves the newest pre-release, so a release candidate can be tried

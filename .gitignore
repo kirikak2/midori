@@ -7,3 +7,4 @@ sdkconfig.defaults
 version.txt
 dist/
 site/firmware/
+site/simulator/

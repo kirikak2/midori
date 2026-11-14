@@ -30,6 +30,7 @@
       <a href="../#boards" class="hide-sm">対応ボード</a>
       <a href="../install/">インストール</a>
       <a href="./" aria-current="page">リファレンス</a>
+      <a href="../../simulator/?lang=ja" class="nav-sim">シミュレーター</a>
       <a href="https://github.com/kirikak2/midori" class="hide-sm">GitHub</a>
       <a href="../../reference/" class="lang" hreflang="en">EN</a>
     </nav>
@@ -128,7 +129,7 @@ UI.show(:pads)</pre></div>
 UI.knob(2, bank: 2, label: "Pan", origin: :center, value: 64) { |v| dev.control_change(10, v.to_i) }
 UI.knob(3, label: "BPM", min: 40, max: 240) { |v| UI::Tempo.bpm = v }
 UI.knob_send_all(bank: :all)
-UI.knobs</pre></div>
+UI.knobs</pre><a class="sim-link" href="../../simulator/?lang=ja#code=jZBBT8IwFMfv_RQvetmSWQEnxiYcVGKyAwlROS_deIOFtm9py4SI390Wglw8eOt7_ff3a_7X8GpJg18jzIopvRVgsUGLpkYOS-zhFpoddEruj5lq2yp_0xpwe-PXkMTd-9NsNH68TzmL-UnkFEJMsW8Dw-BnEhen0XEn9THMAnUSBWxR8I2hKhlmoGSFSsDVy9ZT01xlUJMiK0DUe2ky6KXaooBxnsIXHPpDfM5rMt6SKuu1NCtMHvKQ457KNoXvX_Yog0qajYDRRTKXJhjItqvWRAUaj_Z_kuHgL8ndhf08nwW2juA8ZLXcBXU-OCMXoZ8P1B3xqtOhhv5CKR2aZSmVSk4fFuGYni8dY4qogyUxCBDeWQqdujDEirlTiF2pHQwHLFDYDw&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p>オプション: <code>min:</code> / <code>max:</code>（0〜127）、<code>step:</code>（1。0 で連続値）、<code>origin: :center</code>
           （中央から両側へ伸びるゲージ）、<code>sensitivity:</code>（1.0）。</p>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/KNOBS.md">docs/KNOBS.md</a></p>
@@ -154,7 +155,7 @@ UI.knobs</pre></div>
                     glide_range: 2, y_cc: 74, device: dev)
 pad.slot(5, x_mode: :cc, x_cc: 70, y_cc: 71, device: fx)   # 5 本目の指だけ
 UI.pad(1, label: "Hold", type: :toggle) { |on| pad.hold = on }
-pad.show</pre></div>
+pad.show</pre><a class="sim-link" href="../../simulator/?lang=ja#code=bVDLSsNAFN3PV1zaTQIx9t0a6EIoYhYFUQqKSJhmbpPAZCYksW2wLrpy48a1LvwA6U8V6m94JwXdOHCYuXfOOffRhItcp1DGCFN_oq99yHGBOaoQXRC4hFNYrCGTvKo588dElieJgqJSZQyWyd2cTzuDs77tMsMfGx_f8ya4TMhD4coyiWNYuAVPazIj17EpwDIu6DUjye3dFRe1ogi5RA_uuwMHuiMHei1Cm9Al9AlDwujBYfDPiWQiMMi5isii40AVhKEHw55jylETnrltU9ctpC4t8lsHqRb04YWhCWp-61fZ_lMu1jZVaEIfDh9f3--7_XZ3eH3Zbz_32zc2810ytYgu-RylB41LLUXDgbLKjHmpo0iiDU-w0WoDpoGYCDS9VvB8bCjWK8ak1hkITdMZy1zT4goKzB6pZcQsSAtotxgqwX4A&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p>XYPad は MIDI Devices にも出ているので、そこでパッチすれば弾いた内容をほかの機材にも送れます。</p>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/XYPAD.md">docs/XYPAD.md</a></p>
       </section>
@@ -183,7 +184,7 @@ pad.show</pre></div>
         <div class="code-card"><pre>keys = UI::Keys.new(octaves: 2, low: 48, velocity: :position, device: MIDIDevices.amy)
 MIDI.route(MIDIDevices.usb_midi_host, keys)   # 外部鍵盤の演奏で鍵を光らせる
 keys.set_color([48, 52, 55], :blue)           # 和音やスケールを表示
-keys.show</pre></div>
+keys.show</pre><a class="sim-link" href="../../simulator/?lang=ja#code=VZDBSsNAEIbv-xQDXlqIUYsRDfQgFKFIL4onkZAmUxJMsiG7Sc2xqR6KilDESw8iVCwIgogHpW-z1Nq3cDcq6J5mfma-_59dgp2EhsA9hFazQfeakGAHE4wc1MHFDFagcwJxYOflTDv1A77sR8DyiHtQUdr-dqu2sWVUdaLm64rTNM0GZr5kRNitKOG7ZTqzw3KYSGpdGZBjzJksD-TOrizLDepwO0NmQk2DgHZNWN_UIMOAOj7PTTBjynzu00hTBMk14a-HHeZVogQ9oSnHf_4pa1uh7_qWRxnXQJlXAWAJZuObRX-yuHydj8ai9_QxvZ7dX4neg1REMZydDUQxEL2RKM7LxDpDbjk0oEnlUIUzZFLDONLAbAcpKuTvk-jhxeL2RRSnongTxbPoT0X_UUI_7ybz8fsPzqNdQgJKY3ApAfkdepxQmZjJpryFBYixFTJYWyUYueQL&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/KEYS.md">docs/KEYS.md</a></p>
       </section>
 
@@ -246,7 +247,7 @@ keys.show</pre></div>
         <h3>スクリプトから</h3>
         <div class="code-card"><pre>seq = UI::Sequencer.current        # 画面のソング
 seq.on_pattern { |e| UI.log("pattern #{e[:pattern]}") }
-seq.show</pre></div>
+seq.show</pre><a class="sim-link" href="../../simulator/?lang=ja#code=NU69SgNBEO73KYZccyncqKDgQQohCFekMaQSCWdu4h3s7Wx29_JDksL4CrY2PoAIlsGnuUJ8C3fOONV8H99fBDeWKvAFwjAd0G0KFmdoUU9RQo4L6MFsBUZl61bzUJfKn5Qa3Fr7AmLmRtfD88uri64UrO9zTpokA1yUIUPjMmbiDzrpsqoVi5Da5wLhcB6-cbCMcF5zsZXT2oYJHo4XwffL4ef1rXl6b_ZfzfNns_9gnyQ9MZn3aDVsYIvbECMVPcadfzba4F1yBPe7Thd2rc8VtBRCERnISQDbjKWwzwXAc6VTiGZSOTg7Fahz8Qs&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/SEQUENCER.md">docs/SEQUENCER.md</a></p>
       </section>
 
@@ -277,7 +278,7 @@ t.scale = [36, 38, 42, 45, 46, 49]   # 辺 N → scale[N % size]
 t.add_ball(color: :red)
 UI.pad(1, label: "Faster") { t.rotation += 4 }
 t.start
-t.show</pre></div>
+t.show</pre><a class="sim-link" href="../../simulator/?lang=ja#code=NZDNSsNAFIX38xSHFiHBGPuTFjvQhVAKWbQLtatSyqRzawOTTJgZW6u49QF8HBc-jCsfw5mIq8O5nPPdy-1ibnQFdyAs8pm-y2FoT4bqHaWQdMQ19s9olDi3meKpVO6qrGHPtTsgCrP728VgPBnFKQv5aeDknM_oWHpGTacoDP6sTa2o2jDz1GlYwJzXlS886KrQSrQNW0qyHOMERjvhSl1z9AcJHo04lu7M0UtHSWh7Jg8aM5fanVDkYeuh7w1vEmS-kflc5n022QDo4ufrE0t8v3-gja-XuIAtX2jjAULKbSGUinZaacPBDcmYrfK0ETLqJ1CiIMXRmQvryHRivMKl_wficooMb-EOJ4wLetAnxpTWDaRmQAAZ7Z9gvQk_Sa0iaraVRb_HqJbsFw&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p>ほかに <code>gravity_mode</code>（<code>:down</code> / <code>:center</code> / <code>:none</code>）、<code>bounce</code>、<code>friction</code>、<code>ball_size</code>、<code>channel</code>、<code>duration</code>、<code>on_hit</code>。</p>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/TOMBOLA.md">docs/TOMBOLA.md</a></p>
       </section>
@@ -304,7 +305,7 @@ t.show</pre></div>
         <div class="code-card"><pre>MIDI.route(UI::Tempo, MIDIDevices.usb_midi_device)   # DAW へクロック
 UI::Tempo.bpm = 128
 UI::Tempo.start                                      # .stop / .tap / .sync = true
-UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre></div>
+UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre><a class="sim-link" href="../../simulator/?lang=ja#code=jZCxTsMwFEV3f8WVsqRSMbQSCCJ1qFQhZegCVIxR0ryQiMSObKdQUQbI9yBW_ic_wnMqoY54sd_1vef5OcCt0Q1cSVjHK30Xw1BBhtSWJHLa4RzFK9o63Y-erKtqd1Yp2L1yJUKv3S_X86uby4kU3r_wnDiKVrSrmKHoJfTCsbTSps1oFkxd-AbC30qjO0fhhnMP1LR6itNMZ7OkqfIqyUdhAiDAavmI4eNn-Pwe-q-h7_kg_vIyaxvGz-bXJ5p1qXH41wrAbt3y8NKl48bzbpnoTEcnSK2SbZmqJ8IbDtzzgE0sn5XOEksunE3B2hRKu6rYRyjS2vLr34WoNcNzLeD9rdE8peVi_ApbE7VJYzG7EKRy8Qs&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/TEMPO.md">docs/TEMPO.md</a></p>
       </section>
 
@@ -338,7 +339,7 @@ UI::Tempo.on_change { |bpm| UI.knob_set(1, bpm, notify: false) }</pre></div>
 fm  = amy.add_fm(channel: 0, patch: 128)      # DX7 のプリセット
 syn = amy.add_synth(channel: 1, patch: 5)     # Juno-60 のプリセット
 syn.cutoff = 900
-MIDI.route(MIDIDevices.usb_midi_host, amy)    # 鍵盤から弾く</pre></div>
+MIDI.route(MIDIDevices.usb_midi_host, amy)    # 鍵盤から弾く</pre><a class="sim-link" href="../../simulator/?lang=ja#code=dc-_S8NAFAfw_f6KB10aaM-00GoDHYQgROiiCG4hTV5IIHcXcpdqxzaLIuLo4Ork4Oak-M8cIv4X3qX11-BN9768-7x3HTioBAOVIcwCXxwFUGGKFfIYKSS4gB1Iz6EsomXbM6_zQvVzDnLJVQZdmx3vz4bjycihxPZPrRN4no-L3Bgcz7o22JSSyoi1zcSoUzuARGy5ffTVYxKSMjCpudEoScKUdeMs4hwLD9welJGKMw8Gwz0H2tMB_3QX9OpRN7e6edDrZ900urkgZs1fTLv0jzT4lkbOljmsueiP3X8oGtdKpKkRJ65L7Mq0ErXCPz-s5TxkeZKHmZCqZ2c7G_vj-un97l6vrvT68u3lVa9uCCmEKCERBOAkoGUlDCBN0dKyQCxDJmHgEuQJ-QQ&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_SYNTH.md">docs/AMY_SYNTH.md</a> ・
           <a href="https://github.com/kirikak2/midori/blob/main/docs/AMY_PANEL.md">docs/AMY_PANEL.md</a></p>
       </section>
@@ -386,7 +387,7 @@ md.patch(MIDIDevices.usb_midi_host, MIDIDevices.amy)
 md.patch(MIDIDevices.usb_midi_device, MIDIDevices.sam2695, channel: [0, 9, :clock])
 out = md.output            # Script へ送る = Script のパッチの先へ出ていく
 md.input.on(:note_on) { |m| out.note_on(m.note + 12, m.velocity) }
-md.save                    # スクリプトが張ったパッチはスクリプト限り（save で保存）</pre></div>
+md.save                    # スクリプトが張ったパッチはスクリプト限り（save で保存）</pre><a class="sim-link" href="../../simulator/?lang=ja#code=hVFNSxxBEL33ryjYyw5O2g9Q2AEPgSWwBy-KJwnLONMyQ6a7h-ne1UWF9E4kJhHUk-YQcggkEEj2FIiykB9T7sGTf8GaUcIqgnV69frVq0d1A14VWoJNBKx02nq1A4XYEoVQkeAQiz7MwtYO5Fk4qDWbvTSzL1IFZqBsAs2KW3u5srDUWvQ4q_TLlU8nCNqin5KHEtvNirhrDTehrMWMXJerBUzGBNZpYkpGJM9DGyUPZntmsyvTOO0m2lgfpp9COfCeGYpr4uHYfRofoiRUSmQBbMz50PIhiDIdvXntMd2zFI-cCeSEp6oBa1GR5hbQ_b1-63D4iZT_qd9YnmJZYukITw4OSTR5f4nuO7p36I6rsKkiR65VM1Daiq5WHuzCntwD2sXvqaasEczA_IIPkvcFBUvtwIP9ysKEfQFPVANweIHDEZY_sTzDktYfTcZ_0H1D93Uq2eiR7PrzCQ4_3owPa2N0P67-fZn8Or8Zf2As0zqHWDOg3-J5oemAhprqntxkQuRdaWB-jgkVs1s&amp;board=tab5" target="_blank" rel="noopener">シミュレーターで開く ▶</a></div>
         <p class="ref-more">詳細: <a href="https://github.com/kirikak2/midori/blob/main/docs/UI_MIDI_DEVICES.md">docs/UI_MIDI_DEVICES.md</a> ・
           <a href="https://github.com/kirikak2/midori/blob/main/docs/MIDI_FILTER_REGISTRY.md">docs/MIDI_FILTER_REGISTRY.md</a></p>
       </section>
