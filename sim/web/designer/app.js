@@ -142,7 +142,10 @@ export async function startDesigner(build) {
     $('palette').append(label);
   }
 
-  let drag = null;   // { c0, r0, c1, r1 }
+  // What a pointer on the grid is doing:
+  //   { mode: 'place', c0, r0, c1, r1 }               dragging out a new widget on empty cells
+  //   { mode: 'move' | 'resize', id, c0, r0, col, row, w, h, moved }   a widget (col..h: where it would go)
+  let drag = null;
   function renderGrid() {
     const g = $('grid'), l = layout();
     g.dataset.board = project.board;
@@ -150,50 +153,106 @@ export async function startDesigner(build) {
     g.style.gridTemplateRows = `repeat(${l.rows}, 1fr)`;
     g.textContent = '';
     const bad = new Set(model.problems(project).filter(p => p.layout === current).map(p => p.widget));
+    const moving = drag && drag.mode !== 'place' ? drag : null;
     for (let r = 0; r < l.rows; r++) {
       for (let c = 0; c < l.cols; c++) {
-        if (model.widgetAt(l, c, r)) continue;
+        const under = model.widgetAt(l, c, r);
+        if (under && !(moving && under.id === moving.id)) continue;
         const cell = document.createElement('div');
         cell.className = 'cell';
         cell.style.gridColumn = `${c + 1}`;
         cell.style.gridRow = `${r + 1}`;
-        cell.dataset.col = c; cell.dataset.row = r;
-        if (drag && inRect(c, r, drag)) cell.classList.add('pending');
+        if (drag && drag.mode === 'place' && inRect(c, r, drag)) cell.classList.add('pending');
         g.append(cell);
       }
     }
     for (const w of l.widgets) {
+      const m = moving && moving.id === w.id ? moving : null;
+      const at = m || w;
       const el = document.createElement('div');
-      el.className = 'widget' + (w.id === selected ? ' sel' : '') + (bad.has(w.id) ? ' bad' : '');
-      el.style.gridColumn = `${w.col + 1} / span ${w.w}`;
-      el.style.gridRow = `${w.row + 1} / span ${w.h}`;
+      el.className = 'widget' + (w.id === selected ? ' sel' : '') + (bad.has(w.id) && !m ? ' bad' : '') +
+        (m ? ' dragging' : '') + (m && !fits(m.col, m.row, m.w, m.h, w.id) ? ' blocked' : '');
+      el.style.gridColumn = `${at.col + 1} / span ${at.w}`;
+      el.style.gridRow = `${at.row + 1} / span ${at.h}`;
       el.style.background = widgetColor(w);
       el.textContent = widgetCaption(w);
-      el.onpointerdown = ev => { ev.stopPropagation(); selected = w.id; changed({ preview: false }); };
+      el.title = `${WIDGETS[w.kind].label}: col ${at.col}, row ${at.row}, ${at.w}x${at.h}`;
+      el.onpointerdown = ev => startWidgetDrag(ev, w, 'move');
+      if (w.id === selected) {
+        const handle = document.createElement('div');
+        handle.className = 'resize';
+        handle.title = 'ドラッグで大きさを変える';
+        handle.onpointerdown = ev => startWidgetDrag(ev, w, 'resize');
+        el.append(handle);
+      }
       g.append(el);
     }
   }
   const inRect = (c, r, d) => c >= Math.min(d.c0, d.c1) && c <= Math.max(d.c0, d.c1) && r >= Math.min(d.r0, d.r1) && r <= Math.max(d.r0, d.r1);
-  const cellAt = ev => {
-    const el = document.elementFromPoint(ev.clientX, ev.clientY);
-    return el && el.classList.contains('cell') ? { c: +el.dataset.col, r: +el.dataset.row } : null;
-  };
-  $('grid').addEventListener('pointerdown', ev => {
+  // The cell under the pointer from the grid's geometry (widgets cover their
+  // cells, so not from the element there); clamped to the grid
+  function cellAt(ev) {
+    const g = $('grid'), l = layout(), rc = g.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(g).columnGap) || 0;
+    const cw = (rc.width + gap) / l.cols, ch = (rc.height + gap) / l.rows;
+    return { c: clamp(Math.floor((ev.clientX - rc.left) / cw), 0, l.cols - 1),
+             r: clamp(Math.floor((ev.clientY - rc.top) / ch), 0, l.rows - 1) };
+  }
+  function startWidgetDrag(ev, w, mode) {
+    ev.stopPropagation();
+    ev.preventDefault();
     const at = cellAt(ev);
-    if (!at) return;
+    drag = { mode, id: w.id, c0: at.c, r0: at.r, col: w.col, row: w.row, w: w.w, h: w.h, moved: false };
     $('grid').setPointerCapture(ev.pointerId);
-    drag = { c0: at.c, r0: at.r, c1: at.c, r1: at.r };
+    if (selected !== w.id) { selected = w.id; changed({ preview: false }); }
+  }
+  $('grid').addEventListener('pointerdown', ev => {
+    if (ev.button !== 0) return;
+    const at = cellAt(ev);
+    if (model.widgetAt(layout(), at.c, at.r)) return;
+    $('grid').setPointerCapture(ev.pointerId);
+    drag = { mode: 'place', c0: at.c, r0: at.r, c1: at.c, r1: at.r };
     renderGrid();
   });
   $('grid').addEventListener('pointermove', ev => {
     if (!drag) return;
-    const at = cellAt(ev);
-    if (at && (at.c !== drag.c1 || at.r !== drag.r1)) { drag.c1 = at.c; drag.r1 = at.r; renderGrid(); }
+    const at = cellAt(ev), l = layout();
+    if (drag.mode === 'place') {
+      if (at.c !== drag.c1 || at.r !== drag.r1) { drag.c1 = at.c; drag.r1 = at.r; renderGrid(); }
+      return;
+    }
+    const w = l.widgets.find(x => x.id === drag.id);
+    if (!w) { drag = null; return; }
+    let { col, row, w: ww, h } = w;
+    if (drag.mode === 'move') {
+      col = clamp(w.col + at.c - drag.c0, 0, l.cols - w.w);
+      row = clamp(w.row + at.r - drag.r0, 0, l.rows - w.h);
+    } else {
+      ww = Math.max(1, at.c - w.col + 1);
+      h = Math.max(1, at.r - w.row + 1);
+    }
+    if (col !== drag.col || row !== drag.row || ww !== drag.w || h !== drag.h) {
+      Object.assign(drag, { col, row, w: ww, h, moved: true });
+      renderGrid();
+    }
   });
-  $('grid').addEventListener('pointerup', () => {
+  function endDrag(commit) {
     if (!drag) return;
     const d = drag;
     drag = null;
+    if (d.mode !== 'place') {
+      const w = layout().widgets.find(x => x.id === d.id);
+      // Only where it fits: a move or resize onto another widget springs back
+      if (commit && w && d.moved && (d.col !== w.col || d.row !== w.row || d.w !== w.w || d.h !== w.h) &&
+          fits(d.col, d.row, d.w, d.h, w.id)) {
+        Object.assign(w, { col: d.col, row: d.row, w: d.w, h: d.h });
+        changed();
+      } else {
+        renderGrid();
+      }
+      return;
+    }
+    if (!commit) { renderGrid(); return; }
     const col = Math.min(d.c0, d.c1), row = Math.min(d.r0, d.r1);
     let w = Math.abs(d.c1 - d.c0) + 1, h = Math.abs(d.r1 - d.r0) + 1;
     // A single click gives the widget its usual size where that fits
@@ -207,18 +266,38 @@ export async function startDesigner(build) {
     layout().widgets.push(nw);
     selected = nw.id;
     changed();
-  });
-  function fits(col, row, w, h) {
-    const l = layout();
-    if (col + w > l.cols || row + h > l.rows) return false;
-    for (let r = row; r < row + h; r++) for (let c = col; c < col + w; c++) if (model.widgetAt(l, c, r)) return false;
-    return true;
   }
+  $('grid').addEventListener('pointerup', () => endDrag(true));
+  $('grid').addEventListener('pointercancel', () => endDrag(false));
+  // Whether a widget of w x h fits at (col, row): inside the grid and on no
+  // widget but `ignore` (the one being moved)
+  function fits(col, row, w, h, ignore = null) {
+    const l = layout();
+    if (col < 0 || row < 0 || col + w > l.cols || row + h > l.rows) return false;
+    return !l.widgets.some(o => o.id !== ignore &&
+      col < o.col + o.w && o.col < col + w && row < o.row + o.h && o.row < row + h);
+  }
+  // The keyboard: Delete removes the selected widget, arrows move it, Shift +
+  // arrows resize it, Escape drops a drag
   document.addEventListener('keydown', ev => {
-    if ((ev.key === 'Delete' || ev.key === 'Backspace') && selected && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (ev.key === 'Escape' && drag) { endDrag(false); return; }
+    const w = selected && layout().widgets.find(x => x.id === selected);
+    if (!w) return;
+    if (ev.key === 'Delete' || ev.key === 'Backspace') {
       ev.preventDefault();
       removeSelected();
+      return;
     }
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+    if (!step) return;
+    ev.preventDefault();
+    const [dc, dr] = step;
+    const to = ev.shiftKey ? { col: w.col, row: w.row, w: w.w + dc, h: w.h + dr }
+                           : { col: w.col + dc, row: w.row + dr, w: w.w, h: w.h };
+    if (to.w < 1 || to.h < 1 || !fits(to.col, to.row, to.w, to.h, w.id)) return;
+    Object.assign(w, to);
+    changed();
   });
   function removeSelected() {
     const l = layout();
