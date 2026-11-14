@@ -219,7 +219,10 @@ mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の
 
 - ビルド設定は `build_config/{xtensa,riscv}-esp-picoruby.rb`、gem 一覧は
   `build_config/picoruby_gems.rb`（mruby 標準の `*-ext` 系 gem も入れている。
-  mruby/c が組み込みで持っていたメソッドを補うため）。libmruby は
+  mruby/c が組み込みで持っていたメソッドを補うため。その一覧は `build_config/mruby_stdlib.rb` で、
+  Web シミュレーターのビルドも同じものを読む。2026-11-14 まではシミュレーターに compar-ext などが無く、
+  `Float#clamp` が NoMethodError になった。eval で読まれるファイルの中の `__dir__` は rake の作業ディレクトリ
+  （picoruby/）になるので、パスは `MRUBY_ROOT` から作る）。libmruby は
   `picoruby/build/esp32-picoruby/`
 - **mrb_state / mrb_value のレイアウトを変える define は libmruby と IDF 側で一致させる**
   （`CMakeLists.txt` の `ADDITIONAL_DEFINITIONS`）。ずれてもリンクは通り、メモリが静かに壊れる。

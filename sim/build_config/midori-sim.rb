@@ -39,7 +39,9 @@ MRuby::CrossBuild.new("midori-sim") do |conf|
 
   conf.gembox "mruby-posix"
   conf.gembox "stdlib"
-  conf.gem gemdir: "#{MRUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-math"
+  # The device's mruby standard library (Float#clamp, Struct, ...), from the
+  # same list as the device's build
+  eval File.read("#{MIDORI_ROOT}/components/midori-runtime/build_config/mruby_stdlib.rb")
   conf.gem gemdir: "#{MRUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint"
   conf.gem core: 'picoruby-wasm'
 
