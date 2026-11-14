@@ -1,3 +1,5 @@
 # Build products (sim/build.sh)
 out/
 web/wasm/
+web/examples/
+web/licenses.txt

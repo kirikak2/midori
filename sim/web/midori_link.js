@@ -22,6 +22,8 @@
 // Files go by PicoModem (docs/PICOMODEM.md): a bare STX, the device's ACK,
 // then frames STX | len(2) | cmd | payload | CRC-16/CCITT(2).
 
+import { t } from './i18n.js';
+
 const STX = 0x02, ACK = 0x06;
 const PM = {
   FILE_READ: 0x01, FILE_WRITE: 0x02, CHUNK: 0x04, ABORT: 0xff,
@@ -29,9 +31,16 @@ const PM = {
   OK: 0x00, READY: 0x01,
 };
 const CHUNK_SIZE = 480;            // the device's PicoModem::CHUNK_SIZE
-// USB CDC writes in small pieces with a gap (the PicoRuby web terminal's
-// values): the device's console buffers are small
-const TX_PIECE = 32, TX_GAP_MS = 20;
+// USB CDC writes go in pieces with a gap: the device's console buffers are
+// small. A file transfer starts at the fastest pace that has worked with
+// this browser and steps down when one fails (the last step is the PicoRuby
+// web terminal's 32 bytes / 20 ms); the pace that worked is remembered.
+export const PACES = [
+  { piece: 256, gap: 2 },
+  { piece: 64, gap: 5 },
+  { piece: 32, gap: 20 },
+];
+const PACE_STORE = 'midori-link/pace';
 const TIMEOUT_MS = 5000;
 // The console protocol this page speaks (console_input.c "#info proto=")
 export const PROTO = 3;
@@ -75,6 +84,15 @@ export function frame(cmd, payload = new Uint8Array(0)) {
   return out;
 }
 
+// An ERROR frame from the device. "Timeout ..." / "Unexpected ..." mean the
+// link lost bytes (worth a slower try); anything else (no such file, a full
+// card) would fail again the same way.
+function deviceError(payload) {
+  const e = new Error(dec.decode(payload));
+  e.semantic = !/^(Timeout|Unexpected)/.test(e.message);
+  return e;
+}
+
 // One framed answer's lines out of the console text ("> " prompts and the
 // echo of the command may come first on a line)
 const unprompt = line => line.replace(/^(> )+/, '');
@@ -95,13 +113,17 @@ export class MidoriLink {
     this._waiters = [];                     // line watchers: { test, resolve }
     this._queue = Promise.resolve();        // one command at a time
     this.listTimeoutMs = LIST_TIMEOUT_MS;
+    this.timeoutMs = TIMEOUT_MS;            // a PicoModem frame
+    this.pace = 0;                          // index into PACES
+    try { this.pace = Math.min(PACES.length - 1, Math.max(0, Number(localStorage.getItem(PACE_STORE)) || 0)); } catch (e) {}
+    this.onPace = () => {};                 // (pace, error) a transfer stepped down
     this._recent = [];                      // the last lines, for a timeout's message
   }
 
   // ---- connection
 
   async connect(port) {
-    if (!MidoriLink.supported) throw new Error('このブラウザは Web Serial に対応していません（Chrome / Edge を使ってください）');
+    if (!MidoriLink.supported) throw new Error(t('このブラウザは Web Serial に対応していません（Chrome / Edge を使ってください）', 'This browser has no Web Serial (use Chrome or Edge)'));
     this.port = port || await navigator.serial.requestPort({ filters: FILTERS });
     await this.port.open({ baudRate: 115200 });
     this.writer = this.port.writable.getWriter();
@@ -113,7 +135,8 @@ export class MidoriLink {
       await this.info();
     } catch (e) {
       await this.disconnect();
-      throw new Error(`MIDoRI が応答しません（${e.message}）。midi_device モードの MIDoRI の USB-C か確かめてください`);
+      throw new Error(t(`MIDoRI が応答しません（${e.message}）。midi_device モードの MIDoRI の USB-C か確かめてください`,
+                        `MIDoRI does not answer (${e.message}). Check it is the USB-C of a MIDoRI built in midi_device mode`));
     }
     return this.device;
   }
@@ -185,7 +208,7 @@ export class MidoriLink {
 
   // The next line passing test (within ms)
   // (the timeout's error carries what the device said last: lines .recent)
-  _waitLine(test, ms = TIMEOUT_MS) {
+  _waitLine(test, ms = this.timeoutMs) {
     return new Promise((resolve, reject) => {
       const w = { test, resolve, reject };
       this._waiters.push(w);
@@ -202,10 +225,41 @@ export class MidoriLink {
   }
 
   async _write(bytes) {
-    if (!this.connected) throw new Error('MIDoRI に接続していません');
-    for (let off = 0; off < bytes.length; off += TX_PIECE) {
-      await this.writer.write(bytes.subarray(off, off + TX_PIECE));
-      if (off + TX_PIECE < bytes.length) await sleep(TX_GAP_MS);
+    if (!this.connected) throw new Error(t('MIDoRI に接続していません', 'Not connected to a MIDoRI'));
+    const { piece, gap } = PACES[this.pace];
+    for (let off = 0; off < bytes.length; off += piece) {
+      await this.writer.write(bytes.subarray(off, off + piece));
+      if (off + piece < bytes.length) await sleep(gap);
+    }
+  }
+
+  // A transfer at the current pace, stepping down after a failure: the
+  // device ends its session (its own 5 s timeout) before the next try
+  async _paced(fn) {
+    for (;;) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (e.semantic || this.pace >= PACES.length - 1 || !this.connected) throw e;
+        this.pace++;
+        try { localStorage.setItem(PACE_STORE, String(this.pace)); } catch (x) {}
+        this.onPace(this.pace, e);
+        await this._resync();
+      }
+    }
+  }
+
+  // Wait for the device's console to answer again after a broken session
+  async _resync() {
+    const end = Date.now() + 8000;
+    while (Date.now() < end && this.connected) {
+      await sleep(300);
+      try {
+        const got = this._waitLine(l => l.includes('#info '), 600);
+        await this._write(new TextEncoder().encode('info\r'));
+        await got;
+        return;
+      } catch (e) { /* still in the session */ }
     }
   }
 
@@ -237,7 +291,8 @@ export class MidoriLink {
   // The firmware answers ls / rm in this page's protocol
   _checkProto(need = 2) {
     if (this.device && this.device.proto < need) {
-      throw new Error(`MIDoRI のファームウェアが古く、このページと答え方が違います（proto ${this.device.proto}、このページは ${PROTO}）。ファームウェアを書き込み直してください`);
+      throw new Error(t(`MIDoRI のファームウェアが古く、このページと答え方が違います（proto ${this.device.proto}、このページは ${PROTO}）。ファームウェアを書き込み直してください`,
+                        `The MIDoRI's firmware is older than this page (protocol ${this.device.proto}, the page speaks ${PROTO}). Flash it again`));
     }
   }
 
@@ -258,7 +313,7 @@ export class MidoriLink {
       await this._write(enc.encode(`ls ${dir}\r`));
       let line;
       try { line = await done; } catch (e) {
-        if (e.recent) e.message = `ls ${dir}: 実機から答えがありません（${this.listTimeoutMs / 1000} 秒）。最後に届いた行: ${e.recent.map(l => JSON.stringify(l)).join(' / ') || 'なし'}`;
+        if (e.recent) e.message = t(`ls ${dir}: 実機から答えがありません（${this.listTimeoutMs / 1000} 秒）。最後に届いた行: `, `ls ${dir}: no answer from the device (${this.listTimeoutMs / 1000} s). The last lines: `) + (e.recent.map(l => JSON.stringify(l)).join(' / ') || t('なし', 'none'));
         throw e;
       }
       const answer = line.slice(end.length);
@@ -300,16 +355,16 @@ export class MidoriLink {
   // ---- PicoModem
 
   readFile(path) {
-    return this._modem(async () => {
+    return this._paced(() => this._modem(async () => {
       await this._sendFrame(PM.FILE_READ, enc.encode(path));
       const parts = [];
       let total = -1, got = 0, crc = 0;
       for (;;) {
         const [cmd, payload] = await this._recvFrame();
-        if (cmd === PM.ERROR) throw new Error(dec.decode(payload));
+        if (cmd === PM.ERROR) throw deviceError(payload);
         if (cmd === PM.DONE_ACK) {
           const sum = ((payload[1] << 24) | (payload[2] << 16) | (payload[3] << 8) | payload[4]) >>> 0;
-          if (payload[0] !== PM.OK || sum !== crc) throw new Error(`${path}: CRC が一致しません`);
+          if (payload[0] !== PM.OK || sum !== crc) throw new Error(`${path}: ${t('CRC が一致しません', 'CRC mismatch')}`);
           break;
         }
         if (cmd !== PM.FILE_DATA) throw new Error(`unexpected frame 0x${cmd.toString(16)}`);
@@ -327,32 +382,32 @@ export class MidoriLink {
       let off = 0;
       for (const p of parts) { out.set(p, off); off += p.length; }
       return out;
-    });
+    }));
   }
 
   writeFile(path, data) {
     const bytes = typeof data === 'string' ? enc.encode(data) : data;
-    return this._modem(async () => {
+    return this._paced(() => this._modem(async () => {
       const p = enc.encode(path);
       const head = new Uint8Array(4 + p.length);
       new DataView(head.buffer).setUint32(0, bytes.length);
       head.set(p, 4);
       await this._sendFrame(PM.FILE_WRITE, head);
       let [cmd, payload] = await this._recvFrame();
-      if (cmd === PM.ERROR) throw new Error(dec.decode(payload));
+      if (cmd === PM.ERROR) throw deviceError(payload);
       if (cmd !== PM.FILE_ACK || payload[0] !== PM.READY) throw new Error('the device did not accept the file');
       for (let off = 0; off < bytes.length; off += CHUNK_SIZE) {
         await this._sendFrame(PM.CHUNK, bytes.subarray(off, off + CHUNK_SIZE));
         [cmd, payload] = await this._recvFrame();
-        if (cmd === PM.ERROR) throw new Error(dec.decode(payload));
+        if (cmd === PM.ERROR) throw deviceError(payload);
         if (cmd !== PM.CHUNK_ACK) throw new Error(`unexpected frame 0x${cmd.toString(16)}`);
       }
       // An empty file has no chunks: the device answers DONE_ACK at once
       [cmd, payload] = await this._recvFrame();
-      if (cmd === PM.ERROR) throw new Error(dec.decode(payload));
+      if (cmd === PM.ERROR) throw deviceError(payload);
       const sum = ((payload[1] << 24) | (payload[2] << 16) | (payload[3] << 8) | payload[4]) >>> 0;
-      if (cmd !== PM.DONE_ACK || payload[0] !== PM.OK || sum !== crc32(bytes)) throw new Error(`${path}: CRC が一致しません`);
-    });
+      if (cmd !== PM.DONE_ACK || payload[0] !== PM.OK || sum !== crc32(bytes)) throw new Error(`${path}: ${t('CRC が一致しません', 'CRC mismatch')}`);
+    }));
   }
 
   // One PicoModem session: STX, the ACK, fn's frames; then text again
@@ -398,7 +453,7 @@ export class MidoriLink {
   // Feed the binary buffer to parse until it says done; parse returns how
   // many bytes from the front it used ({ used, done })
   async _take(parse) {
-    const end = Date.now() + TIMEOUT_MS;
+    const end = Date.now() + this.timeoutMs;
     for (;;) {
       const { used, done } = parse(this._binary);
       if (used > 0) this._binary = this._binary.slice(used);

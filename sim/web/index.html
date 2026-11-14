@@ -67,28 +67,31 @@
 </head>
 <body>
 <header>
-  <h1>MIDoRI Simulator <small style="color:var(--muted);font-weight:normal">試作</small></h1>
+  <h1>MIDoRI Simulator</h1>
   <select id="board" aria-label="Board"></select>
   <button id="run" class="primary">▶ Run</button>
   <button id="stop">■ Stop</button>
   <select id="examples" aria-label="Examples"></select>
-  <button id="midi">Web MIDI を使う</button>
-  <a href="./designer.html" style="margin-left:auto">デザイナー →</a>
+  <button id="midi" data-en="Use Web MIDI">Web MIDI を使う</button>
+  <button id="share" title="このスクリプトを開くリンクをコピーします（スクリプトは URL の # の後ろに入り、サーバーには送られません）" data-en-title="Copies a link that opens this script (it goes after the # of the URL and is never sent to a server)" data-en="Share link">共有リンク</button>
+  <a href="./designer.html" style="margin-left:auto" id="to-designer" data-en="Designer →">デザイナー →</a>
+  <a href="./licenses.txt" target="_blank" data-en="Licenses">ライセンス</a>
+  <a data-lang-switch href="#"></a>
 </header>
 <main>
   <section>
     <div id="code"></div>
-    <p class="hint">Run（Ctrl/⌘+Enter）のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。Ctrl/⌘+F で検索。</p>
+    <p class="hint" data-en="Every Run (Ctrl/⌘+Enter) starts the script in a fresh VM, as the device does. Ctrl/⌘+F searches.">Run（Ctrl/⌘+Enter）のたびに新しい VM で最初から実行します（実機のスクリプト実行と同じ）。Ctrl/⌘+F で検索。</p>
     <section id="midori-panel" aria-label="MIDoRI">
-      <h2>MIDoRI 実機（USB-C / Web Serial）</h2>
+      <h2 data-en="Your MIDoRI (USB-C / Web Serial)">MIDoRI 実機（USB-C / Web Serial）</h2>
       <div id="midori-panel-body"></div>
     </section>
   </section>
   <section>
     <div class="device" id="device"><canvas id="screen" width="1280" height="720" aria-label="MIDoRI screen"></canvas></div>
-    <p class="hint">クリック / ドラッグ = 指。Alt+クリックで指を置いたままにできます（もう一度 Alt+クリックで離す）。</p>
+    <p class="hint" data-en="Click / drag = a finger. Alt+click leaves a finger down (Alt+click again lifts it).">クリック / ドラッグ = 指。Alt+クリックで指を置いたままにできます（もう一度 Alt+クリックで離す）。</p>
     <fieldset id="ports" hidden>
-      <legend>MIDI ポートの割り当て</legend>
+      <legend data-en="MIDI ports">MIDI ポートの割り当て</legend>
     </fieldset>
     <div id="log" role="log" aria-live="polite"></div>
   </section>
@@ -102,12 +105,15 @@ const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
   .catch(() => String(Date.now()));
 const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
 const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES },
-       { MidoriLink }, { mountDevicePanel }, { createEditor }] =
+       { MidoriLink }, { mountDevicePanel }, { createEditor }, { shareFragment, readFragment }, { t, localizePage, LANG }] =
   await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js'),
-                     load('midori_link.js'), load('device_panel.js'), load('vendor/codemirror.js')]);
+                     load('midori_link.js'), load('device_panel.js'), load('vendor/codemirror.js'), load('share.js'), load('i18n.js')]);
+localizePage();
+// The designer in the same language
+document.getElementById('to-designer').href = `./designer.html?lang=${LANG}`;
 
 const EXAMPLES = {
-  'Knobs': `# 1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす
+  'Knobs': `# ${t('1 本目のノブで内蔵音源（SAM2695 役）のフィルタを動かす', 'Knob 1 moves the built-in synth\'s (the SAM2695\'s) filter')}
 dev = MIDI::Device.new(MIDIDevices.sam2695)
 
 UI.knob(1, label: "Cutoff", color: :cyan, value: 64) do |v|
@@ -123,22 +129,22 @@ loop do
   MIDI.sleep_ms 10
 end
 `,
-  'Web MIDI': `# 「Web MIDI を使う」を押してから Run。ポートは名前（の一部）で選ぶ
+  'Web MIDI': `# ${t('「Web MIDI を使う」を押してから Run。ポートは名前（の一部）で選ぶ', 'Press "Use Web MIDI", then Run. A port is picked by (part of) its name')}
 unless MIDIDevices.respond_to?(:web_midi)
-  raise "MIDIDevices.web_midi はシミュレーターだけの機能です"
+  raise "${t('MIDIDevices.web_midi はシミュレーターだけの機能です', 'MIDIDevices.web_midi is the simulator\'s only')}"
 end
 MIDIDevices.web_midis.each { |p| puts p.inspect }
 
 port = MIDIDevices.web_midis.first
 if port
-  # ポートで弾いた音を内蔵音源（SAM2695 役）で鳴らし、鍵盤も光らせる
-  keys = UI::Keys.new(octaves: 2, low: 48, device: port)   # 画面の鍵盤 → ポートへ
+  # ${t('ポートで弾いた音を内蔵音源（SAM2695 役）で鳴らし、鍵盤も光らせる', 'What is played on the port sounds on the built-in synth (the SAM2695) and lights the keys')}
+  keys = UI::Keys.new(octaves: 2, low: 48, device: port)   # ${t('画面の鍵盤 → ポートへ', 'the screen\'s keys -> the port')}
   MIDI.route(port, MIDIDevices.sam2695)
   MIDI.route(port, keys)
   MIDI.on(port, :note_on) { |m| puts "note #{m.note} vel #{m.velocity}" }
   keys.show
 else
-  puts "Web MIDI のポートがありません"
+  puts "${t('Web MIDI のポートがありません', 'No Web MIDI port')}"
 end
 
 loop do
@@ -146,9 +152,9 @@ loop do
   MIDI.sleep_ms 10
 end
 `,
-  'AMY': `# Tab5 の UI モードと同じ AMY パネル（Home の「AMY」タイル）をスクリプトから開く。
-# 「+」でパートを足し、タブごとにプリセット・チャンネル・エンベロープ・ノブ・鍵盤
-raise "AMY は Tab5 / CrowPanel だけです（ボードを Tab5 にしてください）" unless BoardConfig::HAS_AMY
+  'AMY': `# ${t('Tab5 の UI モードと同じ AMY パネル（Home の「AMY」タイル）をスクリプトから開く。', 'The AMY panel of the Tab5\'s UI mode (Home\'s "AMY" tile), opened from a script.')}
+# ${t('「+」でパートを足し、タブごとにプリセット・チャンネル・エンベロープ・ノブ・鍵盤', '"+" adds a part; each tab has a preset, a channel, envelopes, knobs and keys')}
+raise "${t('AMY は Tab5 / CrowPanel だけです（ボードを Tab5 にしてください）', 'AMY is on the Tab5 / CrowPanel only (choose the Tab5)')}" unless BoardConfig::HAS_AMY
 panel = UI::AMYPanel.new(engine: Proc.new { MIDIDevices.amy })
 panel.show
 
@@ -218,11 +224,55 @@ const STORE = 'midori-sim/script';
 function loadSaved() { try { return localStorage.getItem(STORE); } catch (e) { return null; } }
 function save() { try { localStorage.setItem(STORE, code.value); } catch (e) {} }
 
-for (const name of Object.keys(EXAMPLES)) $('examples').add(new Option(`Example: ${name}`, name));
-$('examples').add(new Option('Examples…', ''), 0);
-$('examples').value = '';
-$('examples').onchange = e => { if (e.target.value) { code.value = EXAMPLES[e.target.value]; save(); run(); } e.target.value = ''; };
+// The Examples menu: the page's own, then the repository's examples/ (copied
+// with an index by sim/build.sh; absent, the menu has only the first)
+{
+  const sel = $('examples');
+  sel.add(new Option(t('サンプル…', 'Examples…'), ''));
+  const quick = document.createElement('optgroup');
+  quick.label = t('すぐ試せるもの', 'Quick');
+  for (const name of Object.keys(EXAMPLES)) quick.append(new Option(name, name));
+  sel.append(quick);
+  fetch(`./examples/index.json?v=${encodeURIComponent(BUILD)}`).then(r => (r.ok ? r.json() : [])).then(list => {
+    if (!list.length) return;
+    const g = document.createElement('optgroup');
+    g.label = 'examples/';
+    for (const e of list) g.append(new Option(`${e.file.replace(/\.rb$/, '')} — ${e.title}`, `file:${e.file}`));
+    sel.append(g);
+  }).catch(() => {});
+  sel.value = '';
+  sel.onchange = async e => {
+    const v = e.target.value;
+    e.target.value = '';
+    if (!v) return;
+    if (v.startsWith('file:')) {
+      try {
+        const r = await fetch(`./examples/${v.slice(5)}?v=${encodeURIComponent(BUILD)}`);
+        if (!r.ok) throw new Error(String(r.status));
+        code.value = await r.text();
+      } catch (err) { print(`[sim] ${v.slice(5)}: ${err.message}`, 'err'); return; }
+    } else code.value = EXAMPLES[v];
+    save();
+    run();
+  };
+}
 code.value = loadSaved() || EXAMPLES['Knobs'];
+
+// A share link (#code=...): its script in the editor (not run: Run is the
+// viewer's), and the fragment dropped so a reload keeps their edits
+let shared = null;
+try { shared = await readFragment(); } catch (e) { shared = { error: e }; }
+if (shared && !shared.error) {
+  code.value = shared.script;
+  history.replaceState(null, '', location.pathname + location.search);
+}
+$('share').onclick = async () => {
+  try {
+    const url = `${location.origin}${location.pathname}${await shareFragment(code.value, board)}`;
+    await navigator.clipboard.writeText(url).catch(() => {});
+    print(`[sim] ${t(`共有リンクをコピーしました（${url.length} 文字）`, `Share link copied (${url.length} characters)`)}: ${url.length > 160 ? url.slice(0, 160) + '…' : url}`, 'sys');
+  } catch (e) { print(`[sim] ${t('共有リンク', 'Share link')}: ${e.message}`, 'err'); }
+};
 
 function print(s, kind = 'out') {
   if (kind === 'out' && /^[IWD] \(/.test(s)) return;   // ESP-IDF style C logs: kept out of the way
@@ -301,7 +351,7 @@ async function boot(mode, scriptText = null, scriptPath = '') {
       // The startup script (/app.rb), or one picked on the Scripts screen
       onRequestScript: path => { setTimeout(() => runDeviceScript(path), 0); },
       // The Scripts screen's reload: the device's list again
-      onSdRefresh: () => { if (link.connected) panel.refresh(); else print('[sim] 実機に接続すると、実機の /sd のスクリプトが出ます', 'sys'); },
+      onSdRefresh: () => { if (link.connected) panel.refresh(); else print(t('[sim] 実機に接続すると、実機の /sd のスクリプトが出ます', '[sim] Connect your MIDoRI to list its /sd scripts here'), 'sys'); },
       onScriptEnd: why => { print(why === 'stop' ? '[sim] stopped' : '[sim] script ended', 'sys'); boot('ui'); },
     });
   device.M.simVolume = (out, percent) => { if (out === 0) { synth.setVolume(percent); amyAudio.setVolume(percent); } };
@@ -320,10 +370,10 @@ async function runDeviceScript(path) {
     let text;
     if (f) text = dec.decode(f.data);
     else if (link.connected) {
-      print(`[sim] 実機から ${path} を読み込んでいます`, 'sys');
+      print(t(`[sim] 実機から ${path} を読み込んでいます`, `[sim] Reading ${path} from the device`), 'sys');
       text = await panel.readText(path);
-    } else throw new Error('実機に接続していません');
-    print(`[sim] ${path} を実行します`, 'sys');
+    } else throw new Error(t('実機に接続していません', 'No MIDoRI connected'));
+    print(t(`[sim] ${path} を実行します`, `[sim] Running ${path}`), 'sys');
     await boot('script', text, path);
   } catch (e) {
     print(`[sim] ${path}: ${e.message}`, 'err');
@@ -349,10 +399,10 @@ function renderPorts() {
     label.append(role.name);
     const inSel = document.createElement('select');
     const outSel = document.createElement('select');
-    inSel.add(new Option(role.id === 2 ? '（入力なし）' : '入力: なし', ''));
-    outSel.add(new Option(role.id === 2 ? '出力: 内蔵音源' : '出力: なし', ''));
-    if (role.id !== 2) for (const p of midi.inputPorts) inSel.add(new Option(`入力: ${p.name}`, p.id));
-    for (const p of midi.outputPorts) outSel.add(new Option(`出力: ${p.name}`, p.id));
+    inSel.add(new Option(role.id === 2 ? t('（入力なし）', '(no input)') : t('入力: なし', 'In: none'), ''));
+    outSel.add(new Option(role.id === 2 ? t('出力: 内蔵音源', 'Out: built-in synth') : t('出力: なし', 'Out: none'), ''));
+    if (role.id !== 2) for (const p of midi.inputPorts) inSel.add(new Option(`${t('入力', 'In')}: ${p.name}`, p.id));
+    for (const p of midi.outputPorts) outSel.add(new Option(`${t('出力', 'Out')}: ${p.name}`, p.id));
     inSel.disabled = role.id === 2;
     inSel.value = midi.roleInput[role.id] || '';
     outSel.value = midi.roleOutput[role.id] || '';
@@ -366,13 +416,13 @@ function renderPorts() {
   const names = document.createElement('p');
   names.className = 'hint';
   names.textContent = ports.length
-    ? `MIDIDevices.web_midi で使えるポート: ${ports.map(p => `"${p.name}"${p.connected ? '' : '（未接続）'}`).join(', ')}`
-    : 'Web MIDI のポートが見つかりません';
+    ? `${t('MIDIDevices.web_midi で使えるポート', 'Ports for MIDIDevices.web_midi')}: ${ports.map(p => `"${p.name}"${p.connected ? '' : t('（未接続）', ' (closed)')}`).join(', ')}`
+    : t('Web MIDI のポートが見つかりません', 'No Web MIDI ports found');
   fs.append(names);
   // A port opening or closing reaches the running device at once
   if (device) for (const p of ports) device.setWebMidiConnected(p.slot, p.connected);
   if (device && portNames() !== knownPorts) {
-    print('[sim] MIDI ポートが変わりました。Run し直すと MIDIDevices.web_midi と MIDI Devices 画面に反映されます', 'sys');
+    print(t('[sim] MIDI ポートが変わりました。Run し直すと MIDIDevices.web_midi と MIDI Devices 画面に反映されます', '[sim] The MIDI ports changed. Run again for MIDIDevices.web_midi and the MIDI Devices screen to have them'), 'sys');
     knownPorts = portNames();
   }
 }
@@ -381,7 +431,7 @@ $('midi').onclick = async () => {
   try {
     await midi.enable();
     $('midi').hidden = true;
-    print(`[sim] Web MIDI を有効にしました（SysEx ${midi.sysex ? 'あり' : 'なし: ブラウザが許可しませんでした'}）。ポートを Ruby から使うには Run し直してください`, 'sys');
+    print(t(`[sim] Web MIDI を有効にしました（SysEx ${midi.sysex ? 'あり' : 'なし: ブラウザが許可しませんでした'}）。ポートを Ruby から使うには Run し直してください`, `[sim] Web MIDI is on (SysEx ${midi.sysex ? 'allowed' : 'not allowed by the browser'}). Run again to use the ports from Ruby`), 'sys');
   } catch (e) { print(`[sim] Web MIDI: ${e.message}`, 'err'); }
 };
 if (!midi.supported) $('midi').disabled = true;
@@ -399,7 +449,7 @@ const panel = mountDevicePanel($('midori-panel-body'), {
     deviceFiles = files || [];
     // As after power-up: the plugins load and /app.rb runs once
     bootAutorun = true;
-    print(files ? '[sim] 実機のファイルで起動し直します（電源を入れたときと同じ）' : '[sim] 実機のファイルなしで起動し直します', 'sys');
+    print(files ? t('[sim] 実機のファイルで起動し直します（電源を入れたときと同じ）', '[sim] Starting again with the device\'s files (as at power-up)') : t('[sim] 実機のファイルなしで起動し直します', '[sim] Starting again without the device\'s files'), 'sys');
     boot('ui');
   },
   onScriptList: names => {
@@ -407,6 +457,16 @@ const panel = mountDevicePanel($('midori-panel-body'), {
     if (device) device.setScripts(deviceScripts);
   },
 });
+
+if (shared && shared.error) print(`[sim] ${t('共有リンクを読めませんでした', 'Could not read the share link')}: ${shared.error.message}`, 'err');
+else if (shared) {
+  if (shared.board && BOARDS[shared.board] && shared.board !== board) {
+    board = shared.board;
+    $('board').value = board;
+    $('device').dataset.board = board;
+  }
+  print(t('[sim] 共有リンクのスクリプトを開きました。▶ Run で実行します', '[sim] Opened the shared script. ▶ Run runs it'), 'sys');
+}
 
 boot('ui');   // as at power-up
 </script>

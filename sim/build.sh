@@ -74,4 +74,47 @@ for BOARD in $BOARDS; do
 done
 # The page fetches every file with ?v=<this id> (web/device.js)
 printf '{"id":"%s"}\n' "$(date +%Y%m%d%H%M%S)-$$" > "$OUT/build.json"
+
+# The repository's examples for the page's Examples menu (web/examples/,
+# index.json: file and title, the first comment line)
+EX="$SIM/web/examples"
+rm -rf "$EX" && mkdir -p "$EX"
+cp "$SIM/../examples/"*.rb "$EX/"
+ruby -rjson -e '
+  list = Dir[File.join(ARGV[0], "*.rb")].sort.map do |f|
+    first = File.foreach(f).find { |l| l.start_with?("#") } || ""
+    { file: File.basename(f), title: first.sub(/\A#\s*/, "").strip }
+  end
+  File.write(File.join(ARGV[0], "index.json"), JSON.pretty_generate(list) + "\n")
+' "$EX"
+echo "examples: $(ls "$EX"/*.rb | wc -l) -> $EX"
+
+# The licenses of what the pages carry (web/licenses.txt): from the files in
+# the tree and in Emscripten (its runtime, musl and libc++ are in the wasm);
+# LovyanGFX's and CodeMirror's texts are kept in sim/licenses/
+ROOT="$SIM/.."
+EMDIR=$(dirname "$(command -v emcc)")
+section() {   # title, file
+  [ -f "$2" ] || { echo "license file missing: $2" >&2; exit 1; }
+  printf '\n\n==============================================================================\n%s\n==============================================================================\n\n' "$1"
+  cat "$2"
+}
+{
+  echo "The MIDoRI simulator and designer, and what they are built from."
+  echo "Each part below is under its own license."
+  section "MIDoRI (the simulator, main/ui, the MIDoRI gems)" "$ROOT/LICENSE"
+  section "PicoRuby" "$ROOT/components/midori-runtime/picoruby/LICENSE"
+  section "mruby" "$ROOT/components/midori-runtime/picoruby/mrbgems/picoruby-mruby/lib/mruby/LICENSE"
+  section "M5GFX" "$ROOT/managed_components/m5stack__m5gfx/LICENSE"
+  section "LovyanGFX" "$SIM/licenses/LovyanGFX.txt"
+  section "Adafruit GFX fonts (in M5GFX: src/lgfx/Fonts/GFXFF; glyphs from GNU FreeFont)" "$ROOT/managed_components/m5stack__m5gfx/src/lgfx/Fonts/GFXFF/license.txt"
+  section "AMY" "$ROOT/mrbgems/picoruby-amy/lib/amy/LICENSE"
+  section "CodeMirror 6 (web/vendor/codemirror.js; packages and versions in its header)" "$SIM/licenses/CodeMirror.txt"
+  section "Emscripten (the runtime)" "$EMDIR/LICENSE"
+  section "musl libc (in Emscripten)" "$EMDIR/system/lib/libc/musl/COPYRIGHT"
+  section "libc++ (in Emscripten)" "$EMDIR/system/lib/libcxx/LICENSE.TXT"
+  section "libc++abi (in Emscripten)" "$EMDIR/system/lib/libcxxabi/LICENSE.TXT"
+  section "compiler-rt (in Emscripten)" "$EMDIR/system/lib/compiler-rt/LICENSE.TXT"
+} > "$SIM/web/licenses.txt"
+echo "licenses: $SIM/web/licenses.txt"
 ls -la "$OUT"/midori-sim-*.wasm "$OUT"/sim_*.rb

@@ -5,6 +5,7 @@
 import { MidoriLink, frame, crc16, crc32 } from '../web/midori_link.js';
 
 const enc = new TextEncoder(), dec = new TextDecoder();
+globalThis.localStorage = { getItem: () => null, setItem() {} };
 Object.defineProperty(globalThis, 'navigator', {
   value: { serial: { addEventListener() {}, removeEventListener() {} } }, configurable: true,
 });
@@ -19,7 +20,12 @@ class FakeMidori {
     let ctl;
     this.readable = new ReadableStream({ start: c => { ctl = c; } });
     this.out = b => ctl.enqueue(typeof b === 'string' ? enc.encode(b) : b);
-    this.writable = new WritableStream({ write: chunk => this.input(chunk) });
+    // maxPiece: a PicoModem write bigger than this loses a byte (a device
+    // whose buffers the host overruns)
+    this.writable = new WritableStream({ write: chunk => {
+      if (this.bin && this.maxPiece && chunk.length > this.maxPiece) chunk = chunk.subarray(1);
+      this.input(chunk);
+    } });
   }
   async open() {}
   async close() {}
@@ -66,8 +72,16 @@ class FakeMidori {
     } else this.out('> ');
   }
 
-  // picomodem.rb, one command per session
+  // picomodem.rb, one command per session (its errors end the session)
   async modem() {
+    try { await this.modemSession(); } catch (e) {
+      this.out(frame(0xfe, enc.encode('Timeout receiving chunk')));
+    }
+    this.bin = null;
+    setTimeout(() => this.out('[PicoModem] done\r\n> '), 20);
+  }
+
+  async modemSession() {
     const recv = async () => {
       for (let i = 0; i < 500; i++) {
         const b = this.bin;
@@ -119,12 +133,11 @@ class FakeMidori {
       this.fs.set(path, data);
       this.out(frame(0x8f, new Uint8Array([0, ...[24, 16, 8, 0].map(s => (crc >>> s) & 0xff)])));
     }
-    this.bin = null;
-    setTimeout(() => this.out('[PicoModem] done\r\n> '), 20);
   }
 }
 
 const dev = new FakeMidori();
+dev.maxPiece = 1000;   // none of this link's paces overrun it
 const lines = [];
 const link = new MidoriLink({ onLine: l => lines.push(l) });
 const ok = (cond, what) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}`); if (!cond) process.exitCode = 1; };
@@ -162,10 +175,23 @@ link.listTimeoutMs = 300;
 dev.delay = { '/sd': 400, '/plugins': 150 };
 err = null;
 try { await link.list('/sd'); } catch (e) { err = e.message; }
-ok(/答えがありません/.test(err), `a slow ls /sd times out: ${err}`);
+ok(/答えがありません|no answer/.test(err), `a slow ls /sd times out: ${err}`);
 const pl = await link.list('/plugins');     // the late /sd answer arrives while this waits
 ok(pl.map(e => e.name).join() === 'p.rb', `ls /plugins after the late /sd answer: ${pl.map(e => e.name)}`);
 link.listTimeoutMs = 30000;
+// A device that loses bytes when written to in pieces over 64: the
+// transfer steps down (256 -> 64) and succeeds
+const paces = [];
+link.onPace = p => paces.push(p);
+link.timeoutMs = 1500;
+link.pace = 0;
+dev.maxPiece = 64;
+const slow = 'puts :paced\n'.repeat(80);
+await link.writeFile('/sd/paced.rb', slow);
+ok(dec.decode(dev.fs.get('/sd/paced.rb')) === slow && paces.join() === '1', `a lossy link steps down: paces ${paces}`);
+dev.maxPiece = 1000;
+link.timeoutMs = 5000;
+
 // mv: a plugin to the flash
 dev.fs.set('/sd/plugins/q.rb', enc.encode('# q\n'));
 await link.move('/sd/plugins/q.rb', '/plugins/q.rb');
@@ -177,13 +203,13 @@ dev.proto = 2;
 await link.info();
 err = null;
 try { await link.move('/plugins/q.rb', '/sd/plugins/q.rb'); } catch (e) { err = e.message; }
-ok(/ファームウェアが古く/.test(err || ''), 'mv needs proto 3');
+ok(/ファームウェアが古く|firmware is older/.test(err || ''), 'mv needs proto 3');
 
 // Old firmware (proto 1) is named rather than timed out on
 dev.proto = 1;
 await link.info();
 err = null;
 try { await link.list('/sd'); } catch (e) { err = e.message; }
-ok(/ファームウェアが古く/.test(err || ''), `old firmware: ${err}`);
+ok(/ファームウェアが古く|firmware is older/.test(err || ''), `old firmware: ${err}`);
 await link.disconnect();
 process.exit(process.exitCode || 0);
