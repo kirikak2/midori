@@ -581,6 +581,21 @@ R2P2 と同じ PicoModem プロトコル（RBTP）で、ブラウザ側は upstr
   `Editor::Line#idle_handler` から呼ぶ `UI.process`（約 10 ms 周期、`irb_run_events_while_idle`）で動く。
   式の評価中は止まる（2026-11-05）
 
+### attach（実行中の VM に Ruby を送る / 2026-11-14）
+
+詳細は [docs/ATTACH.md](docs/ATTACH.md)。コンソールの attach は実機で確認済み。`eval64` / `evalstop` は実機未確認。
+
+- コンソールの `attach` で、**動いているスクリプト（または UI モード）の VM** に入る（irb は新しい VM を立てるのでスクリプトが止まる）。
+  行編集は C（console task）のまま、1 行ずつ attach キューへ。Ruby の `MIDoRIAttach` が
+  `MIDI.run_filters` のフック（= `UI.process` / `MIDI.sleep_ms` / クロックループ）でスクリプトのタスク上で取り出し、
+  同じ VM の Sandbox で評価して `ScriptManager#attach_reply(more)` で C にプロンプトを出させる（`attach> ` / 続きは `attach* `）
+- `exit` / Ctrl-D で抜ける（スクリプトは動き続ける）、Ctrl-C で評価中の行を止める。Supervisor が次のタスクを始めると
+  `console_input_attach_exit()` で閉じる。協調ポイントを通らないスクリプトには届かない。スクリプトのファイルのローカル変数は見えない
+- 機械向けは `eval <id> <code>`（`#<eval <id>` … `#>eval <id> ok|err ...`）と、複数行・UTF-8 用の `eval64`（Base64 の片）・`evalstop`（`info` は `proto=5`）
+- `MIDoRIAttach` は main_task_base.rb の**シミュレーターと共有する部分**にあり、受け取り元を `install(source)` で渡す
+  （実機は ScriptManager、シミュレーターは `sim_boot.rb` の `SimAttachSource`）。Web シミュレーターのページの Attach 欄から、
+  シミュレーターの VM と接続した実機の VM のどちらにも送れる（`sim/web/attach_console.js`、試験 `node sim/test/node_attach.mjs`）
+
 ### スクリプトロードとESP32リスタート
 
 #### 問題の背景

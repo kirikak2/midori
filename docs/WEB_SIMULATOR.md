@@ -723,11 +723,13 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 
 | コマンド | 答える側 | 答え |
 |---------|---------|------|
-| `info` | C（いつでも） | `#info proto=3 board=<tab5\|cores3\|crowpanel\|freenove> mode=<ui\|script\|irb\|stopping> script=<path>` |
+| `info` | C（いつでも） | `#info proto=5 board=<tab5\|cores3\|crowpanel\|freenove> mode=<ui\|script\|irb\|stopping> script=<path>` |
 | `ls [dir]` | Ruby（UI モードのループ） | `#<ls <dir>`、1 行 1 件 `f\|d<TAB>サイズ<TAB>名前`、`#>ls <dir> ok <件数>` か `#>ls <dir> err <理由>` |
 | `rm <path>` | Ruby（UI モード） | `#>rm <path> ok` か `#>rm <path> err <理由>` |
 | `rescan` | C | Scripts 画面の再読み込みと同じフラグ。`#>rescan ok` |
 | `mv <from> <to>` | Ruby（UI モード） | ボリュームをまたいでも動く（コピーしてサイズを確かめ、元を消す。行き先のディレクトリが無ければ作り、同名のファイルは置き換える）。`#>mv <from> <to> ok` か `... err <理由>`。`proto=3` から |
+| `eval <id> <code>` | Ruby（実行中の VM。スクリプトでも UI モードでも、`MIDI.run_filters` のとき） | `#<eval <id>`、式が出力した行、`#>eval <id> ok <inspect>` か `#>eval <id> err <理由>`。人向けの `attach` と同じ仕組み（docs/ATTACH.md）。`proto=4` から |
+| `eval64 <id> <+\|.> <base64>` / `evalstop` | C が片をつなぎ、Ruby が答える / C | 複数行・UTF-8・長いコードを Base64 の片で送る（`+` には `#>eval64 <id> more`、`.` で実行して `eval` と同じ答え）。`evalstop` は実行中の eval を止める。ページの Attach 欄が使う。`proto=5` から |
 
 - `ls` / `rm` は PicoRuby の VFS が要るので、`load` と同じキューで Ruby に渡す（先頭の 0x01 で `load` のパスと区別）。
   スクリプトや irb の実行中は Ruby がキューを読まないので、C がすぐ `#>ls err busy: ...` を返す

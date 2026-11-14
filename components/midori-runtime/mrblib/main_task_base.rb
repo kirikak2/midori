@@ -400,9 +400,158 @@ def load_plugins
   puts "Filters: #{MIDI.filters.keys.join(', ')}" if MIDI.filters.size > 0
 end
 
+# ============================================================================
+# attach: Ruby from outside run inside this VM (docs/ATTACH.md)
+# ============================================================================
+# Code someone sends - the console's "attach" session and "eval" / "eval64"
+# on the device, the simulator page's Attach panel - runs from
+# MIDI.run_filters, which UI.process, MIDI.sleep_ms and the clock loops all
+# call: between the script's own steps, on its task, so nothing runs in
+# parallel with it. It runs in a Sandbox of this VM (as irb's lines do):
+# it sees the script's globals, constants and classes, and keeps its own
+# locals from one evaluation to the next, but not the script file's
+# locals. While it runs the script waits.
+#
+# The source (MIDoRIAttach.install) hands out items and takes the answers:
+#   attach_pop      -> "L<line>" (the console's attach session),
+#                      "E<id> <code>", "B<id> <base64 code>", or nil
+#   attach_reply(more)  an "L" line is done (more: the expression is open)
+#   attach_cancel?  Ctrl-C / a session began or ended (true once)
+#   stop_requested? the script is asked to stop
+# ScriptManager on the device; the page on the simulator (sim_boot.rb).
+# "E" / "B" answer in frames: "#<eval <id>", what the code prints, then
+# "#>eval <id> ok <inspect>" or "#>eval <id> err <message>".
+module MIDoRIAttach
+  @source = nil
+  @sandbox = nil
+  @buffer = nil   # the lines of an expression that is not complete yet
+  @busy = false   # code that calls MIDI.sleep_ms must not start another
+
+  def self.install(source)
+    first = @source.nil?
+    @source = source
+    $__midi_filter_hooks__ << lambda { MIDoRIAttach.poll } if first
+  end
+
+  def self.poll
+    return if @busy || @source.nil?
+    @buffer = nil if @source.attach_cancel?
+    item = @source.attach_pop
+    return unless item
+    @busy = true
+    begin
+      body = item[1, item.size - 1] || ""
+      case item[0]
+      when "L" then run_line(body)
+      when "E" then run_framed(*body.split(" ", 2))
+      when "B"
+        id, b64 = body.split(" ", 2)
+        run_framed(id, Base64.decode64(b64 || ""))
+      end
+    ensure
+      @busy = false
+    end
+  end
+
+  def self.wrap(code)
+    # The newline before "end": a comment on the code's last line would
+    # otherwise take the rest with it
+    "begin; _ = (#{code}\n); rescue Exception => _; end; _"
+  end
+
+  def self.one_line(s)
+    s.to_s.tr("\r\n", "  ")
+  end
+
+  # The same warm-up irb does (Shell#run_irb): the first run of a new
+  # sandbox's task, then suspended between evaluations
+  def self.sandbox
+    return @sandbox if @sandbox
+    sb = Sandbox.new("attach")
+    sb.compile("_ = nil")
+    sb.execute
+    raise "the script is stopping" unless wait(sb, false)
+    sb.suspend
+    @sandbox = sb
+  end
+
+  # Until the code finishes: true, or false when it was stopped - by Ctrl-C
+  # (cancellable) or because the script is asked to stop
+  def self.wait(sb, cancellable)
+    while sb.state != :DORMANT
+      if @source.stop_requested? || (cancellable && @source.attach_cancel?)
+        begin
+          sb.stop
+          sb.close
+        rescue => e
+          puts "attach: #{e.message}"
+        end
+        @sandbox = nil
+        return false
+      end
+      sleep_ms 5
+    end
+    true
+  end
+
+  # Compiled already: run it and answer [result], or nil when stopped
+  def self.run(sb, cancellable)
+    sb.execute
+    return nil unless wait(sb, cancellable)
+    sb.suspend
+    [sb.result]
+  end
+
+  def self.run_line(line)
+    src = @buffer ? "#{@buffer}\n#{line}" : line
+    sb = sandbox
+    # Like irb: code that does not compile is taken for an unfinished
+    # expression (Ctrl-C forgets it)
+    if src.end_with?("\\") || !sb.compile(wrap(src), filename: "(attach)")
+      @buffer = src
+      @source.attach_reply(true)
+      return
+    end
+    @buffer = nil
+    answer = run(sb, true)
+    if answer.nil?
+      puts "(stopped)"
+    elsif answer[0].is_a?(Exception)
+      puts "#{answer[0].message} (#{answer[0].class})"
+    else
+      puts "=> #{answer[0].inspect}"
+    end
+    @source.attach_reply(false)
+  rescue => e
+    @buffer = nil
+    puts "attach: #{e.message} (#{e.class})"
+    @source.attach_reply(false)
+  end
+
+  def self.run_framed(id, code)
+    sb = sandbox
+    unless sb.compile(wrap(code || ""), filename: "(eval)")
+      puts "#>eval #{id} err SyntaxError: incomplete or invalid code"
+      return
+    end
+    puts "#<eval #{id}"
+    answer = run(sb, true)
+    if answer.nil?
+      puts "#>eval #{id} err stopped"
+    elsif answer[0].is_a?(Exception)
+      puts "#>eval #{id} err #{answer[0].class}: #{one_line(answer[0].message)}"
+    else
+      puts "#>eval #{id} ok #{one_line(answer[0].inspect)}"
+    end
+  rescue => e
+    puts "#>eval #{id} err #{e.class}: #{one_line(e.message)}"
+  end
+end
+
 # ---- The MIDoRI simulator (sim/build.sh) takes this file up to here: the
 # ---- part above must not depend on ScriptManager or the modes (the simulator's
 # ---- files are in Emscripten's FS: SDLoader and the plugins work the same).
+
 # Scan SD card for Ruby scripts and notify C side
 def notify_scripts_to_c
   sm = ScriptManager.new
@@ -774,6 +923,7 @@ elsif script_to_run
   setup_midi_devices   # loads the plugins
   setup_sequencer
   SDLoader.finish
+  MIDoRIAttach.install(ScriptManager.new)
   run_script(script_to_run)
   puts "Script completed, exiting to supervisor"
   # main_task.rb ends here, supervisor will detect and restart in UI mode
@@ -858,6 +1008,7 @@ else
 
     GC.start
     SDLoader.finish
+    MIDoRIAttach.install(ScriptManager.new)
 
     puts "Initialization complete."
     puts "UI Mode: Waiting for script selection"
@@ -866,6 +1017,7 @@ else
     puts "  load /sd/app.rb  - Load and run a script"
     puts "  ls [dir] / rm    - List a directory / delete a file"
     puts "  irb              - Start an interactive Ruby session"
+    puts "  attach           - Run Ruby inside the running script / UI mode"
     puts "  heap             - Show free heap memory"
     puts "  restart          - Restart ESP32"
     print "> "

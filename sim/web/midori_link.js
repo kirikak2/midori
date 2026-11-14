@@ -17,6 +17,10 @@
 //   ls dir  -> "#<ls dir", "f|d<TAB>size<TAB>name"..., "#>ls dir ok <n>" | "#>ls dir err <message>"
 //   rm path -> "#>rm path ok" | "#>rm path err <message>"
 //   mv a b  -> "#>mv a b ok" | "#>mv a b err <message>"   (proto 3)
+//   eval id code -> "#<eval id", its output, "#>eval id ok <inspect>" | "#>eval id err <message>"
+//                   (proto 4: runs in the device's running VM, a script or UI mode; docs/ATTACH.md)
+//   eval64 id + b64 -> "#>eval64 id more"; eval64 id . b64 -> as eval (proto 5: any code,
+//                   as Base64 pieces); evalstop -> "#>evalstop ok" (stops the eval running)
 // An answer names what it answers: one that comes after its command gave up
 // waiting is not taken for the next command's.
 // Files go by PicoModem (docs/PICOMODEM.md): a bare STX, the device's ACK,
@@ -43,9 +47,18 @@ export const PACES = [
 const PACE_STORE = 'midori-link/pace';
 const TIMEOUT_MS = 5000;
 // The console protocol this page speaks (console_input.c "#info proto=")
-export const PROTO = 3;
+export const PROTO = 5;
 // A directory listing: the device stats every entry (a full SD card is slow)
 const LIST_TIMEOUT_MS = 30000;
+// An eval waits for the script to call UI.process / MIDI.sleep_ms
+const EVAL_TIMEOUT_MS = 60000;
+// Base64 characters per "eval64" line (the console's line is 255 characters)
+const EVAL64_PIECE = 192;
+const toBase64 = bytes => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
 // "/sd/" -> "/sd", as the device names it in its answer
 const normDir = d => { let s = String(d || '/').trim() || '/'; while (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1); return s; };
 // Espressif's USB vendor id: the port chooser shows these first
@@ -118,6 +131,9 @@ export class MidoriLink {
     try { this.pace = Math.min(PACES.length - 1, Math.max(0, Number(localStorage.getItem(PACE_STORE)) || 0)); } catch (e) {}
     this.onPace = () => {};                 // (pace, error) a transfer stepped down
     this._recent = [];                      // the last lines, for a timeout's message
+    this._evalSeq = 0;
+    this._evalSink = null;                  // (line) -> true: an eval's output, kept out of onLine
+    this._evalCancel = null;                // the eval waiting for its answer: () cancels it
   }
 
   // ---- connection
@@ -203,6 +219,7 @@ export class MidoriLink {
     for (const w of [...this._waiters]) {
       if (w.test(line)) { this._waiters.splice(this._waiters.indexOf(w), 1); w.resolve(line); }
     }
+    if (this._evalSink && this._evalSink(line)) return;
     this.onLine(line);
   }
 
@@ -346,6 +363,68 @@ export class MidoriLink {
       const m = /^(ok|err) ?(.*)$/.exec((await done).slice(end.length));
       if (!m || m[1] === 'err') throw new Error(m ? m[2] : 'mv failed');
     });
+  }
+
+  // Ruby run inside the device's running VM (the script, or UI mode), as
+  // its console's attach does (docs/ATTACH.md): it runs when the script
+  // next calls UI.process / MIDI.sleep_ms. Resolves { ok, value } (value:
+  // the result's inspect, or the error); what the code prints goes to
+  // onOutput(line) and not to onLine
+  evaluate(code, { onOutput = () => {}, timeoutMs = EVAL_TIMEOUT_MS } = {}) {
+    return this._serial(async () => {
+      this._checkProto(5);
+      const id = `w${++this._evalSeq}`;
+      const b64 = toBase64(enc.encode(code));
+      const pieces = [];
+      for (let i = 0; i < b64.length; i += EVAL64_PIECE) pieces.push(b64.slice(i, i + EVAL64_PIECE));
+      if (!pieces.length) pieces.push('');
+      const start = `#<eval ${id}`, end = `#>eval ${id} `;
+      const parse = line => {
+        const m = /^(ok|err) ?(.*)$/.exec(line.slice(end.length));
+        return m ? { ok: m[1] === 'ok', value: m[2] } : { ok: false, value: line };
+      };
+      let inside = false;
+      this._evalSink = () => inside;
+      try {
+        for (let k = 0; k < pieces.length - 1; k++) {
+          const got = this._waitLine(l => l === `#>eval64 ${id} more` || l.startsWith(end));
+          await this._write(enc.encode(`eval64 ${id} + ${pieces[k]}\r`));
+          const l = await got;
+          if (l.startsWith(end)) return parse(l);
+        }
+        const answer = this._waitLine(l => {
+          if (l === start) { inside = true; return false; }
+          if (l.startsWith(end)) return true;
+          if (inside) onOutput(l);
+          return false;
+        }, timeoutMs);
+        const cancelled = new Promise((_, reject) => {
+          this._evalCancel = () => reject(Object.assign(new Error(t('取り消しました', 'Cancelled')), { cancelled: true }));
+        });
+        answer.catch(() => {});
+        await this._write(enc.encode(`eval64 ${id} . ${pieces[pieces.length - 1]}\r`));
+        let line;
+        try { line = await Promise.race([answer, cancelled]); } catch (e) {
+          if (e.recent) e.message = t(`実機から答えがありません（${timeoutMs / 1000} 秒）。スクリプトが UI.process / MIDI.sleep_ms を呼んでいないかもしれません`,
+                                      `No answer from the device (${timeoutMs / 1000} s). The script may not call UI.process / MIDI.sleep_ms`);
+          throw e;
+        }
+        return parse(line);
+      } finally {
+        this._evalSink = null;
+        this._evalCancel = null;
+      }
+    });
+  }
+
+  // Stop the eval that is running or waiting on the device ("evalstop": the
+  // device drops the queued ones and stops the running one)
+  async cancelEval() {
+    const cancel = this._evalCancel;
+    if (!cancel) return;
+    // Past the command queue: the eval holds it while it waits
+    await this._write(enc.encode('evalstop\r'));
+    cancel();
   }
 
   load(path) { return this.send(`load ${path}`); }

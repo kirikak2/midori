@@ -121,6 +121,12 @@ export class MidoriDevice {
     this.onWebMidiOut = onWebMidiOut || (() => {});
     this.amyAudio = amyAudio || null;               // AmyAudio (amy_audio.js), or none
     this.running = false;
+    // The Attach panel (docs/ATTACH.md): code for MIDoRIAttach (sim_boot.rb)
+    this._attachQueue = [];       // "E<id> <code>", taken by Ruby from run_filters
+    this._attachCancel = false;
+    this._evals = new Map();      // id -> { resolve, reject, onOutput }
+    this._evalInside = null;      // the id whose output is coming
+    this._evalSeq = 0;
     this.fingers = new Map();     // pointerId -> { id, x, y }
     this.pinned = new Map();      // Alt+click fingers that stay down
     this._handlers = [];
@@ -129,8 +135,8 @@ export class MidoriDevice {
   async _boot(factory) {
     const M = await factory({
       locateFile: name => wasmUrl(name, this.buildId),
-      print: s => this.onOutput(s, 'out'),
-      printErr: s => this.onOutput(s, 'err'),
+      print: s => this._out(s),
+      printErr: s => this._err(s),
     });
     this.M = M;
     this.width = M._sim_screen_width();
@@ -179,6 +185,8 @@ export class MidoriDevice {
       takeLive: () => (this.running && this.live ? this.live.take() ?? null : null),
       liveFailed: msg => { if (this.running && this.live) this.live.failed(String(msg)); },
       liveValues: json => { if (this.running && this.live) this.live.values(String(json)); },
+      takeAttach: () => (this.running ? this._attachQueue.shift() ?? null : null),
+      attachCancel: () => { const c = this._attachCancel; this._attachCancel = false; return c; },
     };
     this._attachPointer();
     this.running = true;
@@ -189,11 +197,73 @@ export class MidoriDevice {
 
   stop() {
     this.running = false;
+    this._failEvals(new Error('the VM stopped'));
     for (const [type, fn, target] of this._handlers) target.removeEventListener(type, fn);
     this._handlers = [];
     if (this._raf) cancelAnimationFrame(this._raf);
     clearTimeout(this._timer);
     this.M = null;   // the instance and its heap go with it
+  }
+
+  // ---- attach (docs/ATTACH.md)
+
+  // Ruby run inside this VM (the script, or UI mode) the next time it calls
+  // UI.process / MIDI.sleep_ms, as the device's attach. Resolves { ok, value }
+  // (value: the result's inspect, or the error); what the code prints goes
+  // to onOutput(line) and not to the page's log
+  evaluate(code, { onOutput = () => {} } = {}) {
+    if (!this.running) return Promise.reject(new Error('the simulator is not running'));
+    const id = `s${++this._evalSeq}`;
+    return new Promise((resolve, reject) => {
+      this._evals.set(id, { resolve, reject, onOutput });
+      this._attachQueue.push(`E${id} ${code}`);
+    });
+  }
+
+  // Stop the running eval (Ruby stops its Sandbox) and drop the queued ones
+  cancelEval() {
+    this._attachQueue = [];
+    this._attachCancel = true;
+    this._failEvals(Object.assign(new Error('cancelled'), { cancelled: true }));
+  }
+
+  get evalPending() { return this._evals.size > 0; }
+
+  _failEvals(err) {
+    for (const e of this._evals.values()) e.reject(err);
+    this._evals.clear();
+    this._evalInside = null;
+  }
+
+  // Ruby's output: an eval's frames and output to its caller, the rest to
+  // the page. Frames of an eval nobody waits for (cancelled) are dropped.
+  _out(s) {
+    let m;
+    if ((m = /^#<eval (s\d+)$/.exec(s))) {
+      if (this._evals.has(m[1])) this._evalInside = m[1];
+      return;
+    }
+    if ((m = /^#>eval (s\d+) (ok|err) ?(.*)$/.exec(s))) {
+      const e = this._evals.get(m[1]);
+      if (e) { this._evals.delete(m[1]); e.resolve({ ok: m[2] === 'ok', value: m[3] }); }
+      if (this._evalInside === m[1]) this._evalInside = null;
+      return;
+    }
+    const e = this._evalInside && this._evals.get(this._evalInside);
+    if (e) { e.onOutput(s); return; }
+    this.onOutput(s, 'out');
+  }
+
+  // picoruby-wasm reports a task that ended with an exception on stderr
+  // ("Exception in task: ..." and its backtrace). For an eval the answer
+  // carries the error already, so those lines stay out of the page's log.
+  _err(s) {
+    if (this._evalInside && (/^Exception in task: /.test(s) || (this._evalBacktrace && /^  /.test(s)))) {
+      this._evalBacktrace = true;
+      return;
+    }
+    this._evalBacktrace = false;
+    this.onOutput(s, 'err');
   }
 
   // Midi from the page into the device: role 0 = USB-MIDI Host, 1 = USB-MIDI Device

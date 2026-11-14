@@ -48,9 +48,20 @@
  *   That task brings its own line editor (Editor::Line, reading STDIN), so
  *   the console task hands the link over for the duration of the session -
  *   same byte pump as PicoModem in CDC mode. See docs/IRB.md.
+ *
+ * attach mode:
+ *   The "attach" command joins the Ruby VM that is already running (a
+ *   script, or UI mode) instead of starting a new one. That VM is busy
+ *   with its own loop, so the line editing stays here: every finished
+ *   line goes into the attach queue, and the Ruby side evaluates it the
+ *   next time the script passes MIDI.run_filters (UI.process,
+ *   MIDI.sleep_ms, the clock loops) and asks for the next prompt.
+ *   "eval <id> <code>" / "eval64" are the same thing for machines (the
+ *   web simulator), with framed answers. See docs/ATTACH.md.
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -101,6 +112,9 @@ static const char *TAG = "CONSOLE";
 #define CONSOLE_STX              0x02 /* host asks for a PicoModem session */
 #define CONSOLE_ACK              0x06 /* our answer, before going binary */
 #define CONSOLE_CDC_TX_CHUNK     64   /* bytes per write_queue/flush pair */
+#define CONSOLE_ATTACH_DEPTH     4    /* lines waiting for the Ruby side */
+#define CONSOLE_ATTACH_WAIT_MS   3000 /* "the script is not polling" notice */
+#define CONSOLE_TICK_MS          200  /* CDC mode: wake up for the notice */
 #define CONSOLE_CDC_TX_TIMEOUT   pdMS_TO_TICKS(200)
 
 /*
@@ -112,6 +126,7 @@ typedef enum {
     CONSOLE_MODE_LINE = 0,  /* echo + line editing + command parsing */
     CONSOLE_MODE_MODEM,     /* PicoModem frames -> PicoRuby stdin */
     CONSOLE_MODE_IRB,       /* irb keystrokes -> PicoRuby stdin */
+    CONSOLE_MODE_ATTACH,    /* line editing here, lines -> the running VM */
 } console_mode_t;
 
 static StreamBufferHandle_t s_rx_stream  = NULL;
@@ -125,6 +140,16 @@ static volatile uint32_t    s_rx_dropped = 0;
  * Ruby side; IRB is entered and left by the Ruby side. */
 static volatile console_mode_t s_mode     = CONSOLE_MODE_LINE;
 static volatile uint32_t    s_raw_lost   = 0;
+
+/* attach mode (see the section below). The queue carries both the human
+ * session's lines and the machines' one-shot evals. */
+static QueueHandle_t        s_attach_queue   = NULL;
+static portMUX_TYPE         s_attach_mux     = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool        s_attach_running = false; /* a line is being evaluated */
+static volatile bool        s_attach_cancel  = false; /* Ctrl-C / detach for Ruby */
+static volatile bool        s_attach_more    = false; /* Ruby waits for more lines */
+static volatile TickType_t  s_attach_queued_at = 0;
+static volatile bool        s_attach_noticed = false;
 
 /* Line editor state. Kept on the console task's stack rather than in .bss
  * (see docs/MEMORY_ALLOCATION.md on static buffers and DRAM layout). */
@@ -150,6 +175,7 @@ static void console_help(void)
     printf("Commands:\n");
     printf("  load /sd/app.rb  - Load and run a script\n");
     printf("  irb              - Start an interactive Ruby session\n");
+    printf("  attach           - Run Ruby inside the running script (or UI mode)\n");
     printf("  stop             - Stop the running script (back to UI mode)\n");
     printf("  ls [dir]         - List a directory (/, /sd, /plugins ...; UI mode)\n");
     printf("  rm <path>        - Delete a file (UI mode)\n");
@@ -376,6 +402,400 @@ void console_input_irb_exit(void)
 }
 
 /*--------------------------------------------------------------------+
+ * attach mode
+ *
+ * Queue items start with a kind byte:
+ *   'L' a line typed in the attach session (Ruby answers with
+ *       console_input_attach_reply(), which prints the next prompt)
+ *   'E' "eval <id> <code>" from a machine: framed answer, no prompt
+ *   'B' "eval64": the same with the code in Base64 (any length and bytes)
+ *
+ * Who prints the prompt: Ruby, through console_input_attach_reply(),
+ * after it has evaluated a line - only it knows whether the expression is
+ * complete. This task prints it only where Ruby will not: on entering the
+ * session, and after a Ctrl-C that found nothing being evaluated.
+ *--------------------------------------------------------------------*/
+
+static void console_attach_prompt(bool more)
+{
+    printf(more ? "attach* " : "attach> ");
+    fflush(stdout);
+}
+
+/* Supervisor state that has a Ruby VM to attach to: a script, or UI mode
+ * (also the supervisor's task: RUNNING without a script path). Not irb,
+ * which owns the link already, and not a VM on its way out. */
+static bool console_attach_possible(void)
+{
+    if (supervisor_get_state() != SUPERVISOR_STATE_RUNNING) {
+        return false;
+    }
+    const char *script = supervisor_get_current_script();
+    return !(script && strcmp(script, SUPERVISOR_IRB_PATH) == 0);
+}
+
+/* The queue holds heap strings (kind byte + text): an eval64 can be far
+ * longer than a console line. Whoever takes one out frees it. Freeing is
+ * not allowed inside the critical section, so the drains below take the
+ * pointers out under the lock and free them after it. */
+static char *console_attach_item(char kind, const char *text, size_t len)
+{
+    char *item = (char *)malloc(len + 2);
+    if (item == NULL) {
+        return NULL;
+    }
+    item[0] = kind;
+    memcpy(item + 1, text, len);
+    item[len + 1] = '\0';
+    return item;
+}
+
+static bool console_attach_send_n(char kind, const char *text, size_t len)
+{
+    char *item = console_attach_item(kind, text ? text : "", text ? len : 0);
+    if (item == NULL) {
+        return false;
+    }
+    if (xQueueSend(s_attach_queue, &item, 0) != pdTRUE) {
+        free(item);
+        return false;
+    }
+    s_attach_queued_at = xTaskGetTickCount();
+    s_attach_noticed = false;
+    return true;
+}
+
+static bool console_attach_send(char kind, const char *text)
+{
+    return console_attach_send_n(kind, text, text ? strlen(text) : 0);
+}
+
+/* Inside s_attach_mux: everything waiting, into `out` (CONSOLE_ATTACH_DEPTH) */
+static int console_attach_take_all(char **out)
+{
+    int n = 0;
+    while (n < CONSOLE_ATTACH_DEPTH && xQueueReceive(s_attach_queue, &out[n], 0) == pdTRUE) {
+        n++;
+    }
+    return n;
+}
+
+static void console_attach_free_all(char **items, int n)
+{
+    for (int i = 0; i < n; i++) {
+        free(items[i]);
+    }
+}
+
+static void console_attach_enter(void)
+{
+    if (s_attach_queue == NULL) {
+        printf("attach: not available\n");
+        return;
+    }
+    if (!console_attach_possible()) {
+        printf("attach: nothing to attach to (irb is running, or a script is stopping)\n");
+        return;
+    }
+    const char *script = supervisor_get_current_script();
+    char *old[CONSOLE_ATTACH_DEPTH];
+    taskENTER_CRITICAL(&s_attach_mux);
+    int n = console_attach_take_all(old);
+    s_attach_more = false;
+    s_attach_cancel = true;          /* Ruby: drop what an earlier session left */
+    taskEXIT_CRITICAL(&s_attach_mux);
+    console_attach_free_all(old, n);
+    printf("Attached to %s\n", (script && script[0]) ? script : "UI mode");
+    printf("Lines run when the script calls UI.process / MIDI.sleep_ms.\n");
+    printf("exit / Ctrl-D to detach, Ctrl-C to cancel\n");
+    s_mode = CONSOLE_MODE_ATTACH;
+    console_attach_prompt(false);
+}
+
+/* Back to the command line. `why` is printed when the session did not end
+ * by the user's choice. */
+static void console_attach_leave(const char *why)
+{
+    if (s_mode != CONSOLE_MODE_ATTACH) {
+        return;
+    }
+    s_mode = CONSOLE_MODE_LINE;
+    char *old[CONSOLE_ATTACH_DEPTH];
+    taskENTER_CRITICAL(&s_attach_mux);
+    /* Lines nobody evaluated yet go; an eval from a machine is not ours to
+     * drop, but nothing sends one during a human session. */
+    int n = console_attach_take_all(old);
+    s_attach_cancel = true;          /* stop a running line, forget the rest */
+    s_attach_more = false;
+    taskEXIT_CRITICAL(&s_attach_mux);
+    console_attach_free_all(old, n);
+    if (why) {
+        printf("\n[attach] %s: detached\n", why);
+    } else {
+        printf("Detached\n");
+    }
+    console_prompt();
+}
+
+static void console_attach_line(const char *line)
+{
+    /* Leaving needs no answer from Ruby, so it works even when the script
+     * never polls. Only at the first line of an expression: inside one,
+     * "exit" might be part of the code. */
+    if (!s_attach_more && (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0)) {
+        console_attach_leave(NULL);
+        return;
+    }
+    if (!s_attach_more && line[0] == '\0') {
+        console_attach_prompt(false);
+        return;
+    }
+    if (!console_attach_send('L', line)) {
+        printf("attach: busy (%d lines waiting), line dropped\n", CONSOLE_ATTACH_DEPTH);
+        console_attach_prompt(s_attach_more);
+    }
+}
+
+/* Ctrl-C: drop the lines still waiting, stop the one being evaluated
+ * (Ruby prints the prompt after it) or else forget the half-typed
+ * expression and print the prompt here. */
+static void console_attach_interrupt(void)
+{
+    printf("^C\n");
+    bool running;
+    char *old[CONSOLE_ATTACH_DEPTH];
+    taskENTER_CRITICAL(&s_attach_mux);
+    int n = console_attach_take_all(old);
+    running = s_attach_running;
+    s_attach_cancel = true;
+    s_attach_more = false;
+    taskEXIT_CRITICAL(&s_attach_mux);
+    console_attach_free_all(old, n);
+    if (!running) {
+        console_attach_prompt(false);
+    } else {
+        fflush(stdout);
+    }
+}
+
+/* Called from the console task's loop: tell the user when the script has
+ * not picked a line up for a while (it never calls UI.process or
+ * MIDI.sleep_ms, or it is stuck), once per line. */
+static void console_attach_tick(void)
+{
+    if (s_mode != CONSOLE_MODE_ATTACH || s_attach_noticed) {
+        return;
+    }
+    if (uxQueueMessagesWaiting(s_attach_queue) == 0) {
+        return;
+    }
+    if (xTaskGetTickCount() - s_attach_queued_at < pdMS_TO_TICKS(CONSOLE_ATTACH_WAIT_MS)) {
+        return;
+    }
+    s_attach_noticed = true;
+    printf("\n(waiting: the script has not called UI.process / MIDI.sleep_ms yet;"
+           " Ctrl-C to cancel)\n");
+    fflush(stdout);
+}
+
+/* The id of "eval <id> ..." / "eval64 <id> ...": up to the first space.
+ * Returns what follows it (NULL when nothing does). */
+static const char *console_eval_id(const char *args, char *id, size_t id_size)
+{
+    while (*args == ' ') args++;
+    const char *sp = strchr(args, ' ');
+    size_t idlen = sp ? (size_t)(sp - args) : strlen(args);
+    if (idlen >= id_size) idlen = id_size - 1;
+    memcpy(id, args, idlen);
+    id[idlen] = '\0';
+    if (sp == NULL) return NULL;
+    while (*sp == ' ') sp++;
+    return sp;
+}
+
+static bool console_eval_ready(const char *id)
+{
+    if (s_attach_queue == NULL || !console_attach_possible()) {
+        printf("#>eval %s err busy: no Ruby VM to run it (irb, or stopping)\n", id);
+        fflush(stdout);
+        return false;
+    }
+    if (s_mode == CONSOLE_MODE_ATTACH) {
+        printf("#>eval %s err busy: an attach session is open on the console\n", id);
+        fflush(stdout);
+        return false;
+    }
+    return true;
+}
+
+/* "eval <id> <code>": one expression, answered in frames
+ * ("#<eval <id>", what it prints, "#>eval <id> ok|err ..."). The code is
+ * one console line: printable ASCII only. */
+static void console_eval_command(const char *args)
+{
+    char id[32];
+    const char *code = console_eval_id(args, id, sizeof(id));
+    if (id[0] == '\0' || code == NULL) {
+        printf("#>eval %s err usage: eval <id> <code>\n", id);
+        fflush(stdout);
+        return;
+    }
+    if (!console_eval_ready(id)) return;
+    char buf[CONSOLE_LINE_MAX + 40];
+    int n = snprintf(buf, sizeof(buf), "%s %s", id, code);
+    if (!console_attach_send_n('E', buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1)) {
+        printf("#>eval %s err busy: queue full\n", id);
+        fflush(stdout);
+    }
+}
+
+/*
+ * "eval64 <id> <+|.> <base64>": code of any length and any bytes (several
+ * lines, UTF-8), as Base64 in pieces that fit a console line. "+" adds a
+ * piece and is answered "#>eval64 <id> more"; "." adds the last one and
+ * queues the whole for Ruby, which decodes it and answers as "eval" does.
+ * One eval64 at a time (a new id drops an unfinished one). The pieces are
+ * collected here, in the console task, so they take no room in the queue.
+ */
+#define CONSOLE_EVAL64_MAX   (24 * 1024)   /* Base64 characters */
+static char   *s_e64_buf = NULL;
+static size_t  s_e64_len = 0;
+static char    s_e64_id[32];
+
+static void console_eval64_drop(void)
+{
+    free(s_e64_buf);
+    s_e64_buf = NULL;
+    s_e64_len = 0;
+    s_e64_id[0] = '\0';
+}
+
+static void console_eval64_command(const char *args)
+{
+    char id[32];
+    const char *rest = console_eval_id(args, id, sizeof(id));
+    if (id[0] == '\0' || rest == NULL || (rest[0] != '+' && rest[0] != '.')) {
+        printf("#>eval %s err usage: eval64 <id> <+|.> <base64>\n", id);
+        fflush(stdout);
+        return;
+    }
+    bool last = rest[0] == '.';
+    const char *b64 = rest + 1;
+    while (*b64 == ' ') b64++;
+    size_t n = strlen(b64);
+
+    if (strcmp(id, s_e64_id) != 0) {
+        console_eval64_drop();
+        snprintf(s_e64_id, sizeof(s_e64_id), "%s", id);
+    }
+    if (s_e64_len + n > CONSOLE_EVAL64_MAX) {
+        console_eval64_drop();
+        printf("#>eval %s err code too long (max %d Base64 characters)\n", id, CONSOLE_EVAL64_MAX);
+        fflush(stdout);
+        return;
+    }
+    char *grown = (char *)realloc(s_e64_buf, s_e64_len + n + 1);
+    if (grown == NULL) {
+        console_eval64_drop();
+        printf("#>eval %s err out of memory\n", id);
+        fflush(stdout);
+        return;
+    }
+    s_e64_buf = grown;
+    memcpy(s_e64_buf + s_e64_len, b64, n);
+    s_e64_len += n;
+    s_e64_buf[s_e64_len] = '\0';
+
+    if (!last) {
+        printf("#>eval64 %s more\n", id);
+        fflush(stdout);
+        return;
+    }
+    if (console_eval_ready(id)) {
+        /* "<id> <base64>" */
+        size_t idlen = strlen(id);
+        char *item = (char *)malloc(idlen + 1 + s_e64_len + 2);
+        bool sent = false;
+        if (item != NULL) {
+            item[0] = 'B';
+            memcpy(item + 1, id, idlen);
+            item[1 + idlen] = ' ';
+            memcpy(item + 2 + idlen, s_e64_buf, s_e64_len + 1);
+            if (xQueueSend(s_attach_queue, &item, 0) == pdTRUE) {
+                sent = true;
+            } else {
+                free(item);
+            }
+        }
+        if (!sent) {
+            printf("#>eval %s err busy: queue full\n", id);
+            fflush(stdout);
+        }
+    }
+    console_eval64_drop();
+}
+
+char *console_input_attach_pop(void)
+{
+    if (s_attach_queue == NULL) {
+        return NULL;
+    }
+    char *item = NULL;
+    taskENTER_CRITICAL(&s_attach_mux);
+    /* Inside the lock: a Ctrl-C either drops this line or sees it running */
+    if (xQueueReceive(s_attach_queue, &item, 0) == pdTRUE) {
+        if (item[0] == 'L') {
+            s_attach_running = true;
+        }
+    } else {
+        item = NULL;
+    }
+    taskEXIT_CRITICAL(&s_attach_mux);
+    return item;
+}
+
+void console_input_attach_reply(bool more)
+{
+    taskENTER_CRITICAL(&s_attach_mux);
+    s_attach_running = false;
+    s_attach_more = more;
+    taskEXIT_CRITICAL(&s_attach_mux);
+    if (s_mode == CONSOLE_MODE_ATTACH) {
+        console_attach_prompt(more);
+    }
+}
+
+bool console_input_attach_take_cancel(void)
+{
+    taskENTER_CRITICAL(&s_attach_mux);
+    bool c = s_attach_cancel;
+    s_attach_cancel = false;
+    taskEXIT_CRITICAL(&s_attach_mux);
+    return c;
+}
+
+bool console_input_attached(void)
+{
+    return s_mode == CONSOLE_MODE_ATTACH;
+}
+
+void console_input_attach_exit(const char *why)
+{
+    taskENTER_CRITICAL(&s_attach_mux);
+    s_attach_running = false;
+    taskEXIT_CRITICAL(&s_attach_mux);
+    console_attach_leave(why);
+    /* A machine's evals die with the VM too */
+    if (s_attach_queue) {
+        char *old[CONSOLE_ATTACH_DEPTH];
+        taskENTER_CRITICAL(&s_attach_mux);
+        int n = console_attach_take_all(old);
+        taskEXIT_CRITICAL(&s_attach_mux);
+        console_attach_free_all(old, n);
+    }
+}
+
+/*--------------------------------------------------------------------+
  * Command handling
  *--------------------------------------------------------------------*/
 
@@ -439,13 +859,13 @@ static void console_execute(const char *line)
     /* One line about the device for the web simulator: which board, and
      * whether UI mode (which answers ls / rm and file transfers) is up.
      * proto: 2 = ls / rm answers name their target ("#>ls /sd ok 3"),
-     * 3 = mv */
+     * 3 = mv, 4 = eval (and attach), 5 = eval64 / evalstop */
     if (strcmp(line, "info") == 0) {
         const char *script = supervisor_get_current_script();
         const char *mode = supervisor_get_state() == SUPERVISOR_STATE_STOPPING ? "stopping"
                          : !supervisor_is_script_running() ? "ui"
                          : strcmp(script, SUPERVISOR_IRB_PATH) == 0 ? "irb" : "script";
-        printf("#info proto=3 board=%s mode=%s script=%s\n", CONSOLE_BOARD_ID, mode,
+        printf("#info proto=5 board=%s mode=%s script=%s\n", CONSOLE_BOARD_ID, mode,
                (script && strcmp(mode, "script") == 0) ? script : "");
         fflush(stdout);
         return;
@@ -509,6 +929,39 @@ static void console_execute(const char *line)
         return;
     }
 
+    if (strcmp(line, "attach") == 0) {
+        console_attach_enter();
+        fflush(stdout);
+        return;
+    }
+
+    if (strncmp(line, "eval ", 5) == 0) {
+        console_eval_command(line + 5);
+        return;
+    }
+
+    if (strncmp(line, "eval64 ", 7) == 0) {
+        console_eval64_command(line + 7);
+        return;
+    }
+
+    /* A machine's Ctrl-C: drop the evals still queued and stop the one
+     * running (it answers "#>eval <id> err stopped") */
+    if (strcmp(line, "evalstop") == 0) {
+        if (s_attach_queue != NULL && s_mode != CONSOLE_MODE_ATTACH) {
+            char *old[CONSOLE_ATTACH_DEPTH];
+            taskENTER_CRITICAL(&s_attach_mux);
+            int n = console_attach_take_all(old);
+            s_attach_cancel = true;
+            taskEXIT_CRITICAL(&s_attach_mux);
+            console_attach_free_all(old, n);
+        }
+        console_eval64_drop();
+        printf("#>evalstop ok\n");
+        fflush(stdout);
+        return;
+    }
+
     /* Like "stop", handled in C: the supervisor starts irb as a PicoRuby
      * task of its own, so it works whether the Ruby side is sitting in the
      * UI loop or busy running a script. The console stays in line mode
@@ -567,7 +1020,7 @@ static void console_feed(console_line_t *st, uint8_t c)
 {
     /* The PicoRuby web terminal opens a transfer with a bare STX, the same
      * handshake R2P2's shell uses. Whatever was half-typed is dropped. */
-    if (c == CONSOLE_STX) {
+    if (c == CONSOLE_STX && s_mode == CONSOLE_MODE_LINE) {
         st->len = 0;
         st->esc = 0;
         st->last_was_cr = false;
@@ -601,9 +1054,16 @@ static void console_feed(console_line_t *st, uint8_t c)
         printf("\n");
         fflush(stdout);
         st->buf[st->len] = '\0';
-        console_execute(st->buf);
         st->len = 0;
-        console_prompt();
+        if (s_mode == CONSOLE_MODE_ATTACH) {
+            console_attach_line(st->buf);
+            return;
+        }
+        console_execute(st->buf);
+        /* "attach" printed its own prompt */
+        if (s_mode == CONSOLE_MODE_LINE) {
+            console_prompt();
+        }
         return;
     }
 
@@ -614,6 +1074,19 @@ static void console_feed(console_line_t *st, uint8_t c)
             fflush(stdout);
         }
         return;
+    }
+
+    if (s_mode == CONSOLE_MODE_ATTACH) {
+        if (c == 0x03) {            /* Ctrl-C: cancel (see the function) */
+            st->len = 0;
+            console_attach_interrupt();
+            return;
+        }
+        if (c == 0x04 && st->len == 0) {   /* Ctrl-D on an empty line */
+            printf("\n");
+            console_attach_leave(NULL);
+            return;
+        }
     }
 
     if (c == 0x03 || c == 0x15) {   /* Ctrl-C / Ctrl-U: discard the line */
@@ -640,7 +1113,7 @@ static void console_feed(console_line_t *st, uint8_t c)
  */
 static void console_dispatch(console_line_t *st, uint8_t c)
 {
-    if (s_mode != CONSOLE_MODE_LINE) {
+    if (s_mode == CONSOLE_MODE_MODEM || s_mode == CONSOLE_MODE_IRB) {
         if (!picorb_hal_stdin_push(c)) {
             s_raw_lost++;
         }
@@ -684,7 +1157,7 @@ static void console_input_task(void *arg)
     for (;;) {
         if (s_cdc_mode) {
             size_t n = xStreamBufferReceive(s_rx_stream, buf, sizeof(buf),
-                                            portMAX_DELAY);
+                                            pdMS_TO_TICKS(CONSOLE_TICK_MS));
             for (size_t i = 0; i < n; i++) {
                 console_dispatch(&st, buf[i]);
             }
@@ -710,6 +1183,8 @@ static void console_input_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(CONSOLE_POLL_INTERVAL_MS));
         }
 
+        console_attach_tick();
+
         uint32_t dropped = s_rx_dropped;
         if (dropped) {
             s_rx_dropped = 0;
@@ -733,6 +1208,11 @@ void console_input_start(void)
     if (s_cmd_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create command queue");
         return;
+    }
+    /* Optional: without it "attach" / "eval" say they are unavailable */
+    s_attach_queue = xQueueCreate(CONSOLE_ATTACH_DEPTH, sizeof(char *));
+    if (s_attach_queue == NULL) {
+        ESP_LOGW(TAG, "Failed to create attach queue");
     }
 
 #if CONFIG_USB_MIDI_CONSOLE_ON_CDC
