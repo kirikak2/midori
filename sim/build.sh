@@ -62,11 +62,17 @@ for BOARD in $BOARDS; do
     -Wl,--whole-archive "$SIM/out/$BOARD/libmidori_sim.a" -Wl,--no-whole-archive "$LIBMRUBY" \
     -o "$OUT/midori-sim-$BOARD.js"
   # Ruby the page runs before the user's script: BoardConfig, the part of
-  # main_task_base.rb shared with the device, then the simulator's start-up
+  # main_task_base.rb shared with the device, the hardware gems' stand-ins
+  # (sim_hardware.rb: mock GPIO pins and I2C bus, then picoruby-gpio's own
+  # Ruby and the DFRobot encoder's own driver over them), then the
+  # simulator's start-up
   MARK='# ---- The MIDoRI simulator (sim/build.sh) takes this file up to here'
   {
     cat "$SIM/mrblib/board_config_$BOARD.rb"
     sed "/^$(printf '%s' "$MARK" | sed 's/[][\/.*^$]/\\&/g')/q" "$ROOT/components/midori-runtime/mrblib/main_task_base.rb"
+    cat "$SIM/mrblib/sim_hardware.rb"
+    cat "$ROOT"/components/midori-runtime/picoruby/mrbgems/picoruby-gpio/mrblib/*.rb
+    cat "$ROOT"/mrbgems/picoruby-dfrobot_rotary_encoder/mrblib/*.rb
     cat "$SIM/mrblib/sim_boot.rb"
   } > "$OUT/sim_boot-$BOARD.rb"
   grep -q "$MARK" "$OUT/sim_boot-$BOARD.rb" || { echo "marker not found in main_task_base.rb" >&2; exit 1; }

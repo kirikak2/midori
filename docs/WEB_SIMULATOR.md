@@ -127,6 +127,7 @@ sim/
     panel_wasm_fb.cpp  platform_wasm.cpp  rtos_loop.c  nvs_web.c
   gem/midori-sim/                     # 上の C/C++ と main/ui/*.cpp をビルドに入れる mrbgem
   mrblib/sim_boot.rb                  # BoardConfig / MIDIDevices / ScriptManager
+  mrblib/sim_hardware.rb              # ハードウェア系 gem の代わり（require を通す・GPIO / I2C のモック）
   web/                                # JS ホスト・Web MIDI・デザイナー（ES modules）
   build.sh                            # emsdk で全部ビルドして site/simulator/wasm/ へ
 mrbgems/picoruby-midi/ports/wasm/     # トランスポート・入力タスク・クロックの wasm 版
@@ -650,6 +651,19 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   復元（無ければ「シミュレーターで開いて」と案内）。編集中のプロジェクトはブラウザに自動保存。「シミュレーターで開く」はスクリプトを
   シミュレーターのエディタへ渡す
 - シミュレーターに `ScriptManager` の代わり（`stop_requested?` は常に false）を足した。生成スクリプトや examples の多くが使う
+- ハードウェア系の gem（gpio / i2c / spi / adc / pwm / uart / rmt / sdmmc / adafruit_sk6812 / dfrobot_rotary_encoder）は
+  シミュレーターのビルドに無いが、`require` は通す（`sim/mrblib/sim_hardware.rb`。2026-11-14 までは LoadError で止まった）。
+  build.sh がブート用 Ruby の `sim_boot.rb` の前に、picoruby-gpio と dfrobot_rotary_encoder の mrblib とともに入れる。examples は `BoardConfig::HAS_PRIMARY_I2C`（シミュレーターでは false）を
+  見てハードウェアを使わずに続ける
+  - **I2C は何もつながっていないバス**: `I2C.new` は成功し、`write` / `read` は実機で機器が応答しないときと同じ IOError。
+    `I2C.attach(addr, dev)` でモックの機器を置ける（`i2c_write(bytes)` / `i2c_read(len)` を持つオブジェクト。全インスタンスで共有）。
+    `I2C::RegisterDevice` はレジスタ型（最初のバイトでポインタ、以降は自動インクリメント。`set(reg, *bytes)` で初期値）
+  - **DFRobotRotaryEncoder は gem の本物**（純粋な Ruby なので mrblib をそのままつなぐ）。機器が無ければ `connected?` は false、
+    `I2C::RegisterDevice.new.set(0x00, 0x01, 0xF6)` を 0x54 に置くと 1 台見つかる
+  - **GPIO は picoruby-gpio の Ruby 部分（mrblib）が本物**で、C のバインディングの部分だけがモックのピン表。
+    出力は書いた値を読み返し、入力は `GPIO.drive(pin, 0 / 1)` で外から与えた値（nil で解放）、無ければプル（PULL_UP なら 1、
+    それ以外は 0）。オープンドレインの 1 は解放と同じ。ピン名・値の検査と例外は実機のバインディングと同じ。`GPIO.pins` で状態を見られる
+  - ほかのクラス（SPI / UART など）は定数だけあり（0）、`new` は NotImplementedError
 - 試験: `node sim/test/node_designer.mjs [shot.png]`（モデルを組み、生成、ヘッダからの往復、シミュレーターで実行してタップ）
 - **Envelope / Sequencer / AMY パート**（2026-11-14 追加）:
   - プロジェクトに **AMY パート**（id・FM / Synth・チャンネル・ボイス数・プリセット。Tab5 のみ）。生成は
