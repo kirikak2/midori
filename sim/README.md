@@ -46,6 +46,10 @@ node sim/test/node_designer_screens.mjs shot.png    # designer: Pads / Knobs scr
 node sim/test/node_link.mjs                         # midori_link.js against a fake MIDoRI (console, PicoModem)
 node sim/test/node_startup.mjs                      # start-up shared with the device: /app.rb, /plugins then /sd/plugins
 node sim/test/node_scripts.mjs shot.png 200,108 640,690   # the Scripts screen with a device's list: pick, Run
+node sim/test/node_share.mjs                        # share links (and zlib-made ones) decode
+node sim/test/node_reference.mjs                    # every "open in the simulator" link of the reference runs
+node sim/test/node_designer_settings.mjs            # designer: knob range, key colours, XYPad fingers, BPM
+node sim/test/node_designer_live.mjs                # designer: live patching keeps knob values, takes new code
 ```
 
 ## Layout
@@ -61,6 +65,8 @@ node sim/test/node_scripts.mjs shot.png 200,108 640,690   # the Scripts screen w
 | `web/` | The page: `device.js` (one wasm instance = one boot), `usb_midi.js` (messages <-> USB-MIDI packets, SysEx included), `synth.js` (built-in synth = SAM2695), `amy_audio.js` (AMY's AudioWorklet), `webmidi.js` (Web MIDI ports in the device's roles and by name) |
 | `web/midori_link.js`, `web/device_panel.js` | The real MIDoRI over USB CDC (Web Serial): console commands, PicoModem, the page's panel (docs §13) |
 | `vendor/codemirror/` | The editor: CodeMirror 6 (pinned versions, `package-lock.json`) bundled by `npm install && npm run build` into `web/vendor/codemirror.js` (checked in, so the page needs no npm); colours from the page's `--cm-*` variables |
+| `web/share.js`, `web/i18n.js` | Share links (#code=...), and the pages' two languages (`t()`, `data-en`, `?lang=`) |
+| `licenses/` | License texts not in the tree (LovyanGFX, CodeMirror); `build.sh` writes `web/licenses.txt` |
 | `web/designer.html`, `web/designer/` | The designer (docs §12.6): `model.js` (project model, widget settings), `codegen.js` (project script), `app.js` (the page) |
 | `test/` | Node smoke tests |
 
@@ -99,5 +105,7 @@ Web MIDI port is also `MIDIDevices.web_midi("name")` and a MIDI Devices row /
 column ([picoruby-web_midi](../mrbgems/picoruby-web_midi/), §12.1); AMY plays
 through an AudioWorklet (§12.2). SysEx passes both ways (§12.4). The designer
 (`designer.html`, §12.6) builds layouts and generates the project script. A connected MIDoRI (USB CDC) gives the page its scripts, and the
-simulator its plugins and /app.rb (§13). Not yet: the designer's live
-patching and device panel, CI.
+simulator its plugins and /app.rb (§13). Share links, the repository's
+examples, the reference's links (§15); the designer's live patching,
+device panel, finer settings and route filters (§16); Japanese / English,
+the site and CI (`.github/workflows/pages.yml`), licenses (§17).

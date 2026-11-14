@@ -1338,6 +1338,29 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   広げる話は docs/BLE_MIDI.md §12
 - NimBLE の接続は 4 本（Device 1 + Host 2 + `BLE` クラス 1、`sdkconfig.defaults.ble`）
 
+## Web シミュレーターとデザイナー（sim/ / 2026-11-13〜）
+
+詳細は [docs/WEB_SIMULATOR.md](docs/WEB_SIMULATOR.md)、使い方は [sim/README.md](sim/README.md)。GitHub Pages の `simulator/`。
+
+- **実機の UI コードをそのまま wasm にする**: `main/ui`（LovyanGFX）、gem の ESP32 port と mrblib、
+  main_task_base.rb の**マーカーより上**を Emscripten でビルドし、ESP-IDF / FreeRTOS / M5Unified は `sim/shim` + `sim/port`
+  の薄い層で置き換える。タスクは無く、ページのループが UI タスク（`sim_frame`）・esp_timer・入力タスク（`MIDI_INPUT_POLLED`）・
+  Sequencer（`MIDORI_SIM`）を 1 回ずつ回す。**これらの define の分岐や main_task_base.rb のマーカーより上を変えたら
+  シミュレーターも確かめる**（`sim/build.sh` → `node sim/test/*.mjs`）
+- ビルド: `sim/build.sh`（emsdk 6.0.12、M5GFX は managed_components）。gem の mrblib を変えると build.sh が古い gem のビルドを
+  消して作り直す（実機の `rm -rf .../esp32-picoruby` に当たる）。mruby の標準ライブラリは実機と共通の `build_config/mruby_stdlib.rb`
+- ボードごとに別の wasm（tab5 / cores3）。MIDI は Web MIDI（`picoruby-web_midi` gem は wasm 専用）、AMY は AudioWorklet
+- **実機との接続**: ページの `midori_link.js`（Web Serial + PicoModem）がコンソールの `info` / `ls` / `rm` / `mv` / `rescan` を使う。
+  答えの形（`#<` / `#>`、対象を名乗る）と `proto` は `console_input.c` / main_task_base.rb の `console_command` と組
+  （変えたら両方と `PROTO`）。シミュレーターの Scripts は実機につないでいる間だけ（仮想 /sd は無い）
+- デザイナー（`sim/web/designer/`）: プロジェクトモデル → 1 本のプロジェクトスクリプト（先頭 `# midori-designer:` にモデル）。
+  部品だけの変更は実行中の VM にライブパッチ（`sim_boot.rb` の `UI.process` フック、`live_update`）
+- 文言は `t('日本語', 'English')` / `data-en`（`sim/web/i18n.js`、`?lang=`）。エディタは CodeMirror 6 を
+  `sim/vendor/codemirror` で 1 本にまとめてリポジトリに入れている（CDN なし）
+- Pages（`.github/workflows/pages.yml`）が wasm をビルドし、サイズ（gzip 3 MB 以下）とスモークテストを通ったら `site/simulator/` に置く。
+  リファレンスの「シミュレーターで開く」は `ruby tools/site_sim_links.rb`（コード例を変えたら実行し直す。`node sim/test/node_reference.mjs`）
+- 公開物のライセンスは build.sh が `web/licenses.txt` にまとめる（LovyanGFX / CodeMirror の本文は `sim/licenses/`）
+
 ## 既知の課題
 
 ### USB MIDIデバイスの電源ON順序問題（2026-03-18）

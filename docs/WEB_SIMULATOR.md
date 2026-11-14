@@ -550,7 +550,7 @@ PicoModem にはディレクトリ一覧が無いので、実機のコンソー�
   ブロックに値が届く）、Layout DSL（`areas` + knob + 入れ子の grid の pad。タップで SAM2695 役へノート）、Keys
   （C++ 側の発音経路で SAM2695 役へ）、Sequencer の起動
 - **サイズ**: wasm 1.85 MB（gzip 前）、JS 132 KB。LovyanGFX と main/ui で約 0.3 MB、残りは PicoRuby
-- **まだ**: 仮想 `/sd` と Scripts、CI（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4、CoreS3 は §12.5、デザイナーは §12.6）
+- 仮想 `/sd` は作らないことにした（Scripts は実機とつないで使う、§13）。CI は §17（ブラウザでの動作確認は済み。AMY は §12.2、SysEx は §12.4、CoreS3 は §12.5、デザイナーは §12.6）
 
 ### 12.1 web_midi（2026-11-13）
 
@@ -588,7 +588,7 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   内蔵音源（SAM2695 役）と同じ AudioContext。Settings 画面のスピーカー音量は両方に効く
 - 計測（Node の V8）: FM 12 音で 1 ブロック平均 111 µs / 最大 611 µs（予算 5.33 ms の 2.1% / 11.5%）。wasm は 1.85 → 2.37 MB
 - 確認: `AMY.add_fm` / `add_synth` のノート、レイアウトのパッド、画面の鍵盤（C++ の発音経路）から AMY が鳴る（Node で波形の振幅を確認。
-  ブラウザで聞く確認はまだ）。例は「AMY」（ページ）、試験は `node sim/test/node_amy.mjs`
+  ブラウザでも鳴ることを確認済み、2026-11-14）。例は「AMY」（ページ）、試験は `node sim/test/node_amy.mjs`
 - 先読みの 60 ms ぶん遅れる。ページのスレッドが止まると（GC、重い描画、裏のタブ）音が途切れ得る
 
 ### 12.3 UI モードとスクリプトモード（2026-11-14）
@@ -679,8 +679,7 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   （外した画面は `UI.show` でも開けない）
 - 試験: `node sim/test/node_designer_screens.mjs [shot.png]`（ノブの初期値の送信・メニューの隠しマスク・ルートのチャンネル・
   パッドの発音）
-- **まだ**: ライブパッチ（§6.3）、デザイナーへの実機パネル（§13。保存先は実機だけになった）、
-  ルートの filter / チェーン、VM の検証エラーをグリッドのセルに出すこと（今はプレビューのログに出る）
+- **まだ**: VM の検証エラーをグリッドのセルに出すこと（今はプレビューのログに出る）
 
 ## 13. 実機との接続と起動時のファイル（2026-11-14）
 
@@ -729,8 +728,11 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 ### 13.3 ページ（`sim/web/midori_link.js`、`device_panel.js`）
 
 - `MidoriLink`: Web Serial（Chrome / Edge）で CDC を開き、受信を行に分けてコンソールに出しつつ、`info` / `ls` / `rm` の答えを待つ。
-  ファイルは PicoModem（`FILE_READ` / `FILE_WRITE`、CRC-16/CCITT 初期値 0xFFFF、ファイル全体の CRC-32）。送信は 32 バイトずつ
-  20 ms 空ける（PicoRuby の web terminal と同じ値。実機で速度を詰める余地あり）。コマンドは 1 つずつ（コンソールは 1 本の会話）
+  ファイルは PicoModem（`FILE_READ` / `FILE_WRITE`、CRC-16/CCITT 初期値 0xFFFF、ファイル全体の CRC-32）。コマンドは 1 つずつ
+  （コンソールは 1 本の会話）
+- **送信の速さは段階で下げる**（`PACES`）: 256 バイト / 2 ms → 64 / 5 → 32 / 20（PicoRuby の web terminal の値）。転送が失敗したら
+  実機のセッションが終わる（`info` に答える）のを待ち、1 段遅くしてやり直す。うまくいった段はブラウザに覚える。
+  実機が返した意味のあるエラー（ファイルが無いなど）はやり直さない（`Timeout` / `Unexpected` で始まるものだけがリンクの問題）
 - パネル（シミュレーターの左、エディタの下）: 接続 / 切断、実機の状態（ボードとモード）、一覧（起動時のスクリプト・`/sd` の
   スクリプト・プラグインを読み込み順で）、開く（エディタへ）・実行（`load`）・削除、「/sd に保存」「/app.rb として保存」
   （上書きは確認、`/sd` に新しく足したら `rescan`、保存後に実行も選べる）、実機のスクリプトの停止（`stop` の後、UI モードに
@@ -744,8 +746,9 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   効くのは次の起動から。`proto` が 3 より古いファームウェアには送らず、書き込み直すよう伝える
 - 試験: `node sim/test/node_link.mjs`（実機のプロトコルをまねた偽のデバイスで info / ls / rm / 読み書き / 空ファイル / エラー /
   待ち切れなかった `ls` の遅れた答えを次の `ls` が受け取らないこと）
-- **まだ**: 実機での確認（接続・転送・`/app.rb` の自動実行・`/plugins` の順序）、デザイナーへのパネルの組み込み（§7.4）、
-  `.mrb` のプラグインをシミュレーターで読めるか（ビルド設定が違う: 実機は `MRB_INT64`、シミュレーターは `MRB_INT32`）
+- `.mrb` のプラグイン（ファームウェアの mrbc で作ったもの。`tools/bundle_plugins.rb` の bundle.mrb を含む）はシミュレーターでも
+  そのまま読める（2026-11-14 に確認。整数の幅が違うが、RITE は整数を幅に依存しない形で持ち、32 ビットを超える整数リテラルも
+  シミュレーターの bigint で読める）。試験は `node sim/test/node_startup.mjs`（mrbc がビルド済みなら）
 
 ## 14. エディタ（CodeMirror 6、2026-11-14）
 
@@ -759,4 +762,50 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 - 色はページの CSS 変数（`--cm-keyword` など、ライト / ダークそれぞれ）を読むので、ページのテーマに従う
 - ページからは `createEditor(parent, { onChange, onRun })` が返す `value`（textarea と同じ読み書き）だけを使う
 - 更新するには `sim/vendor/codemirror` で版を書き換えて `npm install --before=<日付> && npm run build`
+
+## 15. 共有リンクとサンプル（2026-11-14）
+
+- **共有リンク**（`sim/web/share.js`）: `#code=<base64url(deflate-raw(UTF-8))>&board=<board>`。スクリプトは URL の `#` の後ろなので
+  サーバーには届かない。ページの「共有リンク」がコピーし、開くとエディタに入る（実行はしない。Run は見た人が押す）。開いたら
+  `#` 以降を消すので、編集してから読み込み直しても共有された版に戻らない。圧縮はブラウザの CompressionStream と同じ形式を
+  Node の zlib / Ruby の Zlib（`-MAX_WBITS`）でも作れる。試験 `node sim/test/node_share.mjs`
+- **examples/**: `sim/build.sh` が `examples/*.rb` と `index.json`（ファイル名と先頭のコメント行）を `web/examples/` に写し、
+  ページの Examples メニューに「examples/」として出る（ページ組み込みのものは「すぐ試せるもの」）
+- **リファレンスの「シミュレーターで開く」**: `ruby tools/site_sim_links.rb` が site/reference（英・日）のコード例ごとに共有リンクを
+  付ける。断片なので前後に `dev` / `fx`（内蔵音源）と `UI.process` のループを足す。`...` を含むものと BLE（シミュレーターに無い）は
+  付けない。何度実行しても同じ。試験 `node sim/test/node_reference.mjs`（リンクの付いた全部をシミュレーターで実行してエラーが無いこと）
+
+## 16. デザイナーの追加（2026-11-14）
+
+- **ライブパッチ**（§6.3）: 部品だけの変更（値・動作・位置・足す / 消す）は、プレビューを作り直さずに実行中の VM へ流す。
+  ページが生成したモジュールの全体（メソッドの再定義。デバイス・パート・XYPad / Tombola / Keys はメモ化されているので残る）と
+  `live_update`（レイアウトを同じタイトルで再定義、Pads / Knobs 画面の再設定、画面に出ているノブ・エンベロープの値の引き継ぎ）を、
+  `sim_boot.rb` が `UI.process` の合間に `eval` する（ハンドラの中では差し替えない）。初期値（value / min / max / ADSR）を変えた部品は
+  引き継がずに新しい値にする。デバイス・パート・ルート・メニュー・ボード・XYPad 等・Tempo の BPM・レイアウトのタイトルと数が
+  変わったら作り直す（`codegen.structureKey`）。評価のエラーはページへ戻り、作り直す。プレビューのスクリプトだけ部品に
+  `id: :w…` を付け、`live_values`（画面のノブの値をページへ）を持つ。インスペクタの「画面の値」と「初期値にする」。
+  保存するスクリプトには入らない。試験 `node sim/test/node_designer_live.mjs`
+- **実機パネル**: シミュレーターと同じ `device_panel.js`。開けるのは `# midori-designer:` のあるファイルだけ（他はシミュレーターの
+  エディタへ）、保存は `/sd/<名前>.rb` か `/app.rb`。実機にある手書きのスクリプト（`# midori-designer:` が無い）は上書きしない
+- **細かい設定**: ノブの min / max / step / sensitivity、Keys の鍵ごとの色（スケール / 和音のプリセットから足せる。Keys は
+  XYPad と同じく 1 つ作ってレイアウトへ `keys:` で渡す）、XYPad の指ごとの上書き（`pad.slot(n, ...)`）、Tempo の開始時の BPM
+  （`UI::Tempo.bpm =`）。前の版のプロジェクトは開くときに既定値で埋める（`model.upgrade`）。試験 `node sim/test/node_designer_settings.mjs`
+- **ルートの filter**: ルートごとに名前付き filter を順に（`route.chain(:chord, [:arp, { rate: :"1/8" }])`）。パラメータは
+  `rate=1/8 octaves=2`（数・true / false 以外はシンボル）。まだ登録されていない名前は素通しなので、実機のプラグインが登録する
+  filter をそのまま書ける。試験は `node_designer_screens.mjs`（プラグインが登録した filter でノートが移調される）
+
+## 17. 2 か国語・サイト・CI・ライセンス（2026-11-14）
+
+- **日本語 / 英語**: `sim/web/i18n.js`。言語は `?lang=ja|en`、前に選んだもの（localStorage）、ブラウザの言語の順。JS の文言は
+  `t('日本語', 'English')`、ページの文言は `data-en`（と `data-en-title` など）。ヘッダーに相手の言語へのリンク。wasm を言語ごとに
+  持たないよう、ページは 1 つ（`site/simulator/`）で、サイトの日本語ページからは `?lang=ja` でリンクする
+- **サイト**: 各ページのナビに「Simulator / シミュレーター」。Pages のワークフローが `sim/web` を `site/simulator/` に写す
+- **CI**（`.github/workflows/pages.yml`）: サブモジュール、Ruby 3.3、emsdk 6.0.12、M5GFX 0.2.24（`dependencies.lock` と同じ
+  コミット）→ `sim/build.sh` → サイズ（各ボードの wasm の gzip を Job Summary に出し、3 MB を超えたら失敗）→ Node のスモークテスト →
+  `site/simulator/`。どこかで失敗したら公開しない（前のサイトが残る）。`sim/**`・`main/ui/**`・`mrbgems/**`・
+  `components/midori-runtime/**`・`examples/**` の変更でも走る
+- **サイズ**（2026-11-14）: 各ボードの wasm 2.4 MB、gzip 0.98 MB（目標 3 MB の 1/3）。JS 31 KB、CodeMirror 114 KB（gzip）
+- **ライセンス**: `sim/build.sh` が `web/licenses.txt` を作る（MIDoRI、PicoRuby、mruby、M5GFX、LovyanGFX、Adafruit GFX フォント、
+  AMY、CodeMirror、Emscripten とその musl / libc++ / libc++abi / compiler-rt）。本文はツリーと emsdk のファイルから取り、
+  ツリーに無い LovyanGFX と CodeMirror のものは `sim/licenses/` に置く。両ページのヘッダーからリンク
 
