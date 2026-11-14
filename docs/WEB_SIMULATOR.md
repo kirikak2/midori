@@ -710,10 +710,11 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 
 | コマンド | 答える側 | 答え |
 |---------|---------|------|
-| `info` | C（いつでも） | `#info proto=2 board=<tab5\|cores3\|crowpanel\|freenove> mode=<ui\|script\|irb\|stopping> script=<path>` |
+| `info` | C（いつでも） | `#info proto=3 board=<tab5\|cores3\|crowpanel\|freenove> mode=<ui\|script\|irb\|stopping> script=<path>` |
 | `ls [dir]` | Ruby（UI モードのループ） | `#<ls <dir>`、1 行 1 件 `f\|d<TAB>サイズ<TAB>名前`、`#>ls <dir> ok <件数>` か `#>ls <dir> err <理由>` |
 | `rm <path>` | Ruby（UI モード） | `#>rm <path> ok` か `#>rm <path> err <理由>` |
 | `rescan` | C | Scripts 画面の再読み込みと同じフラグ。`#>rescan ok` |
+| `mv <from> <to>` | Ruby（UI モード） | ボリュームをまたいでも動く（コピーしてサイズを確かめ、元を消す。行き先のディレクトリが無ければ作り、同名のファイルは置き換える）。`#>mv <from> <to> ok` か `... err <理由>`。`proto=3` から |
 
 - `ls` / `rm` は PicoRuby の VFS が要るので、`load` と同じキューで Ruby に渡す（先頭の 0x01 で `load` のパスと区別）。
   スクリプトや irb の実行中は Ruby がキューを読まないので、C がすぐ `#>ls err busy: ...` を返す
@@ -739,6 +740,8 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   `/sd/<名前>` の要求（`simRequestScript`）がページに来て、ページが実機から読み（PicoModem）、シミュレーターのスクリプト
   モードで実行する（実行中の [Running] 表示は `sim_set_current_script`）。画面の Refresh（`simRequestSdRefresh`）は実機の
   一覧を読み直す。切断すると一覧は空になる。試験: `node sim/test/node_scripts.mjs`
+- プラグインの「flash に移動」（`/sd/plugins` → `/plugins`）と「SD に移動」（逆）。実機の `mv` で移す（USB を往復しない）。
+  効くのは次の起動から。`proto` が 3 より古いファームウェアには送らず、書き込み直すよう伝える
 - 試験: `node sim/test/node_link.mjs`（実機のプロトコルをまねた偽のデバイスで info / ls / rm / 読み書き / 空ファイル / エラー /
   待ち切れなかった `ls` の遅れた答えを次の `ls` が受け取らないこと）
 - **まだ**: 実機での確認（接続・転送・`/app.rb` の自動実行・`/plugins` の順序）、デザイナーへのパネルの組み込み（§7.4）、

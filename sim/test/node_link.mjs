@@ -37,7 +37,7 @@ class FakeMidori {
   exec(line) {
     const [cmd, ...rest] = line.split(' ');
     const arg = rest.join(' ');
-    if (cmd === 'info') this.out(`#info proto=${this.proto ?? 2} board=tab5 mode=${this.mode} script=\r\n`);
+    if (cmd === 'info') this.out(`#info proto=${this.proto ?? 3} board=tab5 mode=${this.mode} script=\r\n`);
     else if (cmd === 'ls' && this.delay && this.delay[arg]) {
       // Answer late (ms per directory)
       const ms = this.delay[arg];
@@ -57,6 +57,10 @@ class FakeMidori {
       this.out(`#<ls ${arg}\r\nI (123) noise: a log line\r\n`);
       for (const [n, [t, s]] of names) this.out(`${t}\t${s}\t${n}\r\n`);
       this.out(`#>ls ${arg} ok ${names.size}\r\n> `);
+    } else if (cmd === 'mv') {
+      const [from, to] = rest;
+      if (!this.fs.has(from)) this.out(`#>mv ${arg} err no such file\r\n> `);
+      else { this.fs.set(to, this.fs.get(from)); this.fs.delete(from); this.out(`#>mv ${arg} ok\r\n> `); }
     } else if (cmd === 'rm') {
       if (this.fs.delete(arg)) this.out(`#>rm ${arg} ok\r\n> `); else this.out(`#>rm ${arg} err no such file\r\n> `);
     } else this.out('> ');
@@ -162,6 +166,19 @@ ok(/答えがありません/.test(err), `a slow ls /sd times out: ${err}`);
 const pl = await link.list('/plugins');     // the late /sd answer arrives while this waits
 ok(pl.map(e => e.name).join() === 'p.rb', `ls /plugins after the late /sd answer: ${pl.map(e => e.name)}`);
 link.listTimeoutMs = 30000;
+// mv: a plugin to the flash
+dev.fs.set('/sd/plugins/q.rb', enc.encode('# q\n'));
+await link.move('/sd/plugins/q.rb', '/plugins/q.rb');
+ok(dev.fs.has('/plugins/q.rb') && !dev.fs.has('/sd/plugins/q.rb'), 'mv /sd/plugins/q.rb /plugins/q.rb');
+err = null;
+try { await link.move('/sd/plugins/none.rb', '/plugins/none.rb'); } catch (e) { err = e.message; }
+ok(err === 'no such file', `mv error: ${err}`);
+dev.proto = 2;
+await link.info();
+err = null;
+try { await link.move('/plugins/q.rb', '/sd/plugins/q.rb'); } catch (e) { err = e.message; }
+ok(/ファームウェアが古く/.test(err || ''), 'mv needs proto 3');
+
 // Old firmware (proto 1) is named rather than timed out on
 dev.proto = 1;
 await link.info();

@@ -16,6 +16,7 @@
 //   info    -> "#info proto=1 board=tab5 mode=ui script="
 //   ls dir  -> "#<ls dir", "f|d<TAB>size<TAB>name"..., "#>ls dir ok <n>" | "#>ls dir err <message>"
 //   rm path -> "#>rm path ok" | "#>rm path err <message>"
+//   mv a b  -> "#>mv a b ok" | "#>mv a b err <message>"   (proto 3)
 // An answer names what it answers: one that comes after its command gave up
 // waiting is not taken for the next command's.
 // Files go by PicoModem (docs/PICOMODEM.md): a bare STX, the device's ACK,
@@ -33,7 +34,7 @@ const CHUNK_SIZE = 480;            // the device's PicoModem::CHUNK_SIZE
 const TX_PIECE = 32, TX_GAP_MS = 20;
 const TIMEOUT_MS = 5000;
 // The console protocol this page speaks (console_input.c "#info proto=")
-export const PROTO = 2;
+export const PROTO = 3;
 // A directory listing: the device stats every entry (a full SD card is slow)
 const LIST_TIMEOUT_MS = 30000;
 // "/sd/" -> "/sd", as the device names it in its answer
@@ -234,8 +235,8 @@ export class MidoriLink {
   }
 
   // The firmware answers ls / rm in this page's protocol
-  _checkProto() {
-    if (this.device && this.device.proto < PROTO) {
+  _checkProto(need = 2) {
+    if (this.device && this.device.proto < need) {
       throw new Error(`MIDoRI のファームウェアが古く、このページと答え方が違います（proto ${this.device.proto}、このページは ${PROTO}）。ファームウェアを書き込み直してください`);
     }
   }
@@ -276,6 +277,19 @@ export class MidoriLink {
       await this._write(enc.encode(`rm ${path}\r`));
       const m = /^(ok|err) ?(.*)$/.exec((await done).slice(end.length));
       if (!m || m[1] === 'err') throw new Error(m ? m[2] : 'rm failed');
+    });
+  }
+
+  // Move a file on the device (across volumes too: /sd/plugins -> /plugins);
+  // the device copies it, makes the directory and deletes the original
+  move(from, to) {
+    return this._serial(async () => {
+      this._checkProto(3);
+      const end = `#>mv ${from} ${to} `;
+      const done = this._waitLine(l => l.startsWith(end), LIST_TIMEOUT_MS);
+      await this._write(enc.encode(`mv ${from} ${to}\r`));
+      const m = /^(ok|err) ?(.*)$/.exec((await done).slice(end.length));
+      if (!m || m[1] === 'err') throw new Error(m ? m[2] : 'mv failed');
     });
   }
 

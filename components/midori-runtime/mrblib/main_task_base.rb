@@ -469,7 +469,8 @@ end
 # simulator and name what they answer, so a late answer is never taken for
 # the next command's: "#<ls <dir>", a line per entry "f|d <TAB> size <TAB>
 # name", then "#>ls <dir> ok <count>" or "#>ls <dir> err <message>";
-# "#>rm <path> ok" or "#>rm <path> err <message>".
+# "#>rm <path> ok" or "#>rm <path> err <message>"; "#>mv <from> <to> ok" or
+# "... err <message>".
 def console_command(line)
   name, arg = line.split(" ", 2)
   arg = (arg || "").strip
@@ -494,11 +495,39 @@ def console_command(line)
     raise "no such file" unless SDLoader.volume_ready?(arg) && File.file?(arg)
     File.unlink(arg)
     puts "#>rm #{arg} ok"
+  when "mv"
+    console_move(*arg.split(" ", 2))
+    puts "#>mv #{arg} ok"
   else
     puts "#>#{name} #{arg} err unknown command"
   end
 rescue => e
   puts "#>#{name} #{arg} err #{e.message}"
+end
+
+# mv: move a file, across volumes too (a plugin from /sd/plugins to the
+# flash's /plugins): copy, check the size, then delete the original. The
+# directory it goes to is made if it is missing; a file there is replaced.
+def console_move(from, to)
+  raise "usage: mv <from> <to>" if from.nil? || to.nil? || to.empty?
+  raise "no such file" unless SDLoader.volume_ready?(from) && File.file?(from)
+  raise "no such volume" unless SDLoader.volume_ready?(to)
+  raise "the same file" if from == to
+  dir = to[0, to.rindex("/") || 0]
+  Dir.mkdir(dir) if !dir.empty? && !Dir.exist?(dir)
+  File.unlink(to) if File.exist?(to)
+  File.open(from, "r") do |src|
+    File.open(to, "w") do |dst|
+      while (chunk = src.read(1024)) && chunk.bytesize > 0
+        dst.write(chunk)
+      end
+    end
+  end
+  if File::Stat.new(to).size != File::Stat.new(from).size
+    File.unlink(to)
+    raise "copy failed (sizes differ)"
+  end
+  File.unlink(from)
 end
 
 # The SD card is FAT (picoruby-filesystem-fat, a midori gem), mounted as

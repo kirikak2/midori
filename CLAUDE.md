@@ -1290,7 +1290,7 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   （`ScriptManager#boot_autorun?`: リセット後の最初の 1 回だけ true、直前のリセットが panic / ウォッチドッグなら false）。
   Stop・終了の後は UI モードのまま。消すのはコンソールの `rm /app.rb`
 - 内蔵フラッシュ（`/`）は全モードでマウントする（`mount_flash`。以前は UI モードだけ）。`run_script` が SD を要るのは `/sd` のスクリプトだけ
-- コンソールに `info`（C。ボード・モード・実行中のスクリプトを 1 行で）/ `ls [dir]` / `rm <path>`（Ruby の UI モードが答える。
+- コンソールに `info`（C。ボード・モード・実行中のスクリプトを 1 行で）/ `ls [dir]` / `rm <path>` / `mv <from> <to>`（ボリュームをまたぐコピー + 削除。Ruby の UI モードが答える。
   `load` と同じキューに先頭 0x01 で積む。スクリプト実行中は C が `#>ls err busy` を返す）/ `rescan` を足した。答えは
   `#<` / `#>` の印付きで、Web シミュレーターの実機パネル（`sim/web/midori_link.js`、Web Serial + PicoModem）が読む
 

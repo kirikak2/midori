@@ -153,6 +153,7 @@ static void console_help(void)
     printf("  stop             - Stop the running script (back to UI mode)\n");
     printf("  ls [dir]         - List a directory (/, /sd, /plugins ...; UI mode)\n");
     printf("  rm <path>        - Delete a file (UI mode)\n");
+    printf("  mv <from> <to>   - Move a file, across volumes too (UI mode)\n");
     printf("  rescan           - Read the SD card again (the Scripts screen's list)\n");
     printf("  info             - Board, mode and running script, in one line\n");
     printf("  heap             - Show free heap memory\n");
@@ -437,13 +438,14 @@ static void console_execute(const char *line)
 
     /* One line about the device for the web simulator: which board, and
      * whether UI mode (which answers ls / rm and file transfers) is up.
-     * proto: 2 = ls / rm answers name their target ("#>ls /sd ok 3") */
+     * proto: 2 = ls / rm answers name their target ("#>ls /sd ok 3"),
+     * 3 = mv */
     if (strcmp(line, "info") == 0) {
         const char *script = supervisor_get_current_script();
         const char *mode = supervisor_get_state() == SUPERVISOR_STATE_STOPPING ? "stopping"
                          : !supervisor_is_script_running() ? "ui"
                          : strcmp(script, SUPERVISOR_IRB_PATH) == 0 ? "irb" : "script";
-        printf("#info proto=2 board=%s mode=%s script=%s\n", CONSOLE_BOARD_ID, mode,
+        printf("#info proto=3 board=%s mode=%s script=%s\n", CONSOLE_BOARD_ID, mode,
                (script && strcmp(mode, "script") == 0) ? script : "");
         fflush(stdout);
         return;
@@ -465,6 +467,18 @@ static void console_execute(const char *line)
             return;
         }
         console_queue_ruby("rm", path);
+        return;
+    }
+
+    if (strncmp(line, "mv ", 3) == 0) {
+        const char *args = line + 3;
+        while (*args == ' ') args++;
+        if (strchr(args, ' ') == NULL) {
+            printf("#>mv %s err usage: mv <from> <to>\n", args);
+            fflush(stdout);
+            return;
+        }
+        console_queue_ruby("mv", args);
         return;
     }
 

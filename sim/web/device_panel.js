@@ -86,6 +86,9 @@ export function mountDevicePanel(el, { link, print, getCode, setCode, getName, o
         };
         if (/\.rb$/i.test(f.path)) btn('開く', () => open(f), 'エディタに読み込む');
         if (f.kind !== 'plugin') btn('実行', () => runOnDevice(f.path), '実機で実行する');
+        // Plugins between the SD card and the internal flash (/plugins load first)
+        if (f.kind === 'plugin' && f.path.startsWith('/sd/plugins/')) btn('flash に移動', () => move(f, '/plugins'), '内蔵フラッシュの /plugins へ移す（SD カードが無くても読まれ、/sd/plugins より先に読まれる）');
+        if (f.kind === 'plugin' && f.path.startsWith('/plugins/')) btn('SD に移動', () => move(f, '/sd/plugins'), 'SD カードの /sd/plugins へ移す');
         btn('削除', () => remove(f));
       }
     }
@@ -166,6 +169,15 @@ export function mountDevicePanel(el, { link, print, getCode, setCode, getName, o
     await link.remove(f.path);
     print(`[MIDoRI] 削除: ${f.path}`, 'sys');
     if (f.kind === 'script') await link.rescan();
+    await refresh();
+  }
+
+  async function move(f, dir) {
+    const name = f.path.split('/').pop();
+    const to = `${dir}/${name}`;
+    if (files.some(x => x.path === to) && !confirm(`${to} は実機にあります。上書きしますか？`)) return;
+    await link.move(f.path, to);
+    print(`[MIDoRI] 移動: ${f.path} → ${to}（次の起動から有効）`, 'sys');
     await refresh();
   }
 
