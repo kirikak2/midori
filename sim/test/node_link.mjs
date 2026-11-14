@@ -43,6 +43,7 @@ class FakeMidori {
   exec(line) {
     const [cmd, ...rest] = line.split(' ');
     const arg = rest.join(' ');
+    if (line.length > 255) this.tooLong = (this.tooLong || 0) + 1;   // console_input.c's line buffer
     if (cmd === 'info') this.out(`#info proto=${this.proto ?? 3} board=tab5 mode=${this.mode} script=\r\n`);
     else if (cmd === 'ls' && this.delay && this.delay[arg]) {
       // Answer late (ms per directory)
@@ -69,6 +70,25 @@ class FakeMidori {
       else { this.fs.set(to, this.fs.get(from)); this.fs.delete(from); this.out(`#>mv ${arg} ok\r\n> `); }
     } else if (cmd === 'rm') {
       if (this.fs.delete(arg)) this.out(`#>rm ${arg} ok\r\n> `); else this.out(`#>rm ${arg} err no such file\r\n> `);
+    } else if (cmd === 'eval64') {
+      // console_input.c collects the pieces; Ruby decodes and answers later
+      const [id, mark, b64 = ''] = rest;
+      if (this.e64id !== id) { this.e64id = id; this.e64 = ''; }
+      this.e64 += b64;
+      if (mark === '+') { this.out(`#>eval64 ${id} more\r\n> `); return; }
+      const code = dec.decode(Uint8Array.from(atob(this.e64), c => c.charCodeAt(0)));
+      this.e64id = null;
+      this.out('> ');
+      this.evals = (this.evals || 0) + 1;
+      if (code.includes('hang')) { this.hanging = id; this.out(`#<eval ${id}\r\n`); return; }
+      setTimeout(() => {
+        this.out(`#<eval ${id}\r\n`);
+        for (const l of code.split('\n')) this.out(`line: ${l}\r\n`);
+        this.out(`#>eval ${id} ok ${code.length}\r\n`);
+      }, 30);
+    } else if (cmd === 'evalstop') {
+      this.out('#>evalstop ok\r\n> ');
+      if (this.hanging) { this.out(`#>eval ${this.hanging} err stopped\r\n`); this.hanging = null; }
     } else this.out('> ');
   }
 
@@ -204,6 +224,35 @@ await link.info();
 err = null;
 try { await link.move('/plugins/q.rb', '/sd/plugins/q.rb'); } catch (e) { err = e.message; }
 ok(/ファームウェアが古く|firmware is older/.test(err || ''), 'mv needs proto 3');
+
+// eval (attach, docs/ATTACH.md): code of any length and bytes goes as
+// Base64 pieces that fit the device's console line
+dev.proto = 5;
+await link.info();
+const code = Array.from({ length: 40 }, (_, i) => `puts "${i}: 日本語 # 行"`).join('\n');
+const outLines = [];
+const before = lines.length;
+let r = await link.evaluate(code, { onOutput: l => outLines.push(l) });
+ok(r.ok && Number(r.value) === code.length, `eval64: the device got all of it back: ${JSON.stringify(r)}`);
+ok(outLines.length === 40 && outLines[3] === 'line: puts "3: 日本語 # 行"', `eval64: output to onOutput (${outLines.length} lines)`);
+ok(!lines.slice(before).some(l => l.startsWith('line: ')), 'eval64: output kept out of onLine');
+ok(!dev.tooLong, `eval64: every line fits the console (${dev.tooLong || 0} too long)`);
+r = await link.evaluate('1 + 1');
+ok(r.ok && r.value === '5', `eval64: one piece: ${JSON.stringify(r)}`);
+// Cancel: evalstop stops the eval that hangs
+const hung = link.evaluate('hang');
+await new Promise(res => setTimeout(res, 100));
+await link.cancelEval();
+err = null;
+try { await hung; } catch (e) { err = e; }
+ok(err && err.cancelled, `eval: cancelled (${err && err.message})`);
+r = await link.evaluate('after');
+ok(r.ok && r.value === '5', 'eval: the next one works after a cancel');
+dev.proto = 4;
+await link.info();
+err = null;
+try { await link.evaluate('1'); } catch (e) { err = e.message; }
+ok(/ファームウェアが古く|firmware is older/.test(err || ''), 'eval64 needs proto 5');
 
 // Old firmware (proto 1) is named rather than timed out on
 dev.proto = 1;

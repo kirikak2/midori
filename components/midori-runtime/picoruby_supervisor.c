@@ -3,6 +3,7 @@
  * @brief PicoRuby task supervisor for dynamic script switching
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 #include "freertos/FreeRTOS.h"
@@ -446,6 +447,8 @@ static void start_picoruby_task(const char *script_path)
     if (!is_irb_path(script_path)) {
         console_input_irb_exit();
     }
+    // An attach session belongs to the VM that just went away
+    console_input_attach_exit(s_current_script[0] ? "the script ended" : "UI mode ended");
 
     // Set the requested script for main_task.rb to read
     if (script_path) {
@@ -876,6 +879,39 @@ static mrb_value c_sm_irb_end(mrb_state *mrb, mrb_value self)
     return mrb_nil_value();
 }
 
+/*
+ * attach mode (docs/ATTACH.md): main_task.rb's MIDoRIAttach pops the lines
+ * the console queued, evaluates them and asks for the next prompt.
+ */
+static mrb_value c_sm_attach_pop(mrb_state *mrb, mrb_value self)
+{
+    char *item = console_input_attach_pop();
+    if (item == NULL) {
+        return mrb_nil_value();
+    }
+    mrb_value str = mrb_str_new_cstr(mrb, item);
+    free(item);
+    return str;
+}
+
+static mrb_value c_sm_attach_reply(mrb_state *mrb, mrb_value self)
+{
+    mrb_bool more = FALSE;
+    mrb_get_args(mrb, "|b", &more);
+    console_input_attach_reply(more);
+    return mrb_nil_value();
+}
+
+static mrb_value c_sm_attach_cancel(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(console_input_attach_take_cancel());
+}
+
+static mrb_value c_sm_attached(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(console_input_attached());
+}
+
 static mrb_value c_sm_get_autorun_script(mrb_state *mrb, mrb_value self)
 {
     const char *script = supervisor_get_requested_script();
@@ -978,6 +1014,10 @@ static void register_script_manager_class(mrb_state *mrb)
     mrb_define_method(mrb, cls, "irb_requested?", c_sm_irb_requested, MRB_ARGS_NONE());
     mrb_define_method(mrb, cls, "irb_begin", c_sm_irb_begin, MRB_ARGS_NONE());
     mrb_define_method(mrb, cls, "irb_end", c_sm_irb_end, MRB_ARGS_NONE());
+    mrb_define_method(mrb, cls, "attach_pop", c_sm_attach_pop, MRB_ARGS_NONE());
+    mrb_define_method(mrb, cls, "attach_reply", c_sm_attach_reply, MRB_ARGS_OPT(1));
+    mrb_define_method(mrb, cls, "attach_cancel?", c_sm_attach_cancel, MRB_ARGS_NONE());
+    mrb_define_method(mrb, cls, "attached?", c_sm_attached, MRB_ARGS_NONE());
     ESP_LOGI(TAG, "ScriptManager class registered");
 }
 

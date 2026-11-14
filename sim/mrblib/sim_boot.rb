@@ -79,3 +79,32 @@ def sim_live_poll
 rescue => e
   # A page without live patching (the simulator's own): nothing to take
 end
+
+# The page's Attach panel (docs/ATTACH.md): code it queues runs inside this
+# VM, through the device's own MIDoRIAttach (the part of main_task_base.rb
+# shared with the simulator), from MIDI.run_filters. Answers are the
+# device's frames ("#<eval <id>" ... "#>eval <id> ok|err ..."), which the
+# page reads off the output (sim/web/device.js).
+class SimAttachSource
+  def initialize
+    @bridge = JS.global[:__midoriSim]
+    # A page whose bridge has no takeAttach (the designer's) is never asked
+    @ok = !@bridge[:takeAttach].nil?
+  rescue => e
+    @ok = false
+  end
+
+  def attach_pop
+    return nil unless @ok
+    item = @bridge.takeAttach
+    item.is_a?(String) ? item : nil
+  end
+
+  def attach_cancel?
+    @ok && @bridge.attachCancel == true
+  end
+
+  def attach_reply(more = false); end
+  def stop_requested?; false; end
+end
+MIDoRIAttach.install(SimAttachSource.new)

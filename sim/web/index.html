@@ -63,6 +63,8 @@
   #midori-panel td:nth-child(2) { color: var(--muted); white-space: nowrap; }
   #midori-panel td:last-child { text-align: right; white-space: nowrap; }
   button.small { padding: 1px 8px; font-size: 12px; }
+  #attach-panel { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; background: var(--panel); }
+  #attach-panel h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -94,6 +96,10 @@
       <legend data-en="MIDI ports">MIDI ポートの割り当て</legend>
     </fieldset>
     <div id="log" role="log" aria-live="polite"></div>
+    <section id="attach-panel" aria-label="Attach">
+      <h2 data-en="Attach (Ruby inside the running VM)">Attach（動いている VM の中で Ruby を実行）</h2>
+      <div id="attach-body"></div>
+    </section>
   </section>
 </main>
 <script type="module">
@@ -105,9 +111,11 @@ const BUILD = await fetch('./wasm/build.json', { cache: 'no-store' })
   .catch(() => String(Date.now()));
 const load = name => import(`./${name}?v=${encodeURIComponent(BUILD)}`);
 const [{ MidoriDevice, BOARDS, DEFAULT_BOARD }, { UsbMidiAssembler }, { BuiltinSynth }, { AmyAudio }, { WebMidi, ROLES },
-       { MidoriLink }, { mountDevicePanel }, { createEditor }, { shareFragment, readFragment }, { t, localizePage, LANG }] =
+       { MidoriLink }, { mountDevicePanel }, { createEditor }, { shareFragment, readFragment }, { t, localizePage, LANG },
+       { mountAttachConsole }] =
   await Promise.all([load('device.js'), load('usb_midi.js'), load('synth.js'), load('amy_audio.js'), load('webmidi.js'),
-                     load('midori_link.js'), load('device_panel.js'), load('vendor/codemirror.js'), load('share.js'), load('i18n.js')]);
+                     load('midori_link.js'), load('device_panel.js'), load('vendor/codemirror.js'), load('share.js'), load('i18n.js'),
+                     load('attach_console.js')]);
 localizePage();
 // The designer in the same language
 document.getElementById('to-designer').href = `./designer.html?lang=${LANG}`;
@@ -358,7 +366,7 @@ async function boot(mode, scriptText = null, scriptPath = '') {
     for (const r of [0, 1]) device.setConnected(r, midi.roleConnected(r));
     knownPorts = portNames();
   })();
-  try { await starting; } finally { starting = null; }
+  try { await starting; } finally { starting = null; attachUi.refresh(); }
 }
 const run = () => boot('script');
 
@@ -439,7 +447,7 @@ if (!midi.supported) $('midi').disabled = true;
 // The real MIDoRI over USB CDC: its scripts, and its start-up files for the simulator
 // Its console in the log, without the page's own traffic (framed answers,
 // their entries, the echo of the commands) and ESP-IDF's logs
-const quiet = /^(#[<>]|#info |[fd]\t\d+\t|(info|ls|rm|rescan)( |$)|[IWD] \(|\[PicoModem\])/;
+const quiet = /^(#[<>]|#info |[fd]\t\d+\t|(info|ls|rm|rescan|eval|eval64|evalstop)( |$)|[IWD] \(|\[PicoModem\])/;
 const link = new MidoriLink({ onLine: line => { if (line.trim() && !quiet.test(line)) print(`[MIDoRI] ${line}`, 'sys'); } });
 const panel = mountDevicePanel($('midori-panel-body'), {
   link, print,
@@ -457,6 +465,45 @@ const panel = mountDevicePanel($('midori-panel-body'), {
     if (device) device.setScripts(deviceScripts);
   },
 });
+
+// Attach: Ruby into the simulator's running VM or the connected MIDoRI's
+// (docs/ATTACH.md). Both answer in the same frames ("#<eval" / "#>eval").
+const SIM_MODES = { ui: t('UI モード', 'UI mode'), script: t('スクリプト実行中', 'running the script') };
+const DEV_MODES = { ui: t('UI モード', 'UI mode'), script: t('スクリプト実行中', 'running a script'), irb: t('irb 実行中', 'in irb'), stopping: t('停止中', 'stopping') };
+const attachUi = mountAttachConsole($('attach-body'), {
+  targets: [
+    {
+      id: 'sim', label: t('シミュレーター', 'Simulator'),
+      state: () => (device && device.running
+        ? { available: true, text: SIM_MODES[device.mode] }
+        : { available: false, text: t('起動中…', 'Starting…') }),
+      evaluate: (src, o) => device.evaluate(src, o),
+      cancel: () => { if (device) device.cancelEval(); },
+    },
+    {
+      id: 'device', label: t('実機（MIDoRI）', 'Device (MIDoRI)'),
+      state: () => {
+        const d = link.device;
+        if (!link.connected || !d) return { available: false, text: t('実機に接続していません（左の「実機に接続」）', 'Not connected (Connect on the left)') };
+        if (d.proto < 5) return { available: false, text: t(`ファームウェアが古いので使えません（proto ${d.proto}、5 以上が必要）`, `The firmware is too old (protocol ${d.proto}, needs 5)`) };
+        if (d.mode !== 'ui' && d.mode !== 'script') return { available: false, text: DEV_MODES[d.mode] || d.mode };
+        return { available: true, text: `${d.board}: ${DEV_MODES[d.mode]}${d.script ? ` (${d.script})` : ''}` };
+      },
+      // The device's mode may have changed since (a script started there): ask first
+      evaluate: async (src, o) => {
+        const d = await link.info();
+        if (d.mode !== 'ui' && d.mode !== 'script') throw new Error(t(`実機は${DEV_MODES[d.mode] || d.mode}です`, `The device is ${DEV_MODES[d.mode] || d.mode}`));
+        return link.evaluate(src, o);
+      },
+      cancel: () => link.cancelEval().catch(e => print(`[MIDoRI] ${e.message}`, 'err')),
+    },
+  ],
+});
+// The device panel owns link.onState; the Attach panel follows it too
+{
+  const panelState = link.onState;
+  link.onState = () => { panelState(); attachUi.refresh(); };
+}
 
 if (shared && shared.error) print(`[sim] ${t('共有リンクを読めませんでした', 'Could not read the share link')}: ${shared.error.message}`, 'err');
 else if (shared) {

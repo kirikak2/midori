@@ -95,6 +95,7 @@ jobs:
           node sim/test/node_designer_live.mjs
           node sim/test/node_startup.mjs
           node sim/test/node_link.mjs
+          node sim/test/node_attach.mjs
           node sim/test/node_share.mjs
           node sim/test/node_reference.mjs
 

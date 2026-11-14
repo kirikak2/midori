@@ -91,6 +91,48 @@ void console_input_irb_enter(void);
  */
 void console_input_irb_exit(void);
 
+/*--------------------------------------------------------------------+
+ * attach mode
+ *
+ * "attach" joins the Ruby VM that is already running (a script or UI
+ * mode). The console task keeps the line editing and queues each finished
+ * line; the Ruby side picks them up from MIDI.run_filters (UI.process,
+ * MIDI.sleep_ms, the clock loops), evaluates them in a Sandbox of the same
+ * VM and asks for the next prompt. "eval <id> <code>" queues one framed
+ * expression for machines. See docs/ATTACH.md.
+ *--------------------------------------------------------------------*/
+
+/*
+ * Pop one queued item: a heap string (the caller frees it) made of a kind
+ * byte ('L' a line of the attach session, 'E' "<id> <code>" from eval,
+ * 'B' "<id> <base64>" from eval64) and its text, or NULL. Non-blocking.
+ * Popping an 'L' marks it as being evaluated until
+ * console_input_attach_reply().
+ */
+char *console_input_attach_pop(void);
+
+/*
+ * An 'L' line is done: print the next prompt ("attach* " when `more`,
+ * i.e. the expression is not complete yet). Called from Ruby.
+ */
+void console_input_attach_reply(bool more);
+
+/*
+ * True once after a Ctrl-C or the start / end of a session: the Ruby side
+ * stops the line it is evaluating and forgets a half-typed expression.
+ */
+bool console_input_attach_take_cancel(void);
+
+/* True while the console is in an attach session. */
+bool console_input_attached(void);
+
+/*
+ * End the attach session because its VM is going away (the supervisor
+ * calls it whenever it starts a task). `why` is shown to the user. Safe
+ * to call with no session.
+ */
+void console_input_attach_exit(const char *why);
+
 #ifdef __cplusplus
 }
 #endif
