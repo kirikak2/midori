@@ -6,6 +6,11 @@ USB (host and device) and UART, route and transform what flows between them,
 and play it from a touch screen or the built-in AMY synthesizer. Scripts live
 on the SD card and are swapped live, without rebooting.
 
+**Try it in the browser:** the [MIDoRI Simulator](https://kirikak2.github.io/midori/simulator/)
+runs the firmware's own screen and Ruby runtime, and the
+[Designer](https://kirikak2.github.io/midori/simulator/designer.html) builds
+screen layouts without writing code. No board needed.
+
 ```ruby
 require 'midi'
 require 'ui'
@@ -27,6 +32,7 @@ end
 - **USB MIDI Host** — Plug synthesizers, keyboards and controllers straight into the board, with hot-plug detection and recovery
 - **USB MIDI Device** — In `midi_device` mode the board itself is a USB MIDI device to a computer (TinyUSB CDC + MIDI composite; appears as `Midori <board>`)
 - **UART MIDI / SAM2695** — Serial MIDI out to DIN gear or the onboard SAM2695 General MIDI sound module
+- **BLE-MIDI** (ESP32-S3 boards, Tab5) — The board is a BLE-MIDI peripheral to a computer or tablet, and connects to BLE-MIDI devices as a central (up to two), both handled in C ([docs](docs/BLE_MIDI.md))
 - **MIDI routing** — `MIDI.route(from, to, channel:)` forwards input to any output in C, without going through Ruby, so a keyboard can drive a synth with no added latency. The on-screen keyboard (`UI::Keys`) and the sequencer (`UI::Sequencer`) can be a source or a destination as well
 
 ### Script
@@ -36,8 +42,17 @@ end
 - **BPM loop & clock** — `MIDI.bpm_loop` runs BPM-synced loops with MIDI Clock output, or follows an external MIDI Clock
 - **MML** — Write melodies and rhythms in Music Macro Language
 - **Live script switching** — Load, stop and swap scripts from the touch screen or the console, without rebooting (FreeRTOS supervisor task)
+- **Startup script and plugins** — `/app.rb` on the internal flash runs once at power-up. The `.rb` / `.mrb` files in `/plugins` (flash) and then `/sd/plugins` load at start-up in every mode, to add MIDI filters, devices and layouts
 - **irb** — An interactive Ruby prompt on the serial / USB CDC console
 - **Browser console** — With TinyUSB CDC enabled (`midi_device` mode), connect to the Midori console from [picoruby.org/terminal](https://picoruby.org/terminal) over the USB serial port to load scripts and upload / download SD card files. Nothing to install.
+
+### Simulate and design
+
+- **Web simulator** — The firmware's touch UI (`main/ui`), gems and Ruby runtime compiled to WebAssembly with Emscripten, not a reimplementation. Tab5 and CoreS3 screens, MIDI through Web MIDI, AMY through Web Audio. Scripts are written in a CodeMirror editor, and a script can be shared as a link (the script goes after the URL's `#` and never reaches a server). Japanese and English
+- **Connect to a real MIDoRI** — From the simulator (Chrome / Edge, Web Serial), list, open, save, run, move and delete the scripts and plugins on a board in `midi_device` mode. Save a script to `/sd` or as the startup `/app.rb`
+- **Designer** — Lay out pads, knobs, envelopes, XY pad, Tombola, keyboard, tempo and sequencer on a grid by dragging, and set up devices, AMY parts and routes with filter chains. It writes one plain Ruby script (the project is kept in its header, so the designer opens it again), and the preview updates the running simulator as you edit
+
+See [sim/README.md](sim/README.md) and [docs/WEB_SIMULATOR.md](docs/WEB_SIMULATOR.md).
 
 ### Play
 
@@ -71,9 +86,13 @@ work the same with any of them.
 | [picoruby-uart_midi](https://github.com/kirikak2/picoruby-uart_midi) | Transport: UART / 5-pin DIN MIDI |
 | [picoruby-sam2695](https://github.com/kirikak2/picoruby-sam2695) | Transport: SAM2695 GM sound module, a thin layer over uart_midi |
 | [picoruby-amy](https://github.com/kirikak2/picoruby-amy) | Transport: [AMY](https://github.com/shorepine/amy) synth over I2S, with `AMY::FM` / `AMY::Synth` |
+| [picoruby-ble_midi_device](https://github.com/kirikak2/picoruby-ble_midi_device) | Transport: BLE-MIDI peripheral (NimBLE) |
+| [picoruby-ble_midi_host](https://github.com/kirikak2/picoruby-ble_midi_host) | Transport: BLE-MIDI central (NimBLE) |
+| [picoruby-web_midi](https://github.com/kirikak2/picoruby-web_midi) | Transport: Web MIDI ports, for the web simulator's wasm build |
 
 `picoruby-ui` (the M5Stack touch UI) lives in this repository, because it
-is specific to Midori. The gems currently have an ESP32 port only.
+is specific to Midori. The gems have an ESP32 port, and the simulator builds
+them for WebAssembly as well.
 
 A new transport registers itself with `MIDI_transport_register()` (see
 `midi_transport.h` in picoruby-midi) and then works with everything above,
@@ -187,9 +206,27 @@ in `host` mode, USB CDC in `midi_device` mode):
 > load /sd/app.rb    # run a script
 > stop               # stop it and return to the UI
 > irb                # interactive Ruby
+> ls /sd             # list a directory (/, /sd, /plugins ...)
+> rm /app.rb         # delete a file
+> mv /sd/plugins/arp.rb /plugins/arp.rb   # move a file, across volumes too
+> info               # board, mode and running script
 > heap               # free heap
 > help
 ```
+
+`ls`, `rm` and `mv` work while no script is running (UI mode).
+
+### At power-up
+
+| Path | Volume | Loaded |
+|------|--------|--------|
+| `/plugins/*.rb`, `*.mrb` | internal flash | at start-up in every mode, first |
+| `/sd/plugins/*.rb`, `*.mrb` | SD card | at start-up in every mode, after `/plugins` |
+| `/app.rb` | internal flash | once after power-on, instead of the UI (skipped after a crash) |
+
+Plugins load in name order. `foo.mrb` is used instead of a `foo.rb` next to
+it, and files starting with `_` and subdirectories are skipped. Stopping
+`/app.rb` (or its end) leaves the board in UI mode; `rm /app.rb` removes it.
 
 ### From the browser (picoruby.org/terminal)
 
@@ -211,6 +248,11 @@ console in the browser. No serial tools or drivers are needed:
 
 File transfers only work while no script is running, at the `> ` prompt.
 See [docs/PICOMODEM.md](docs/PICOMODEM.md) for the details.
+
+The [web simulator](https://kirikak2.github.io/midori/simulator/) connects to
+the same port and lists the board's scripts and plugins: open them in its
+editor, save scripts to `/sd` or as `/app.rb`, run them on the board, and move
+plugins between the SD card and the flash.
 
 ### Choosing outputs
 
@@ -440,14 +482,15 @@ The grid math lives in Ruby and has host tests
 (`mrbgems/picoruby-ui/test/layout_test.rb`). Layouts are new and have not yet
 been tried on hardware. See [docs/UI_LAYOUT_DSL.md](docs/UI_LAYOUT_DSL.md) for
 the full design and [examples/plugins/](examples/plugins/) for complete
-layouts (`perform.rb`, `keys.rb`, `clock.rb`): copy them to `/sd/plugins/` and
+layouts (`perform.rb`, `keys.rb`, `clock.rb`): copy them to `/sd/plugins/` (or `/plugins/`) and
 they are loaded at start-up, each a Home tile. `ruby tools/bundle_plugins.rb`
 compiles the whole directory into a single `examples/bundle.mrb` to copy there
 instead.
 
 ### Examples
 
-Ready-to-run scripts are in [examples/](examples/). They play through the
+Ready-to-run scripts are in [examples/](examples/); the web simulator's
+examples menu opens each of them. They play through the
 OUT and listen to the IN picked on the MIDI Devices screen
 (`UI::MIDIDevices.midi_out` / `.midi_in`), falling back to a board default
 when none is picked, so the same script works with whatever is plugged in.
@@ -469,7 +512,7 @@ when none is picked, so the same script works with whatever is plugged in.
 | [midi_filter.rb](examples/midi_filter.rb) | Route a keyboard to a synth, rewriting its notes in Ruby |
 | [tempo_keys.rb](examples/tempo_keys.rb) | Send the tempo as MIDI clock, with a BPM knob and the keyboard |
 | [seaboard_blocks.rb](examples/seaboard_blocks.rb) / [midi_to_lumi.rb](examples/midi_to_lumi.rb) | Device-specific controllers |
-| [plugins/](examples/plugins/) | Plugins for `/sd/plugins/` (loaded at start-up; all of them compiled into one [bundle.mrb](examples/bundle.mrb) by `tools/bundle_plugins.rb`): the named MIDI filters `chord.rb`, `arp.rb`, `channel.rb`, `lumi.rb`; the layouts `perform.rb` (XY pad, knobs and pads, switched from MIDI), `keys.rb` (the keyboard with knobs and pads), `clock.rb` (the tempo with a BPM knob) |
+| [plugins/](examples/plugins/) | Plugins for `/sd/plugins/` or `/plugins/` (loaded at start-up; all of them compiled into one [bundle.mrb](examples/bundle.mrb) by `tools/bundle_plugins.rb`): the named MIDI filters `chord.rb`, `arp.rb`, `channel.rb`, `lumi.rb`; the layouts `perform.rb` (XY pad, knobs and pads, switched from MIDI), `keys.rb` (the keyboard with knobs and pads), `clock.rb` (the tempo with a BPM knob) |
 | [dfrobot_encoder_cc.rb](examples/dfrobot_encoder_cc.rb) / [dfrobot_encoder_dual_cc.rb](examples/dfrobot_encoder_dual_cc.rb) | Hardware rotary encoders as CC knobs |
 
 ## Architecture
@@ -486,10 +529,13 @@ Core 0  Main task ────────── app_main loop: touch UI (M5GFX 
 ```
 
 The MIDI stack is the [picoruby-midi family](#the-picoruby-midi-family) of
-mrbgems. See [CLAUDE.md](CLAUDE.md) and [docs/](docs/)
+mrbgems. The web simulator runs the same UI and Ruby code in the browser,
+with the tasks above driven one pass at a time from the page's frame loop. See [CLAUDE.md](CLAUDE.md) and [docs/](docs/)
 for details.
 
 ## License
 
 MIT License (see [LICENSE](LICENSE)). The submodules and components keep
-their own licenses.
+their own licenses. The web simulator's bundled projects (LovyanGFX / M5GFX,
+CodeMirror, mruby / PicoRuby, AMY ...) are listed with their licence texts in
+its `licenses.txt`, generated by `sim/build.sh`.
