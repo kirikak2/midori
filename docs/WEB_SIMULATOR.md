@@ -664,6 +664,20 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 - 部品の移動と大きさ変更: 部品をドラッグで移動、選んだ部品の右下の角をドラッグで大きさを変える。ドラッグ中はその位置に
   仮に描き、他の部品に重なる・はみ出す位置は破線の赤で示して、離すと元に戻す。キーボードでは矢印で移動、Shift + 矢印で
   大きさ、Esc でドラッグをやめる。セルの位置はグリッドの寸法から計算する（部品がセルを覆っているので要素からは引かない）
+- **Pads / Knobs 画面**: タブの先頭の「Pads 画面」「Knobs 画面」で、実機の Pads / Knobs 画面そのものを組む（ボードの
+  グリッド: Tab5 4 x 3、CoreS3 3 x 2。Knobs はバンク A〜D）。空きをクリックで置き、ドラッグ・矢印キーで番号を入れ替える。
+  設定と動作はレイアウトの pad / knob と同じで、生成は `setup_pads`（`UI.pad(n, ...)`）/ `setup_knobs`
+  （`UI.knob(n, bank:, ...)`。初期値は `UI.knob_send_all(bank: :all)`）。「最初に表示する」はレイアウトのほかに
+  `UI.show(:pads)` / `UI.show(:knobs, bank:)` も選べる（`project.start` は `'pads'` / `'knobs:<bank>'`）。
+  ボードの数を超える番号は「問題」に出す
+- **ルート**: `project.routes`（送信元・宛先はデバイスの id、送信元に Clock = `MIDI::Clock`、通すものは全部 / Clock だけ /
+  1 チャンネル）。生成は `setup_routes` から `route(from, to, channel)` を呼び、デバイスがそのボードに無ければ飛ばし、
+  `ArgumentError`（送信元になれないなど）は表示して続ける。AMY は送信元に選べない。同じ種類のデバイス同士（同じビット）や
+  同じデバイスへのルートは「問題」に出す
+- **Home のメニュー**: `project.menu.hide` を `UI.menu(hide: [...])` に。Home / Scripts は外せない（外せる画面は
+  `MENU_SCREENS`、Home の並び順）。Layouts を外すと全レイアウトのタイルが消える。最初に表示する画面を外すと「問題」に出す
+  （外した画面は `UI.show` でも開けない）
+- 試験: `node sim/test/node_designer_screens.mjs [shot.png]`（ノブの初期値の送信・メニューの隠しマスク・ルートのチャンネル・
+  パッドの発音）
 - **まだ**: ライブパッチ（§6.3）、`/sd` への保存の 3 つの保存先と Scripts パネル（§7.3 / §7.4）、
-  Knobs / Pads 画面の設定（§6.4 の画面ごとの設定）、ルートの編集、
-  VM の検証エラーをグリッドのセルに出すこと（今はプレビューのログに出る）
+  ルートの filter / チェーン、VM の検証エラーをグリッドのセルに出すこと（今はプレビューのログに出る）

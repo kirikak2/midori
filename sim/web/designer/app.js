@@ -13,16 +13,19 @@ export async function startDesigner(build) {
     import(`./model.js${v}`), import(`./codegen.js${v}`), import(`../device.js${v}`),
     import(`../usb_midi.js${v}`), import(`../synth.js${v}`), import(`../amy_audio.js${v}`),
   ]);
-  const { WIDGETS, ACTIONS, COLORS, DEVICE_KINDS, PART_TYPES } = model;
+  const { WIDGETS, ACTIONS, COLORS, DEVICE_KINDS, PART_TYPES, MENU_SCREENS, ROUTE_CLOCK, KNOB_BANKS } = model;
   const { MidoriDevice, BOARDS, DEFAULT_BOARD } = dev;
 
   // ---- state
 
   let project = loadSaved() || model.newProject(DEFAULT_BOARD);
   if (!BOARDS[project.board]) project.board = DEFAULT_BOARD;
-  project.parts ||= [];   // projects from before AMY parts
-  let current = Math.min(project.start || 0, project.layouts.length - 1);   // layout being edited
-  let selected = null;     // widget id
+  model.upgrade(project);   // projects from older versions
+  let current = 0;          // layout being edited
+  let view = 'layout';      // what the grid edits: 'layout' | 'pads' | 'knobs'
+  let bank = 0;             // the Knobs bank being edited (0..3)
+  let selected = null;      // widget / slot id
+  openAtStart();
   let paletteKind = 'pad';
 
   function loadSaved() {
@@ -32,7 +35,26 @@ export async function startDesigner(build) {
     try { localStorage.setItem(STORE, JSON.stringify(project)); } catch (e) {}
   }
   const layout = () => project.layouts[current];
-  const widget = () => layout().widgets.find(w => w.id === selected) || null;
+  const inLayout = () => view === 'layout';
+  // The Pads / Knobs screen's slots being edited (Knobs: this bank)
+  const slots = () => (view === 'pads' ? project.pads : project.knobs.filter(k => (k.bank || 0) === bank));
+  const slotAt = i => slots().find(sl => sl.index === i) || null;
+  const widget = () => (inLayout() ? layout().widgets : project[view]).find(w => w.id === selected) || null;
+  // What the edited view is as project.start / generate's show
+  const viewKey = () => (inLayout() ? current : view === 'pads' ? 'pads' : `knobs:${bank}`);
+  // Open the project where it starts
+  function openAtStart() {
+    const st = project.start ?? 0;
+    if (typeof st === 'string') {
+      const [v, b] = st.split(':');
+      view = v === 'knobs' ? 'knobs' : 'pads';
+      bank = clamp(Number(b) || 0, 0, KNOB_BANKS - 1);
+      current = 0;
+    } else {
+      view = 'layout';
+      current = clamp(st, 0, project.layouts.length - 1);
+    }
+  }
 
   // Every edit goes through here: re-render, store, preview again
   function changed({ preview = true } = {}) {
@@ -49,7 +71,7 @@ export async function startDesigner(build) {
   $('new').onclick = () => {
     if (!confirm('今のプロジェクトを捨てて新しく始めますか？（保存していない変更は消えます）')) return;
     project = model.newProject(project.board);
-    current = 0; selected = null;
+    current = 0; view = 'layout'; bank = 0; selected = null;
     changed();
   };
   $('save').onclick = () => {
@@ -71,9 +93,8 @@ export async function startDesigner(build) {
       alert('MIDoRI Designer で作ったファイルではありません（先頭に # midori-designer: がありません）。\nシミュレーターのエディタで開いてください。');
       return;
     }
-    project = m;
-    project.parts ||= [];
-    current = Math.min(project.start || 0, project.layouts.length - 1);
+    project = model.upgrade(m);
+    openAtStart();
     selected = null;
     changed();
   };
@@ -91,11 +112,23 @@ export async function startDesigner(build) {
   function renderTabs() {
     const tabs = $('tabs');
     tabs.textContent = '';
+    // The device's own Pads / Knobs screens, then the layouts
+    for (const [v, label] of [['pads', 'Pads 画面'], ['knobs', 'Knobs 画面']]) {
+      const b = document.createElement('button');
+      b.className = 'screen';
+      b.textContent = label;
+      b.setAttribute('aria-selected', String(view === v));
+      b.onclick = () => { view = v; selected = null; changed(); };
+      tabs.append(b);
+    }
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    tabs.append(sep);
     project.layouts.forEach((l, i) => {
       const b = document.createElement('button');
       b.textContent = l.title || `Layout ${i + 1}`;
-      b.setAttribute('aria-selected', String(i === current));
-      b.onclick = () => { current = i; selected = null; changed(); };
+      b.setAttribute('aria-selected', String(inLayout() && i === current));
+      b.onclick = () => { view = 'layout'; current = i; selected = null; changed(); };
       tabs.append(b);
     });
     const add = document.createElement('button');
@@ -103,16 +136,22 @@ export async function startDesigner(build) {
     add.title = 'レイアウトを追加';
     add.onclick = () => {
       project.layouts.push(model.newLayout(`Layout ${project.layouts.length + 1}`));
-      current = project.layouts.length - 1; selected = null;
+      view = 'layout'; current = project.layouts.length - 1; selected = null;
       changed();
     };
     tabs.append(add);
+    $('layout-fields').hidden = !inLayout();
+    $('screen-fields').hidden = inLayout();
+    $('palette').hidden = !inLayout();
+    $('layout-hint').hidden = !inLayout();
+    $('slot-hint').hidden = inLayout();
+    $('start').checked = String(project.start ?? 0) === String(viewKey());
+    $('send-initial').checked = project.sendInitial !== false;
+    if (!inLayout()) { renderScreenFields(); return; }
     const l = layout();
     $('title').value = l.title;
     $('cols').value = l.cols;
     $('rows').value = l.rows;
-    $('start').checked = project.start === current;
-    $('send-initial').checked = project.sendInitial !== false;
     $('del-layout').disabled = project.layouts.length <= 1;
   }
   $('title').oninput = () => { layout().title = $('title').value; save(); renderTabs(); $('title').focus(); schedulePreview(); };
@@ -123,12 +162,31 @@ export async function startDesigner(build) {
   };
   $('cols').onchange = resize;
   $('rows').onchange = resize;
-  $('start').onchange = () => { project.start = current; changed({ preview: false }); };
+  $('start').onchange = () => { project.start = viewKey(); changed({ preview: false }); };
+  // The Pads / Knobs screen's line: its size on this board, Knobs' banks
+  function renderScreenFields() {
+    const { cols, rows } = model.screenGrid(project.board);
+    const what = view === 'pads' ? 'パッド' : 'ノブ';
+    $('screen-info').textContent = `${BOARDS[project.board].name}: ${what} ${cols * rows} 個（${cols} x ${rows}）` +
+      (view === 'knobs' ? ' × 4 バンク' : '');
+    const banks = $('banks');
+    banks.textContent = '';
+    if (view !== 'knobs') return;
+    for (let b = 0; b < KNOB_BANKS; b++) {
+      const btn = document.createElement('button');
+      btn.className = 'small';
+      const n = project.knobs.filter(k => (k.bank || 0) === b).length;
+      btn.textContent = 'ABCD'[b] + (n ? ` (${n})` : '');
+      btn.setAttribute('aria-selected', String(b === bank));
+      btn.onclick = () => { bank = b; selected = null; changed(); };
+      banks.append(btn);
+    }
+  }
   $('send-initial').onchange = () => { project.sendInitial = $('send-initial').checked; changed(); };
   $('del-layout').onclick = () => {
     if (project.layouts.length <= 1 || !confirm(`レイアウト「${layout().title}」を削除しますか？`)) return;
     project.layouts.splice(current, 1);
-    if (project.start >= project.layouts.length) project.start = 0;
+    if (typeof project.start === 'number' && project.start >= project.layouts.length) project.start = 0;
     current = Math.max(0, current - 1); selected = null;
     changed();
   };
@@ -147,6 +205,7 @@ export async function startDesigner(build) {
   //   { mode: 'move' | 'resize', id, c0, r0, col, row, w, h, moved }   a widget (col..h: where it would go)
   let drag = null;
   function renderGrid() {
+    if (!inLayout()) { renderSlots(); return; }
     const g = $('grid'), l = layout();
     g.dataset.board = project.board;
     g.style.gridTemplateColumns = `repeat(${l.cols}, 1fr)`;
@@ -188,11 +247,57 @@ export async function startDesigner(build) {
       g.append(el);
     }
   }
+  // The Pads / Knobs screen: its fixed grid, a slot per cell
+  function renderSlots() {
+    const g = $('grid'), { cols, rows } = model.screenGrid(project.board);
+    g.dataset.board = project.board;
+    g.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    g.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    g.textContent = '';
+    const bad = new Set(model.problems(project).filter(p => p.screen === view).map(p => p.widget));
+    const what = view === 'pads' ? 'Pad' : 'Knob';
+    for (let i = 0; i < cols * rows; i++) {
+      const sl = slotAt(i);
+      const el = document.createElement('div');
+      el.style.gridColumn = `${(i % cols) + 1}`;
+      el.style.gridRow = `${Math.floor(i / cols) + 1}`;
+      const target = drag && drag.mode === 'slot' && drag.moved && drag.to === i && drag.from !== i;
+      if (sl) {
+        el.className = 'widget' + (sl.id === selected ? ' sel' : '') + (bad.has(sl.id) ? ' bad' : '') + (target ? ' target' : '') +
+          (drag && drag.mode === 'slot' && drag.id === sl.id && drag.moved ? ' dragging' : '');
+        el.style.background = widgetColor(sl);
+        el.textContent = `${i + 1}: ${widgetCaption(sl)}`;
+        el.title = `${what} ${i + 1}${view === 'knobs' ? ` (bank ${'ABCD'[bank]})` : ''}`;
+        el.onpointerdown = ev => startSlotDrag(ev, sl);
+      } else {
+        el.className = 'cell slot-empty' + (target ? ' target' : '');
+        el.textContent = `+ ${what} ${i + 1}`;
+      }
+      g.append(el);
+    }
+  }
+  function startSlotDrag(ev, sl) {
+    ev.stopPropagation();
+    ev.preventDefault();
+    drag = { mode: 'slot', id: sl.id, from: sl.index, to: sl.index, moved: false };
+    $('grid').setPointerCapture(ev.pointerId);
+    if (selected !== sl.id) { selected = sl.id; changed({ preview: false }); }
+  }
+  // Move a slot to another number, swapping with the one there
+  function moveSlot(sl, to) {
+    const count = model.slotCount(project.board);
+    if (to < 0 || to >= count || to === sl.index) return false;
+    const other = slotAt(to);
+    if (other) other.index = sl.index;
+    sl.index = to;
+    return true;
+  }
+  const gridDims = () => (inLayout() ? layout() : model.screenGrid(project.board));
   const inRect = (c, r, d) => c >= Math.min(d.c0, d.c1) && c <= Math.max(d.c0, d.c1) && r >= Math.min(d.r0, d.r1) && r <= Math.max(d.r0, d.r1);
   // The cell under the pointer from the grid's geometry (widgets cover their
   // cells, so not from the element there); clamped to the grid
   function cellAt(ev) {
-    const g = $('grid'), l = layout(), rc = g.getBoundingClientRect();
+    const g = $('grid'), l = gridDims(), rc = g.getBoundingClientRect();
     const gap = parseFloat(getComputedStyle(g).columnGap) || 0;
     const cw = (rc.width + gap) / l.cols, ch = (rc.height + gap) / l.rows;
     return { c: clamp(Math.floor((ev.clientX - rc.left) / cw), 0, l.cols - 1),
@@ -209,6 +314,16 @@ export async function startDesigner(build) {
   $('grid').addEventListener('pointerdown', ev => {
     if (ev.button !== 0) return;
     const at = cellAt(ev);
+    if (!inLayout()) {
+      // A click on an empty slot puts a pad / knob there
+      const i = at.r * gridDims().cols + at.c;
+      if (slotAt(i)) return;
+      const sl = model.newSlot(view === 'pads' ? 'pad' : 'knob', i, bank);
+      project[view].push(sl);
+      selected = sl.id;
+      changed();
+      return;
+    }
     if (model.widgetAt(layout(), at.c, at.r)) return;
     $('grid').setPointerCapture(ev.pointerId);
     drag = { mode: 'place', c0: at.c, r0: at.r, c1: at.c, r1: at.r };
@@ -216,7 +331,12 @@ export async function startDesigner(build) {
   });
   $('grid').addEventListener('pointermove', ev => {
     if (!drag) return;
-    const at = cellAt(ev), l = layout();
+    const at = cellAt(ev), l = gridDims();
+    if (drag.mode === 'slot') {
+      const to = at.r * l.cols + at.c;
+      if (to !== drag.to) { drag.to = to; drag.moved = true; renderGrid(); }
+      return;
+    }
     if (drag.mode === 'place') {
       if (at.c !== drag.c1 || at.r !== drag.r1) { drag.c1 = at.c; drag.r1 = at.r; renderGrid(); }
       return;
@@ -240,6 +360,12 @@ export async function startDesigner(build) {
     if (!drag) return;
     const d = drag;
     drag = null;
+    if (d.mode === 'slot') {
+      const sl = project[view].find(x => x.id === d.id);
+      if (commit && sl && d.moved && moveSlot(sl, d.to)) changed();
+      else renderGrid();
+      return;
+    }
     if (d.mode !== 'place') {
       const w = layout().widgets.find(x => x.id === d.id);
       // Only where it fits: a move or resize onto another widget springs back
@@ -282,7 +408,7 @@ export async function startDesigner(build) {
   document.addEventListener('keydown', ev => {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
     if (ev.key === 'Escape' && drag) { endDrag(false); return; }
-    const w = selected && layout().widgets.find(x => x.id === selected);
+    const w = selected && widget();
     if (!w) return;
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
       ev.preventDefault();
@@ -293,6 +419,14 @@ export async function startDesigner(build) {
     if (!step) return;
     ev.preventDefault();
     const [dc, dr] = step;
+    if (!inLayout()) {
+      // The neighbour in the screen's grid (rows wrap only within the grid)
+      const { cols } = gridDims();
+      const c = (w.index % cols) + dc;
+      if (c < 0 || c >= cols) return;
+      if (moveSlot(w, w.index + dc + dr * cols)) changed();
+      return;
+    }
     const to = ev.shiftKey ? { col: w.col, row: w.row, w: w.w + dc, h: w.h + dr }
                            : { col: w.col + dc, row: w.row + dr, w: w.w, h: w.h };
     if (to.w < 1 || to.h < 1 || !fits(to.col, to.row, to.w, to.h, w.id)) return;
@@ -300,8 +434,8 @@ export async function startDesigner(build) {
     changed();
   });
   function removeSelected() {
-    const l = layout();
-    l.widgets = l.widgets.filter(w => w.id !== selected);
+    if (inLayout()) layout().widgets = layout().widgets.filter(w => w.id !== selected);
+    else project[view] = project[view].filter(w => w.id !== selected);
     selected = null;
     changed();
   }
@@ -327,9 +461,16 @@ export async function startDesigner(build) {
     del.className = 'small'; del.textContent = '削除'; del.onclick = removeSelected;
     head.append(del);
     box.append(head);
-    // Position: col / row / span, 0-based like the DSL
-    for (const [key, label] of [['col', '列 (0〜)'], ['row', '行 (0〜)'], ['w', '幅'], ['h', '高さ']]) {
-      box.append(numberField(label, w[key], key === 'w' || key === 'h' ? 1 : 0, 12, val => { w[key] = val; changed(); }));
+    if (!inLayout()) {
+      // The number on the screen (1-based as UI.pad / UI.knob); another
+      // slot there swaps
+      box.append(numberField(view === 'knobs' ? `番号（バンク ${'ABCD'[bank]}）` : '番号', w.index + 1, 1, model.slotCount(project.board),
+        val => { if (moveSlot(w, val - 1)) changed(); }));
+    } else {
+      // Position: col / row / span, 0-based like the DSL
+      for (const [key, label] of [['col', '列 (0〜)'], ['row', '行 (0〜)'], ['w', '幅'], ['h', '高さ']]) {
+        box.append(numberField(label, w[key], key === 'w' || key === 'h' ? 1 : 0, 12, val => { w[key] = val; changed(); }));
+      }
     }
     for (const fld of spec.props) box.append(field(fld, w.props[fld.key], val => { w.props[fld.key] = val; changed(); }));
     if (spec.actions) {
@@ -446,7 +587,12 @@ export async function startDesigner(build) {
       if (project.devices.length > 1) {
         const del = document.createElement('button');
         del.className = 'small'; del.textContent = '×';
-        del.onclick = () => { renameDevice(d.id, project.devices[i === 0 ? 1 : 0].id); project.devices.splice(i, 1); changed(); };
+        del.onclick = () => {
+          project.routes = project.routes.filter(r => r.from !== d.id && r.to !== d.id);
+          renameDevice(d.id, project.devices[i === 0 ? 1 : 0].id);
+          project.devices.splice(i, 1);
+          changed();
+        };
         row.append(del);
       }
       box.append(row);
@@ -455,9 +601,84 @@ export async function startDesigner(build) {
   // Point every widget and action at another device id
   function renameDevice(from, to) {
     for (const d of project.devices) if (d.id === from) d.id = to;
-    for (const l of project.layouts) for (const w of l.widgets) {
+    const all = [...project.layouts.flatMap(l => l.widgets), ...project.pads, ...project.knobs];
+    for (const w of all) {
       if (w.props.device === from) w.props.device = to;
       if (w.action && w.action.device === from) w.action.device = to;
+    }
+    for (const r of project.routes) {
+      if (r.from === from) r.from = to;
+      if (r.to === from) r.to = to;
+    }
+  }
+
+  // ---- routes (MIDI.route)
+
+  function renderRoutes() {
+    const box = $('routes');
+    box.textContent = '';
+    const deviceLabel = d => `${d.id} (${DEVICE_KINDS[d.kind].label})`;
+    project.routes.forEach((r, i) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const from = document.createElement('select');
+      from.setAttribute('aria-label', 'From');
+      for (const d of project.devices) if (model.canRouteFrom(d.kind)) from.add(new Option(deviceLabel(d), d.id));
+      from.add(new Option('Clock (Tempo)', ROUTE_CLOCK));
+      from.value = r.from;
+      from.onchange = () => {
+        r.from = from.value;
+        if (r.from === ROUTE_CLOCK) r.channel = 'all';   // the clock has no channels
+        changed();
+      };
+      const to = document.createElement('select');
+      to.setAttribute('aria-label', 'To');
+      for (const d of project.devices) to.add(new Option(deviceLabel(d), d.id));
+      to.value = r.to;
+      to.onchange = () => { r.to = to.value; changed(); };
+      const ch = document.createElement('select');
+      ch.setAttribute('aria-label', 'Channel');
+      ch.add(new Option('全部', 'all'));
+      if (r.from !== ROUTE_CLOCK) {
+        ch.add(new Option('Clock だけ', 'clock'));
+        for (let c = 0; c < 16; c++) ch.add(new Option(`ch ${c + 1} だけ`, String(c)));
+      }
+      ch.value = String(r.channel ?? 'all');
+      ch.onchange = () => { r.channel = /^\d+$/.test(ch.value) ? Number(ch.value) : ch.value; changed(); };
+      const del = document.createElement('button');
+      del.className = 'small'; del.textContent = '×';
+      del.onclick = () => { project.routes.splice(i, 1); changed(); };
+      const arrow = document.createElement('span');
+      arrow.textContent = '→';
+      row.append(from, arrow, to, ch, del);
+      box.append(row);
+    });
+  }
+  $('add-route').onclick = () => {
+    const src = project.devices.find(d => model.canRouteFrom(d.kind));
+    const from = src ? src.id : ROUTE_CLOCK;
+    const dst = project.devices.find(d => d.id !== from) || project.devices[0];
+    project.routes.push({ from, to: dst.id, channel: 'all' });
+    changed();
+  };
+
+  // ---- Home's menu (UI.menu)
+
+  function renderMenu() {
+    const box = $('menu');
+    box.textContent = '';
+    const hide = new Set(project.menu.hide);
+    for (const [key, label] of MENU_SCREENS) {
+      const l = document.createElement('label');
+      const i = document.createElement('input');
+      i.type = 'checkbox'; i.checked = !hide.has(key);
+      i.onchange = () => {
+        project.menu.hide = MENU_SCREENS.map(([k]) => k)
+          .filter(k => (k === key ? !i.checked : hide.has(k)));
+        changed();
+      };
+      l.append(i, ` ${label}`);
+      box.append(l);
     }
   }
   // ---- AMY parts (Tab5)
@@ -532,7 +753,9 @@ export async function startDesigner(build) {
     $('problems').innerHTML = '';
     for (const p of ps) {
       const li = document.createElement('li');
-      li.textContent = p.widget ? `${project.layouts[p.layout].title}: ${p.message}` : p.message;
+      const where = p.screen ? (p.screen === 'pads' ? 'Pads' : 'Knobs')
+        : p.widget && project.layouts[p.layout] ? project.layouts[p.layout].title : '';
+      li.textContent = where ? `${where}: ${p.message}` : p.message;
       $('problems').append(li);
     }
   }
@@ -546,6 +769,8 @@ export async function startDesigner(build) {
     renderInspector();
     renderDevices();
     renderParts();
+    renderRoutes();
+    renderMenu();
     renderProblems();
     $('code').textContent = codegen.generate(project);
   }
@@ -596,7 +821,7 @@ export async function startDesigner(build) {
       const t0 = performance.now();
       device = await MidoriDevice.start({
         canvas: $('screen'), board: project.board, mode: 'script',
-        script: codegen.generate(project, { show: current }),
+        script: codegen.generate(project, { show: viewKey() }),
         onOutput: print, onMidiOut: midiOut, amyAudio,
         onScriptEnd: () => print('[designer] the script ended', 'sys'),
       });

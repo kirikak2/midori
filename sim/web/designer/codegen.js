@@ -3,7 +3,7 @@
 // (/sd/<name>.rb). Its first line carries the project model, so the designer
 // can open the file again; the device ignores the comment.
 
-import { WIDGETS, DEVICE_KINDS, PART_TYPES } from './model.js';
+import { WIDGETS, DEVICE_KINDS, PART_TYPES, ROUTE_CLOCK, upgrade } from './model.js';
 
 export const HEADER = '# midori-designer: ';
 
@@ -181,6 +181,73 @@ function widgetLines(project, M, w, area) {
   }
 }
 
+// The Pads / Knobs screens: UI.pad / UI.knob with the same blocks as the
+// layout's pads and knobs
+function slotLines(project, M, sl) {
+  const p = sl.props;
+  const args = [String(sl.index + 1)];
+  if (sl.kind === 'knob') args.push(`bank: ${int(sl.bank, 0, 3) + 1}`);
+  args.push(`label: ${rubyStr(p.label)}`, `color: ${sym(p.color || 'gray')}`);
+  if (sl.kind === 'pad') args.push(`type: ${sym(p.type || 'trigger')}`);
+  else {
+    args.push(`value: ${int(p.value, 0, 127)}`);
+    if (p.origin === 'center') args.push('origin: :center');
+  }
+  const call = `UI.${sl.kind}(${args.join(', ')})`;
+  const block = actionBlock(project, M, sl);
+  if (!block) return [call];
+  const [params, body] = block;
+  return [`${call} do${params ? ` |${params}|` : ''}`, ...body.map(l => `  ${l}`), 'end'];
+}
+
+function screenMethods(project, M) {
+  const out = [];
+  const bySlot = (a, b) => (a.bank || 0) - (b.bank || 0) || a.index - b.index;
+  for (const [key, name] of [['pads', 'setup_pads'], ['knobs', 'setup_knobs']]) {
+    const slots = [...(project[key] || [])].sort(bySlot);
+    if (!slots.length) continue;
+    out.push(`  # The ${key === 'pads' ? 'Pads' : 'Knobs'} screen`, `  def self.${name}`);
+    for (const sl of slots) for (const l of slotLines(project, M, sl)) out.push(`    ${l}`);
+    out.push('  end', '');
+  }
+  return out;
+}
+
+// The source / destination of a route as Ruby: a device's transport, or
+// the clock (what Tempo sends)
+const routeEnd = (M, id) => (id === ROUTE_CLOCK ? 'MIDI::Clock' : `${M}.${id}_transport`);
+const routeChannel = ch => (ch === 'clock' ? ', :clock' : Number.isInteger(ch) ? `, ${int(ch, 0, 15)}` : '');
+
+function routeMethods(project, M) {
+  const routes = (project.routes || []).filter(r => r.from && r.to && r.from !== r.to);
+  if (!routes.length) return [];
+  return [
+    `  # MIDI.route: skipped where a device is absent on this board`,
+    `  def self.route(from, to, channel = nil)`,
+    `    return unless from && to`,
+    `    MIDI.route(from, to, channel: channel) || puts("route: the route table is full")`,
+    `  rescue ArgumentError => e`,
+    `    puts "route: #{e.message}"`,
+    `  end`,
+    ``,
+    `  def self.setup_routes`,
+    ...routes.map(r => `    route(${routeEnd(M, r.from)}, ${routeEnd(M, r.to)}${routeChannel(r.channel)})`),
+    `  end`,
+    ``,
+  ];
+}
+
+// What setup shows first: a layout, or the Pads / Knobs screen
+function showLine(project, show) {
+  if (show === 'pads') return `    UI.show(:pads)`;
+  if (typeof show === 'string' && show.startsWith('knobs')) {
+    const bank = Number(show.split(':')[1]) || 0;
+    return `    UI.show(:knobs, bank: ${int(bank, 0, 3) + 1})`;
+  }
+  const i = Math.max(0, Math.min(project.layouts.length - 1, Number(show) || 0));
+  return `    UI.show(@layouts[${i}]) if @layouts[${i}]`;
+}
+
 // XYPad / Tombola have one model on the device: one instance in the project,
 // made once and placed by whichever layout has it
 function instanceMethods(project, M) {
@@ -244,11 +311,16 @@ function layoutMethod(project, M, layout, index) {
   return out;
 }
 
-// opts.show: the layout to show first (default project.start); the
-// designer's preview shows the one being edited
+// opts.show: what to show first (default project.start): a layout's index,
+// 'pads', or 'knobs' / 'knobs:<bank>'; the designer's preview shows what is
+// being edited
 export function generate(project, opts = {}) {
+  upgrade(project);
   const M = moduleName(project.name);
-  const show = Math.max(0, Math.min(project.layouts.length - 1, opts.show ?? project.start ?? 0));
+  const show = opts.show ?? project.start ?? 0;
+  const hide = (project.menu.hide || []).filter(Boolean);
+  const hasKnobs = project.knobs.length > 0;
+  const sendInitial = project.sendInitial !== false;
   const lines = [
     HEADER + encodeModel(project),
     `# ${project.name} -- made with the MIDoRI Designer. Edit it there: this file is generated.`,
@@ -260,13 +332,20 @@ export function generate(project, opts = {}) {
     ...partMethods(project),
     ...instanceMethods(project, M),
     ...project.layouts.flatMap((l, i) => layoutMethod(project, M, l, i)),
+    ...screenMethods(project, M),
+    ...routeMethods(project, M),
     `  def self.setup`,
-    ...((project.parts || []).length ? [`    ${project.parts.map(p => p.id).join('; ')}   # the AMY parts`] : []),
+    ...(project.parts.length ? [`    ${project.parts.map(p => p.id).join('; ')}   # the AMY parts`] : []),
     `    @layouts = [${project.layouts.map((_, i) => `layout_${i + 1}`).join(', ')}]`,
-    ...(project.sendInitial === false ? [] : [
+    ...(project.pads.length ? ['    setup_pads'] : []),
+    ...(hasKnobs ? ['    setup_knobs'] : []),
+    ...(routeMethods(project, M).length ? ['    setup_routes'] : []),
+    ...(hide.length ? [`    UI.menu(hide: [${hide.map(sym).join(', ')}])   # Home's tiles`] : []),
+    ...(sendInitial ? [
       `    # Knobs and envelopes send their starting values (defining them sends nothing)`,
-      `    @layouts.each { |l| l.send_all }`]),
-    `    UI.show(@layouts[${show}]) if @layouts[${show}]`,
+      `    @layouts.each { |l| l.send_all }`,
+      ...(hasKnobs ? ['    UI.knob_send_all(bank: :all)'] : [])] : []),
+    showLine(project, show),
     `  end`,
     ``,
     `  def self.run`,

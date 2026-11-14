@@ -69,6 +69,12 @@
   .field input[type=text], .field input[type=number], .field select { width: 100%; }
   .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
   #problems li { color: var(--err); }
+  .menu-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 2px 8px; }
+  .tabs .sep { width: 1px; background: var(--line); margin: 0 4px; }
+  .tabs button.screen { font-style: italic; }
+  .slot-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; cursor: pointer; }
+  .slot-empty:hover { background: var(--cell-hover); }
+  .widget.target, .cell.target { outline: 2px dashed var(--sel); outline-offset: 1px; }
   details summary { cursor: pointer; color: var(--muted); }
   #code { width: 100%; height: 320px; font: 12px/1.45 ui-monospace, monospace; white-space: pre; overflow: auto; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0 0; }
 </style>
@@ -88,13 +94,17 @@
 <main>
   <div>
     <section class="card">
-      <h2>レイアウト</h2>
+      <h2>画面とレイアウト</h2>
       <div class="tabs" id="tabs"></div>
-      <div class="row">
+      <div class="row" id="layout-fields">
         <label>タイトル <input type="text" id="title" style="width:10em"></label>
         <label>列 <input type="number" id="cols" min="1" max="12" style="width:4em"></label>
         <label>行 <input type="number" id="rows" min="1" max="12" style="width:4em"></label>
         <button class="small" id="del-layout">削除</button>
+      </div>
+      <div class="row" id="screen-fields" hidden>
+        <span id="screen-info"></span>
+        <span class="tabs" id="banks" style="margin:0"></span>
       </div>
       <div class="row">
         <label><input type="radio" name="start" id="start"> 最初に表示する</label>
@@ -105,7 +115,8 @@
       <h2>部品</h2>
       <div class="palette" id="palette"></div>
       <div id="grid" aria-label="Layout grid"></div>
-      <p class="hint">空いたセルをドラッグして部品を置く。部品はドラッグで移動、選んだ部品の右下の角をドラッグで大きさを変える（矢印キーで移動、Shift + 矢印で大きさ、Delete で削除）。</p>
+      <p class="hint" id="slot-hint" hidden>空いたところをクリックしてパッド / ノブを置く。ドラッグで入れ替え、矢印キーで隣と入れ替え、Delete で削除。</p>
+      <p class="hint" id="layout-hint">空いたセルをドラッグして部品を置く。部品はドラッグで移動、選んだ部品の右下の角をドラッグで大きさを変える（矢印キーで移動、Shift + 矢印で大きさ、Delete で削除）。</p>
     </section>
   </div>
   <div>
@@ -132,6 +143,17 @@
       <div id="parts"></div>
       <button class="small" id="add-part">パートを追加</button>
       <p class="hint">Keys などでパートを鳴らすときは、デバイスに AMY を足して、そのパートのチャンネルで送ります。Envelope の送り先にもなります。</p>
+    </section>
+    <section class="card">
+      <h2>ルート（MIDI.route）</h2>
+      <div id="routes"></div>
+      <button class="small" id="add-route">ルートを追加</button>
+      <p class="hint">受けた MIDI を C で別のデバイスへ流します（MIDI Thru）。Clock は Tempo のクロック（MIDI::Clock）。そのボードに無いデバイスのルートは飛ばします。</p>
+    </section>
+    <section class="card">
+      <h2>Home のメニュー</h2>
+      <div id="menu" class="menu-list"></div>
+      <p class="hint">外した画面は Home に出ず、UI.show でも開けません（UI.menu(hide:)）。Home と Scripts は常に出ます。スクリプトが終われば元に戻ります。</p>
     </section>
     <section class="card" id="problems-card" hidden>
       <h2>問題</h2>

@@ -6,10 +6,16 @@
 //     v: 1, name, board,
 //     devices: [{ id, kind, port? }],          // kind: sam2695 | amy | usb_midi_host | usb_midi_device | web_midi
 //     parts: [{ id, type, channel, voices, patch }],   // AMY parts (Tab5): type fm | synth
-//     start: 0,                                // the layout shown first
+//     start: 0 | 'pads' | 'knobs',             // shown first: a layout's index or a screen
 //     layouts: [{ title, cols, rows, widgets: [widget] }],
+//     pads:  [slot],                           // the Pads screen (UI.pad)
+//     knobs: [slot],                           // the Knobs screen (UI.knob), banks 0..3
+//     routes: [{ from, to, channel }],         // MIDI.route: device ids ('clock' = MIDI::Clock as a source);
+//                                              //   channel 'all' | 'clock' | 0..15
+//     menu: { hide: [screen] },                // UI.menu(hide:): Home's tiles
 //   }
 //   widget = { id, kind, col, row, w, h, props: {}, action: { type, ... } }
+//   slot   = { id, kind: 'pad' | 'knob', index, bank?, props: {}, action }   // index / bank 0-based
 //
 // The widget kinds and their settings follow the layout DSL
 // (mrbgems/picoruby-ui/mrblib/ui_layout.rb) and the classes behind it.
@@ -125,6 +131,30 @@ export const ACTIONS = {
   none:       { label: 'Nothing', fields: [] },
 };
 
+// The Pads / Knobs screens' grid per board (main/ui/ui_common.h: UI_PAD_* /
+// UI_KNOB_*; Knobs have 4 banks A-D)
+export const SCREEN_GRID = {
+  tab5:   { cols: 4, rows: 3 },
+  cores3: { cols: 3, rows: 2 },
+};
+export const KNOB_BANKS = 4;
+export const screenGrid = board => SCREEN_GRID[board] || SCREEN_GRID.tab5;
+export const slotCount = board => screenGrid(board).cols * screenGrid(board).rows;
+
+// Home's tiles UI.menu(hide:) can take away, in Home's order
+// (main/ui/ui_manager.cpp MENU_ORDER). :home and :scripts always stay.
+// :layout is every layout's tile at once.
+export const MENU_SCREENS = [
+  ['pads', 'Pads'], ['knobs', 'Knobs'], ['xypad', 'XYPad'], ['keys', 'Keys'], ['sequencer', 'Sequencer'],
+  ['tombola', 'Tombola'], ['layout', 'Layouts (all)'], ['tempo', 'Tempo'], ['midi_devices', 'MIDI Devices'],
+  ['bluetooth', 'Bluetooth'], ['logs', 'Logs'], ['settings', 'Settings'],
+];
+
+// Where a route can start: devices that receive (AMY only plays), and the
+// clock (Tempo = MIDI::Clock)
+export const ROUTE_CLOCK = 'clock';
+export const canRouteFrom = kind => kind !== 'amy';
+
 export function newProject(board = 'tab5') {
   return {
     v: 1,
@@ -135,7 +165,31 @@ export function newProject(board = 'tab5') {
     sendInitial: true,      // knobs / envelopes send their starting values at start
     start: 0,
     layouts: [newLayout('Perform')],
+    pads: [],
+    knobs: [],
+    routes: [],
+    menu: { hide: [] },
   };
+}
+
+// Fill in what projects from older versions of the designer lack
+export function upgrade(project) {
+  project.parts ||= [];
+  project.pads ||= [];
+  project.knobs ||= [];
+  project.routes ||= [];
+  project.menu ||= { hide: [] };
+  project.menu.hide ||= [];
+  return project;
+}
+
+// A Pads / Knobs screen slot: a pad / knob with the widget's settings
+export function newSlot(kind, index, bank = 0) {
+  const w = newWidget(kind, 0, 0, 1, 1);
+  const slot = { id: w.id, kind, index, props: w.props, action: w.action };
+  if (kind === 'knob') slot.bank = bank;
+  slot.props.label = `${WIDGETS[kind].label} ${index + 1}`;
+  return slot;
 }
 
 export function newLayout(title) {
@@ -194,6 +248,33 @@ export function problems(project) {
   }));
   if ((project.parts || []).length && project.board !== 'tab5') {
     out.push({ layout: 0, widget: null, message: 'AMY parts play on the Tab5 only (this board has no AMY)' });
+  }
+  // The Pads / Knobs screens
+  const count = slotCount(project.board);
+  for (const [key, label] of [['pads', 'Pad'], ['knobs', 'Knob']]) {
+    for (const sl of project[key] || []) {
+      if (sl.index >= count) {
+        out.push({ screen: key, widget: sl.id, message: `${label} ${sl.index + 1} is not on this board (${count} per screen)` });
+      }
+    }
+  }
+  // Routes
+  const devs = new Map(project.devices.map(d => [d.id, d]));
+  for (const r of project.routes || []) {
+    const from = r.from === ROUTE_CLOCK ? { kind: 'clock' } : devs.get(r.from), to = devs.get(r.to);
+    if (!from || !to) out.push({ route: r, message: `Route ${r.from} -> ${r.to}: no such device` });
+    else if (r.from === r.to) out.push({ route: r, message: `Route ${r.from} -> ${r.to}: the same device` });
+    else if (!canRouteFrom(from.kind)) out.push({ route: r, message: `Route ${r.from} -> ${r.to}: ${DEVICE_KINDS[from.kind].label} cannot be a source` });
+    else if (from.kind !== 'web_midi' && to.kind !== 'web_midi' && from.kind === to.kind && from.kind !== 'clock') {
+      out.push({ route: r, message: `Route ${r.from} -> ${r.to}: both are the same transport` });
+    }
+  }
+  // Home's menu
+  const hide = new Set((project.menu || {}).hide || []);
+  const start = project.start ?? 0;
+  const startScreen = typeof start === 'number' ? 'layout' : String(start).split(':')[0];
+  if (hide.has(startScreen)) {
+    out.push({ message: `The screen shown first (${startScreen === 'layout' ? 'a layout' : startScreen}) is hidden from the menu, so it cannot be shown` });
   }
   // XYPad / Tombola / Keys: one model on the device, so one in the whole project
   const kinds = {};

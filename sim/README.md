@@ -42,6 +42,7 @@ BOARD=cores3 node sim/test/node_modes.mjs ui shot.png   # the same on CoreS3 (al
 node sim/test/node_sysex.mjs                        # SysEx: routed dump, send_sysex, reassembly
 node sim/test/node_designer.mjs shot.png            # designer: model -> project script -> run, taps
 node sim/test/node_designer_amy.mjs shot.png        # designer: AMY parts, envelopes, sequencer (Tab5)
+node sim/test/node_designer_screens.mjs shot.png    # designer: Pads / Knobs screens, routes, Home's menu
 ```
 
 ## Layout
