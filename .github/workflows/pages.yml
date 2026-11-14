@@ -65,9 +65,14 @@ jobs:
       - name: M5GFX (checked in)
         run: grep -m1 '^version:' managed_components/m5stack__m5gfx/idf_component.yml
 
+      # picoruby-aot's generator (run for the wasm build) needs prism and rbs
+      # newer than Ruby 3.3's bundled prism 0.19: the versions picoruby's
+      # Gemfile.lock pins
       - name: Build the simulator
         run: |
           gem install rake --no-document
+          gem install prism -v 1.9.0 --no-document
+          gem install rbs -v 4.2.0 --no-document
           sim/build.sh
 
       # Each board's wasm, gzipped, against the 3 MB target (docs §8)
