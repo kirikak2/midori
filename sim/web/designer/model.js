@@ -10,8 +10,9 @@
 //     layouts: [{ title, cols, rows, widgets: [widget] }],
 //     pads:  [slot],                           // the Pads screen (UI.pad)
 //     knobs: [slot],                           // the Knobs screen (UI.knob), banks 0..3
-//     routes: [{ from, to, channel }],         // MIDI.route: device ids ('clock' = MIDI::Clock as a source);
-//                                              //   channel 'all' | 'clock' | 0..15
+//     routes: [{ from, to, channel, chain }],  // MIDI.route: device ids ('clock' = MIDI::Clock as a source);
+//                                              //   channel 'all' | 'clock' | 0..15; chain: named filters
+//                                              //   [{ name, params: "rate=1/8 octaves=2" }] (Route#chain)
 //     menu: { hide: [screen] },                // UI.menu(hide:): Home's tiles
 //   }
 //   widget = { id, kind, col, row, w, h, props: {}, action: { type, ... } }
@@ -32,7 +33,9 @@ export const DEVICE_KINDS = {
 
 // One field of a widget's settings: type is int | float | optnum (a number or
 // blank) | text | color | choice | bool | notes (a list of note numbers) |
-// device | part (an AMY part or none)
+// device | part (an AMY part or none) | keycolors (Keys: [{ color, notes }]) |
+// xyslots (XYPad: per-finger overrides [{ slot, x_mode, x_cc, y_cc, note,
+// channel, hold, device }])
 const f = (key, label, type, def, extra = {}) => ({ key, label, type, def, ...extra });
 
 export const WIDGETS = {
@@ -50,8 +53,12 @@ export const WIDGETS = {
     props: [
       f('label', 'Label', 'text', 'Knob'),
       f('color', 'Color', 'color', 'cyan'),
-      f('value', 'Initial value', 'int', 64, { min: 0, max: 127 }),
+      f('value', 'Initial value', 'float', 64),
       f('origin', 'Origin', 'choice', 'min', { choices: ['min', 'center'] }),
+      f('min', 'Min', 'float', 0),
+      f('max', 'Max', 'float', 127),
+      f('step', 'Step (0 = smooth)', 'float', 1),
+      f('sensitivity', 'Sensitivity', 'float', 1),
     ],
     actions: ['cc', 'program', 'pitch_bend', 'ruby', 'none'],
   },
@@ -63,6 +70,7 @@ export const WIDGETS = {
       f('channel', 'Channel (0-15)', 'int', 0, { min: 0, max: 15 }),
       f('velocity', 'Velocity', 'choice', '100', { choices: ['100', '127', 'position'] }),
       f('device', 'Device', 'device', 'synth'),
+      f('colors', 'Key colours', 'keycolors', []),
     ],
   },
   xypad: {
@@ -74,6 +82,7 @@ export const WIDGETS = {
       f('channel', 'Channel (0-15)', 'int', 0, { min: 0, max: 15 }),
       f('hold', 'Hold', 'bool', false),
       f('device', 'Device', 'device', 'synth'),
+      f('slots', 'Per finger', 'xyslots', []),
     ],
   },
   tombola: {
@@ -88,7 +97,9 @@ export const WIDGETS = {
       f('device', 'Device', 'device', 'synth'),
     ],
   },
-  tempo: { label: 'Tempo', size: [2, 1], single: true, props: [] },
+  tempo: { label: 'Tempo', size: [2, 1], single: true, props: [
+    f('bpm', 'BPM at start (blank: as it is)', 'optnum', ''),
+  ] },
   // An ADSR editor (docs/ENVELOPE.md): on an AMY part (Synth: amp / filter,
   // FM: an operator), or only its Ruby block. Blank stages start from the part.
   envelope: {
@@ -109,6 +120,26 @@ export const WIDGETS = {
   // The Sequencer screen in the cell (docs/SEQUENCER.md): the song as it is
   sequencer: { label: 'Sequencer', size: [4, 2], single: true, props: [] },
 };
+
+// Keys colour presets: a scale or chord from a root (note numbers mod 12)
+export const KEY_PRESETS = {
+  'Major scale': [0, 2, 4, 5, 7, 9, 11],
+  'Minor scale': [0, 2, 3, 5, 7, 8, 10],
+  'Major pentatonic': [0, 2, 4, 7, 9],
+  'Minor pentatonic': [0, 3, 5, 7, 10],
+  'Blues': [0, 3, 5, 6, 7, 10],
+  'Major chord': [0, 4, 7],
+  'Minor chord': [0, 3, 7],
+  'Dominant 7th': [0, 4, 7, 10],
+};
+export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+// The notes of a preset on a keyboard from low over octaves
+export function presetNotes(preset, root, low, octaves) {
+  const pcs = new Set((KEY_PRESETS[preset] || []).map(i => (i + root) % 12));
+  const out = [];
+  for (let n = low; n <= low + 12 * octaves && n <= 127; n++) if (pcs.has(n % 12)) out.push(n);
+  return out;
+}
 
 // AMY parts (docs/AMY_SYNTH.md §6): played on their MIDI channel through the
 // amy device; FM presets are DX7 128..255, Synth (Juno) 0..127
@@ -153,6 +184,10 @@ export const MENU_SCREENS = [
 // Where a route can start: devices that receive (AMY only plays), and the
 // clock (Tempo = MIDI::Clock)
 export const ROUTE_CLOCK = 'clock';
+// Filter names the examples' plugins register (examples/plugins): offered as
+// suggestions; any name goes (a name nothing registers passes MIDI through)
+export const KNOWN_FILTERS = ['chord', 'arp', 'chmap', 'minor7', 'lumi'];
+export const filterNameOk = n => /^[a-z][a-z0-9_]{0,15}$/.test(n);
 export const canRouteFrom = kind => kind !== 'amy';
 
 export function newProject(board = 'tab5') {
@@ -180,6 +215,14 @@ export function upgrade(project) {
   project.routes ||= [];
   project.menu ||= { hide: [] };
   project.menu.hide ||= [];
+  // Settings a widget of an older designer did not have: their defaults
+  const all = [...project.layouts.flatMap(l => l.widgets), ...project.pads, ...project.knobs];
+  for (const w of all) {
+    const spec = WIDGETS[w.kind];
+    if (!spec) continue;
+    w.props ||= {};
+    for (const fld of spec.props) if (!(fld.key in w.props)) w.props[fld.key] = structuredClone(fld.def);
+  }
   return project;
 }
 
@@ -267,6 +310,9 @@ export function problems(project) {
     else if (!canRouteFrom(from.kind)) out.push({ route: r, message: `Route ${r.from} -> ${r.to}: ${DEVICE_KINDS[from.kind].label} cannot be a source` });
     else if (from.kind !== 'web_midi' && to.kind !== 'web_midi' && from.kind === to.kind && from.kind !== 'clock') {
       out.push({ route: r, message: `Route ${r.from} -> ${r.to}: both are the same transport` });
+    }
+    for (const f of r.chain || []) {
+      if (!filterNameOk(f.name || '')) out.push({ route: r, message: `Route ${r.from} -> ${r.to}: filter name "${f.name}" (a-z, 0-9, _; up to 16)` });
     }
   }
   // Home's menu

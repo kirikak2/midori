@@ -9,10 +9,14 @@ const PREVIEW_DELAY_MS = 350;
 
 export async function startDesigner(build) {
   const v = `?v=${encodeURIComponent(build)}`;
-  const [model, codegen, dev, usb, synthMod, amyMod] = await Promise.all([
+  const [model, codegen, dev, usb, synthMod, amyMod, linkMod, panelMod, i18n] = await Promise.all([
     import(`./model.js${v}`), import(`./codegen.js${v}`), import(`../device.js${v}`),
     import(`../usb_midi.js${v}`), import(`../synth.js${v}`), import(`../amy_audio.js${v}`),
+    import(`../midori_link.js${v}`), import(`../device_panel.js${v}`), import(`../i18n.js${v}`),
   ]);
+  const { t } = i18n;
+  i18n.localizePage();
+  $('to-simulator').href = `./index.html?lang=${i18n.LANG}`;
   const { WIDGETS, ACTIONS, COLORS, DEVICE_KINDS, PART_TYPES, MENU_SCREENS, ROUTE_CLOCK, KNOB_BANKS } = model;
   const { MidoriDevice, BOARDS, DEFAULT_BOARD } = dev;
 
@@ -69,7 +73,7 @@ export async function startDesigner(build) {
   $('name').oninput = () => { project.name = $('name').value; changed(); };
   $('board').onchange = () => { project.board = $('board').value; changed(); };
   $('new').onclick = () => {
-    if (!confirm('今のプロジェクトを捨てて新しく始めますか？（保存していない変更は消えます）')) return;
+    if (!confirm(t('今のプロジェクトを捨てて新しく始めますか？（保存していない変更は消えます）', 'Throw this project away and start a new one? (Unsaved changes are lost)'))) return;
     project = model.newProject(project.board);
     current = 0; view = 'layout'; bank = 0; selected = null;
     changed();
@@ -90,7 +94,7 @@ export async function startDesigner(build) {
     let m = null;
     try { m = codegen.decodeModel(await f.text()); } catch (e) { m = null; }
     if (!m || !Array.isArray(m.layouts)) {
-      alert('MIDoRI Designer で作ったファイルではありません（先頭に # midori-designer: がありません）。\nシミュレーターのエディタで開いてください。');
+      alert(t('MIDoRI Designer で作ったファイルではありません（先頭に # midori-designer: がありません）。\nシミュレーターのエディタで開いてください。', 'This file was not made by the MIDoRI Designer (no # midori-designer: line at the top).\nOpen it in the simulator\'s editor.'));
       return;
     }
     project = model.upgrade(m);
@@ -113,7 +117,7 @@ export async function startDesigner(build) {
     const tabs = $('tabs');
     tabs.textContent = '';
     // The device's own Pads / Knobs screens, then the layouts
-    for (const [v, label] of [['pads', 'Pads 画面'], ['knobs', 'Knobs 画面']]) {
+    for (const [v, label] of [['pads', t('Pads 画面', 'Pads screen')], ['knobs', t('Knobs 画面', 'Knobs screen')]]) {
       const b = document.createElement('button');
       b.className = 'screen';
       b.textContent = label;
@@ -133,7 +137,7 @@ export async function startDesigner(build) {
     });
     const add = document.createElement('button');
     add.textContent = '+';
-    add.title = 'レイアウトを追加';
+    add.title = t('レイアウトを追加', 'Add a layout');
     add.onclick = () => {
       project.layouts.push(model.newLayout(`Layout ${project.layouts.length + 1}`));
       view = 'layout'; current = project.layouts.length - 1; selected = null;
@@ -166,9 +170,9 @@ export async function startDesigner(build) {
   // The Pads / Knobs screen's line: its size on this board, Knobs' banks
   function renderScreenFields() {
     const { cols, rows } = model.screenGrid(project.board);
-    const what = view === 'pads' ? 'パッド' : 'ノブ';
-    $('screen-info').textContent = `${BOARDS[project.board].name}: ${what} ${cols * rows} 個（${cols} x ${rows}）` +
-      (view === 'knobs' ? ' × 4 バンク' : '');
+    const what = view === 'pads' ? t('パッド', 'pads') : t('ノブ', 'knobs');
+    $('screen-info').textContent = t(`${BOARDS[project.board].name}: ${what} ${cols * rows} 個（${cols} x ${rows}）`, `${BOARDS[project.board].name}: ${cols * rows} ${what} (${cols} x ${rows})`) +
+      (view === 'knobs' ? t(' × 4 バンク', ' × 4 banks') : '');
     const banks = $('banks');
     banks.textContent = '';
     if (view !== 'knobs') return;
@@ -184,7 +188,7 @@ export async function startDesigner(build) {
   }
   $('send-initial').onchange = () => { project.sendInitial = $('send-initial').checked; changed(); };
   $('del-layout').onclick = () => {
-    if (project.layouts.length <= 1 || !confirm(`レイアウト「${layout().title}」を削除しますか？`)) return;
+    if (project.layouts.length <= 1 || !confirm(t(`レイアウト「${layout().title}」を削除しますか？`, `Delete the layout "${layout().title}"?`))) return;
     project.layouts.splice(current, 1);
     if (typeof project.start === 'number' && project.start >= project.layouts.length) project.start = 0;
     current = Math.max(0, current - 1); selected = null;
@@ -240,7 +244,7 @@ export async function startDesigner(build) {
       if (w.id === selected) {
         const handle = document.createElement('div');
         handle.className = 'resize';
-        handle.title = 'ドラッグで大きさを変える';
+        handle.title = t('ドラッグで大きさを変える', 'Drag to resize');
         handle.onpointerdown = ev => startWidgetDrag(ev, w, 'resize');
         el.append(handle);
       }
@@ -452,27 +456,41 @@ export async function startDesigner(build) {
     const box = $('inspector');
     box.textContent = '';
     const w = widget();
-    if (!w) { box.innerHTML = '<p class="hint">部品を選ぶと設定が出ます。</p>'; return; }
+    if (!w) { box.innerHTML = `<p class="hint">${t('部品を選ぶと設定が出ます。', 'Select a widget for its settings.')}</p>`; return; }
     const spec = WIDGETS[w.kind];
     const head = document.createElement('div');
     head.className = 'row';
     head.innerHTML = `<strong>${spec.label}</strong>`;
     const del = document.createElement('button');
-    del.className = 'small'; del.textContent = '削除'; del.onclick = removeSelected;
+    del.className = 'small'; del.textContent = t('削除', 'Delete'); del.onclick = removeSelected;
     head.append(del);
     box.append(head);
     if (!inLayout()) {
       // The number on the screen (1-based as UI.pad / UI.knob); another
       // slot there swaps
-      box.append(numberField(view === 'knobs' ? `番号（バンク ${'ABCD'[bank]}）` : '番号', w.index + 1, 1, model.slotCount(project.board),
+      box.append(numberField(view === 'knobs' ? t(`番号（バンク ${'ABCD'[bank]}）`, `Number (bank ${'ABCD'[bank]})`) : t('番号', 'Number'), w.index + 1, 1, model.slotCount(project.board),
         val => { if (moveSlot(w, val - 1)) changed(); }));
     } else {
       // Position: col / row / span, 0-based like the DSL
-      for (const [key, label] of [['col', '列 (0〜)'], ['row', '行 (0〜)'], ['w', '幅'], ['h', '高さ']]) {
+      for (const [key, label] of [['col', t('列 (0〜)', 'Column (0-)')], ['row', t('行 (0〜)', 'Row (0-)')], ['w', t('幅', 'Width')], ['h', t('高さ', 'Height')]]) {
         box.append(numberField(label, w[key], key === 'w' || key === 'h' ? 1 : 0, 12, val => { w[key] = val; changed(); }));
       }
     }
-    for (const fld of spec.props) box.append(field(fld, w.props[fld.key], val => { w.props[fld.key] = val; changed(); }));
+    for (const fld of spec.props) box.append(field(fld, w.props[fld.key], val => { w.props[fld.key] = val; changed(); }, w));
+    if (w.kind === 'knob') {
+      // The value on the preview's screen (turned there), and taking it as
+      // the starting value
+      const span = document.createElement('span');
+      span.id = 'live-value';
+      span.textContent = w.id in liveValues ? String(Math.round(liveValues[w.id] * 100) / 100) : '—';
+      const take = document.createElement('button');
+      take.className = 'small'; take.textContent = t('初期値にする', 'Use as the start');
+      take.onclick = () => { if (w.id in liveValues) { w.props.value = Math.round(liveValues[w.id] * 100) / 100; changed(); } };
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.append(span, take);
+      box.append(labeled(t('画面の値', 'On screen'), row));
+    }
     if (spec.actions) {
       const sel = document.createElement('select');
       for (const t of spec.actions) sel.add(new Option(ACTIONS[t].label, t));
@@ -483,7 +501,7 @@ export async function startDesigner(build) {
         if (keepDevice && 'device' in w.action) w.action.device = keepDevice;
         changed();
       };
-      box.append(labeled('動作', sel));
+      box.append(labeled(t('動作', 'Action'), sel));
       for (const fld of ACTIONS[w.action.type].fields) {
         box.append(field(fld, w.action[fld.key], val => { w.action[fld.key] = val; changed(); }));
       }
@@ -504,8 +522,10 @@ export async function startDesigner(build) {
     i.onchange = () => { const n = float ? parseFloat(i.value) : parseInt(i.value, 10); if (Number.isFinite(n)) set(clamp(n, min, max)); };
     return labeled(text, i);
   }
-  function field(fld, value, set) {
+  function field(fld, value, set, w = null) {
     switch (fld.type) {
+      case 'keycolors': return keyColorsField(fld, value || [], set, w);
+      case 'xyslots': return xySlotsField(fld, value || [], set);
       case 'int': return numberField(fld.label, value, fld.min ?? -99999, fld.max ?? 99999, set);
       case 'optnum': {
         // A number, or blank for "as the target has it"
@@ -557,6 +577,94 @@ export async function startDesigner(build) {
     }
   }
 
+  // Keys: colour rows (a colour and its notes), and presets (a scale or a
+  // chord from a root, on this keyboard's range)
+  function keyColorsField(fld, rows, set, w) {
+    const box = document.createElement('div');
+    const commit = () => set(rows.map(r => ({ color: r.color, notes: [...r.notes] })));
+    rows.forEach((r, i) => {
+      const line = document.createElement('div');
+      line.className = 'row';
+      const col = document.createElement('select');
+      for (const c of COLORS) col.add(new Option(c, c));
+      col.value = r.color || 'blue';
+      col.onchange = () => { r.color = col.value; commit(); };
+      const ns = document.createElement('input');
+      ns.type = 'text'; ns.value = (r.notes || []).join(' '); ns.style.flex = '1';
+      ns.setAttribute('aria-label', 'Notes');
+      ns.onchange = () => { r.notes = ns.value.split(/[\s,]+/).filter(Boolean).map(n => clamp(parseInt(n, 10) || 0, 0, 127)); commit(); };
+      const del = document.createElement('button');
+      del.className = 'small'; del.textContent = '×';
+      del.onclick = () => { rows.splice(i, 1); commit(); };
+      line.append(col, ns, del);
+      box.append(line);
+    });
+    const add = document.createElement('div');
+    add.className = 'row';
+    const preset = document.createElement('select');
+    for (const k of Object.keys(model.KEY_PRESETS)) preset.add(new Option(k, k));
+    const root = document.createElement('select');
+    model.NOTE_NAMES.forEach((n, i) => root.add(new Option(n, String(i))));
+    const color = document.createElement('select');
+    for (const c of COLORS) color.add(new Option(c, c));
+    color.value = 'blue';
+    const btn = document.createElement('button');
+    btn.className = 'small'; btn.textContent = t('追加', 'Add');
+    btn.onclick = () => {
+      const low = (w && Number(w.props.low)) || 48, oct = (w && Number(w.props.octaves)) || 2;
+      rows.push({ color: color.value, notes: model.presetNotes(preset.value, Number(root.value), low, oct) });
+      commit();
+    };
+    add.append(root, preset, color, btn);
+    box.append(add);
+    return labeled(fld.label, box);
+  }
+
+  // XYPad: what each finger (1-5) does differently from the pad
+  function xySlotsField(fld, slots, set) {
+    const box = document.createElement('div');
+    const commit = () => set(slots.filter(Boolean).map(x => ({ ...x })));
+    for (let n = 1; n <= 5; n++) {
+      let sl = slots.find(x => x.slot === n);
+      const det = document.createElement('details');
+      const sum = document.createElement('summary');
+      sum.textContent = t(`指 ${n}${sl ? '（変更あり）' : ''}`, `Finger ${n}${sl ? ' (changed)' : ''}`);
+      det.append(sum);
+      const on = document.createElement('input');
+      on.type = 'checkbox'; on.checked = !!sl;
+      on.onchange = () => {
+        if (on.checked) slots.push({ slot: n, x_mode: '', x_cc: 70, y_cc: '', note: '', channel: '', hold: '', device: '' });
+        else slots.splice(slots.indexOf(slots.find(x => x.slot === n)), 1);
+        commit();
+      };
+      det.append(labeled(t('この指を変える', 'Change this finger'), on));
+      if (sl) {
+        det.open = true;
+        const sel = (label, key, opts) => {
+          const s = document.createElement('select');
+          for (const [v, t] of opts) s.add(new Option(t, v));
+          s.value = String(sl[key] ?? '');
+          s.onchange = () => { sl[key] = s.value === 'true' ? true : s.value === 'false' ? false : s.value; commit(); };
+          return labeled(label, s);
+        };
+        const num = (label, key, lo, hi) => {
+          const i = document.createElement('input');
+          i.type = 'number'; i.min = lo; i.max = hi; i.value = sl[key] ?? ''; i.placeholder = t('(パッドと同じ)', '(as the pad)');
+          i.onchange = () => { sl[key] = i.value === '' ? '' : clamp(parseInt(i.value, 10) || 0, lo, hi); commit(); };
+          return labeled(label, i);
+        };
+        det.append(
+          sel('X', 'x_mode', [['', t('(パッドと同じ)', '(as the pad)')], ['scale', t('スケールの音程', 'Notes of the scale')], ['cc', 'CC']]),
+          num(t('X の CC', 'X CC'), 'x_cc', 0, 127), num(t('Y の CC', 'Y CC'), 'y_cc', 0, 127), num(t('ノート（X が CC のとき）', 'Note (when X is a CC)'), 'note', 0, 127),
+          num(t('チャンネル (0-15)', 'Channel (0-15)'), 'channel', 0, 15),
+          sel('Hold', 'hold', [['', t('(パッドと同じ)', '(as the pad)')], ['true', 'on'], ['false', 'off']]),
+          sel(t('デバイス', 'Device'), 'device', [['', t('(パッドと同じ)', '(as the pad)')], ...project.devices.map(d => [d.id, d.id])]));
+      }
+      box.append(det);
+    }
+    return labeled(fld.label, box);
+  }
+
   // ---- devices
 
   function renderDevices() {
@@ -566,7 +674,7 @@ export async function startDesigner(build) {
       const row = document.createElement('div');
       row.className = 'row';
       const id = document.createElement('input');
-      id.type = 'text'; id.value = d.id; id.style.width = '7em'; id.title = 'Ruby の名前（英小文字・数字・_）';
+      id.type = 'text'; id.value = d.id; id.style.width = '7em'; id.title = t('Ruby の名前（英小文字・数字・_）', 'Its Ruby name (a-z, 0-9, _)');
       id.onchange = () => {
         const nid = id.value.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, '') || d.id;
         if (project.devices.some(o => o !== d && o.id === nid) || project.parts.some(p => p.id === nid)) { id.value = d.id; return; }
@@ -605,6 +713,7 @@ export async function startDesigner(build) {
     for (const w of all) {
       if (w.props.device === from) w.props.device = to;
       if (w.action && w.action.device === from) w.action.device = to;
+      for (const sl of w.props.slots || []) if (sl.device === from) sl.device = to;
     }
     for (const r of project.routes) {
       if (r.from === from) r.from = to;
@@ -638,10 +747,10 @@ export async function startDesigner(build) {
       to.onchange = () => { r.to = to.value; changed(); };
       const ch = document.createElement('select');
       ch.setAttribute('aria-label', 'Channel');
-      ch.add(new Option('全部', 'all'));
+      ch.add(new Option(t('全部', 'Everything'), 'all'));
       if (r.from !== ROUTE_CLOCK) {
-        ch.add(new Option('Clock だけ', 'clock'));
-        for (let c = 0; c < 16; c++) ch.add(new Option(`ch ${c + 1} だけ`, String(c)));
+        ch.add(new Option(t('Clock だけ', 'Clock only'), 'clock'));
+        for (let c = 0; c < 16; c++) ch.add(new Option(t(`ch ${c + 1} だけ`, `ch ${c + 1} only`), String(c)));
       }
       ch.value = String(r.channel ?? 'all');
       ch.onchange = () => { r.channel = /^\d+$/.test(ch.value) ? Number(ch.value) : ch.value; changed(); };
@@ -650,9 +759,41 @@ export async function startDesigner(build) {
       del.onclick = () => { project.routes.splice(i, 1); changed(); };
       const arrow = document.createElement('span');
       arrow.textContent = '→';
-      row.append(from, arrow, to, ch, del);
+      const addFilter = document.createElement('button');
+      addFilter.className = 'small'; addFilter.textContent = t('+ フィルタ', '+ Filter');
+      addFilter.title = t('名前付き filter（MIDI.register_filter。プラグインが登録するもの）を通す', 'Pass a named filter (MIDI.register_filter, as plugins register them)');
+      addFilter.onclick = () => { (r.chain ||= []).push({ name: '', params: '' }); changed({ preview: false }); };
+      row.append(from, arrow, to, ch, addFilter, del);
       box.append(row);
+      // Its chain: the filters in order (Route#chain)
+      (r.chain || []).forEach((f, fi) => {
+        const line = document.createElement('div');
+        line.className = 'row';
+        line.style.paddingLeft = '1.5em';
+        const n = document.createElement('input');
+        n.type = 'text'; n.value = f.name || ''; n.placeholder = 'filter name'; n.style.width = '8em';
+        n.setAttribute('list', 'known-filters');
+        n.onchange = () => { f.name = n.value.trim().toLowerCase(); changed(); };
+        const ps = document.createElement('input');
+        ps.type = 'text'; ps.value = f.params || ''; ps.placeholder = 'rate=1/8 octaves=2'; ps.style.flex = '1';
+        ps.title = t('パラメータ（名前=値 をスペース区切り。数・true / false 以外はシンボル）', 'Parameters (name=value, separated by spaces; anything but numbers and true / false is a Symbol)');
+        ps.onchange = () => { f.params = ps.value; changed(); };
+        const up = document.createElement('button');
+        up.className = 'small'; up.textContent = '↑'; up.disabled = fi === 0; up.title = t('前へ', 'Earlier');
+        up.onclick = () => { [r.chain[fi - 1], r.chain[fi]] = [r.chain[fi], r.chain[fi - 1]]; changed(); };
+        const x = document.createElement('button');
+        x.className = 'small'; x.textContent = '×';
+        x.onclick = () => { r.chain.splice(fi, 1); changed(); };
+        line.append(`${fi + 1}.`, n, ps, up, x);
+        box.append(line);
+      });
     });
+    if (!$('known-filters')) {
+      const dl = document.createElement('datalist');
+      dl.id = 'known-filters';
+      for (const name of model.KNOWN_FILTERS) dl.append(new Option(name));
+      document.body.append(dl);
+    }
   }
   $('add-route').onclick = () => {
     const src = project.devices.find(d => model.canRouteFrom(d.kind));
@@ -691,7 +832,7 @@ export async function startDesigner(build) {
       const row = document.createElement('div');
       row.className = 'row';
       const id = document.createElement('input');
-      id.type = 'text'; id.value = p.id; id.style.width = '6em'; id.title = 'Ruby の名前';
+      id.type = 'text'; id.value = p.id; id.style.width = '6em'; id.title = t('Ruby の名前', 'Its Ruby name');
       id.onchange = () => {
         const nid = id.value.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, '') || p.id;
         if (nid === p.id || project.parts.some(o => o.id === nid) || project.devices.some(d => d.id === nid)) { id.value = p.id; return; }
@@ -808,9 +949,66 @@ export async function startDesigner(build) {
   }
 
   let device = null, timer = null, starting = null, again = false;
+  // What the running preview was made from: structure (codegen.structureKey)
+  // and the project then. A change that keeps the structure is patched into
+  // the running VM (live); anything else starts the preview again.
+  let running = null;
+  const liveQueue = [];
+  let wantValues = false;
+  let liveValues = {};          // widget / slot id -> the knob's value on screen
+  const live = {
+    take: () => {
+      if (liveQueue.length) return liveQueue.shift();
+      if (wantValues && running) { wantValues = false; return `${codegen.moduleName(project.name)}.live_values`; }
+      return null;
+    },
+    failed: msg => {
+      print(t(`[designer] 反映できなかったので作り直します（${msg}）`, `[designer] Could not patch it in (${msg}); starting again`), 'sys');
+      running = null;
+      preview();
+    },
+    values: json => {
+      try { liveValues = JSON.parse(json); } catch (e) { return; }
+      const el = document.getElementById('live-value');
+      if (el && selected && selected in liveValues) el.textContent = String(Math.round(liveValues[selected] * 100) / 100);
+    },
+  };
+  // The selected knob's value on screen, twice a second
+  setInterval(() => {
+    const w = widget();
+    if (w && w.kind === 'knob' && running) wantValues = true;
+  }, 500);
+
   function schedulePreview() {
     clearTimeout(timer);
-    timer = setTimeout(preview, PREVIEW_DELAY_MS);
+    timer = setTimeout(update, PREVIEW_DELAY_MS);
+  }
+
+  // Patch or start again
+  function update() {
+    if (device && running && !starting && codegen.structureKey(project) === running.key) patch();
+    else preview();
+  }
+
+  // The knobs / envelopes whose starting value changed (or that are new):
+  // they take the new value; the others keep what is on screen
+  const valueKeys = ['value', 'min', 'max', 'attack', 'decay', 'sustain', 'release'];
+  function freshIds(before, after) {
+    const old = new Map();
+    const all = p => [...p.layouts.flatMap(l => l.widgets), ...p.pads, ...p.knobs];
+    for (const w of all(before)) old.set(w.id, w);
+    const out = [];
+    for (const w of all(after)) {
+      const o = old.get(w.id);
+      if (!o || valueKeys.some(k => JSON.stringify(o.props[k]) !== JSON.stringify(w.props[k]))) out.push(w.id);
+    }
+    return out;
+  }
+
+  function patch() {
+    const code = codegen.generate(project, { live: { fresh: freshIds(running.snap, project) }, show: viewKey() });
+    liveQueue.push(code);
+    running.snap = structuredClone(project);
   }
   async function preview() {
     if (starting) { again = true; return; }
@@ -821,10 +1019,13 @@ export async function startDesigner(build) {
       const t0 = performance.now();
       device = await MidoriDevice.start({
         canvas: $('screen'), board: project.board, mode: 'script',
-        script: codegen.generate(project, { show: viewKey() }),
+        script: codegen.generate(project, { show: viewKey(), preview: true }),
         onOutput: print, onMidiOut: midiOut, amyAudio,
         onScriptEnd: () => print('[designer] the script ended', 'sys'),
+        live,
       });
+      liveQueue.length = 0;
+      running = { key: codegen.structureKey(project), snap: structuredClone(project) };
       device.M.simVolume = (out, percent) => { if (out === 0) { synth.setVolume(percent); amyAudio.setVolume(percent); } };
       print(`[designer] ${BOARDS[project.board].name}: started in ${Math.round(performance.now() - t0)} ms`, 'sys');
     })();
@@ -832,6 +1033,42 @@ export async function startDesigner(build) {
     starting = null;
     if (again) { again = false; preview(); }
   }
+
+  // ---- the real MIDoRI (USB CDC): open a project from it, save one to it
+
+  const quiet = /^(#[<>]|#info |[fd]\t\d+\t|(info|ls|rm|mv|rescan)( |$)|[IWD] \(|\[PicoModem\])/;
+  const link = new linkMod.MidoriLink({ onLine: line => { if (line.trim() && !quiet.test(line)) print(`[MIDoRI] ${line}`, 'sys'); } });
+  panelMod.mountDevicePanel($('midori-panel-body'), {
+    link, print, startupFiles: false,
+    getCode: () => codegen.generate(project),
+    getName: () => codegen.fileName(project.name).replace(/\.rb$/, ''),
+    // A designer file: its project; anything else goes to the simulator's editor
+    setCode: (text, path) => {
+      let m = null;
+      try { m = codegen.decodeModel(text); } catch (e) { m = null; }
+      if (!m || !Array.isArray(m.layouts)) {
+        if (confirm(t(`${path} はデザイナーで作ったファイルではありません（先頭に # midori-designer: がありません）。\nシミュレーターのエディタで開きますか？`, `${path} was not made by the designer (no # midori-designer: line at the top).\nOpen it in the simulator's editor?`))) {
+          try { localStorage.setItem('midori-sim/script', text); } catch (e) {}
+          window.open('./index.html', '_blank');
+        }
+        return false;
+      }
+      project = model.upgrade(m);
+      openAtStart();
+      selected = null;
+      changed();
+      return true;
+    },
+    // Never over a hand-written script; ask before replacing a project
+    beforeSave: async (path, existing) => {
+      if (existing === null) return true;
+      if (!existing.startsWith(codegen.HEADER)) {
+        alert(t(`${path} はデザイナーで作ったファイルではない（手書きのスクリプト）ので、上書きしません。名前を変えて保存してください。`, `${path} is a hand-written script (not made by the designer), so it is not replaced. Save under another name.`));
+        return false;
+      }
+      return confirm(t(`${path} は実機にあります。上書きしますか？`, `${path} is on the device. Replace it?`));
+    },
+  });
 
   renderAll();
   preview();

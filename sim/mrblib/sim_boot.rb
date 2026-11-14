@@ -47,3 +47,35 @@ unless Object.const_defined?(:ScriptManager)
     def free_heap; 0; end
   end
 end
+
+# Live patching from the designer (docs/WEB_SIMULATOR.md §6.3): Ruby the page
+# queues (__midoriSim.takeLive) runs between UI.process passes, never inside
+# a handler, as the AMY panel's redefinitions do. An error tells the page,
+# which starts the preview again.
+module UI
+  class << self
+    alias sim_process_without_live process
+    def process(*args)
+      result = sim_process_without_live(*args)
+      sim_live_poll
+      result
+    end
+  end
+end
+
+def sim_live_poll
+  bridge = JS.global[:__midoriSim]
+  # Asked once: a page whose bridge has no takeLive is never called for it
+  $sim_live_ok = !bridge[:takeLive].nil? if $sim_live_ok.nil?
+  return unless $sim_live_ok
+  code = bridge.takeLive
+  return unless code.is_a?(String)
+  begin
+    eval(code)
+  rescue Exception => e
+    puts "[live] #{e.class}: #{e.message}"
+    bridge.liveFailed("#{e.class}: #{e.message}")
+  end
+rescue => e
+  # A page without live patching (the simulator's own): nothing to take
+end

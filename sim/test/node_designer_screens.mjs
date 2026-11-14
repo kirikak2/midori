@@ -23,7 +23,7 @@ const k1 = newSlot('knob', 0, 0); k1.action.cc = 74; k1.props.value = 40; p.knob
 const k2 = newSlot('knob', 1, 1); k2.action = { type: 'ruby', body: 'puts "knob B2 v=#{v.to_i} hidden=#{UI._menu_hidden}"' };
 p.knobs.push(k2);
 // Routes: the USB host's channel 1 to the synth; the clock to the synth
-p.routes.push({ from: 'kb', to: 'synth', channel: 0 });
+p.routes.push({ from: 'kb', to: 'synth', channel: 0, chain: [{ name: 'up', params: 'by=12' }] });
 p.routes.push({ from: 'clock', to: 'synth', channel: 'all' });
 p.menu.hide = ['settings', 'logs'];
 p.start = 'pads';
@@ -43,6 +43,18 @@ const fb = new Uint16Array(W * H);
 M.simPresent = (ptr, stride, x, y, w, h) => { const b = ptr >> 1; for (let j = y; j < y + h; j++) fb.set(M.HEAPU16.subarray(b + j * stride + x, b + j * stride + x + w), j * W + x); };
 const midi = [];
 M.simMidiOut = (role, cin, b1, b2, b3) => { if (b1 !== 0xf8) midi.push(`${role} ${b1.toString(16)} ${b2} ${b3}`); };
+// A plugin registering the filter the route chains (as /sd/plugins would)
+M.FS.mkdirTree('/sd/plugins');
+M.FS.writeFile('/sd/plugins/up.rb', `class Up < MIDI::Filter
+  types [:note_on, :note_off]
+  param :by, :int, range: -24..24, default: 0
+  def call(m)
+    m.note += params[:by]
+    m
+  end
+end
+MIDI.register_filter(:up, Up.new)
+`);
 M._sim_boot();
 M._sim_midi_connect(0, 1);
 M.ccall('picorb_init', 'number', [], []);
@@ -63,10 +75,12 @@ const tp = M._malloc(12);
 const tap = async (x, y) => { M.HEAP32[tp >> 2] = 0; M.HEAP32[(tp >> 2) + 1] = x; M.HEAP32[(tp >> 2) + 2] = y; M._sim_touch(tp, 1); await run(120); M._sim_touch(tp, 0); await run(300); };
 await run(800);
 console.log('start midi:', midi.splice(0).join(' | '));
-// From the USB host: channel 1 passes, channel 2 does not
+// From the USB host: channel 1 passes (through the "up" filter: +12),
+// channel 2 does not
 M._sim_midi_in(0, 0x09, 0x90, 60, 100);
 M._sim_midi_in(0, 0x09, 0x91, 61, 100);
 await run(200);
+await run(300);   // the filter runs in UI.process
 console.log('routed:', midi.splice(0).join(' | '));
 await tap(Math.round(W / 8), Math.round(H * 0.5));   // pad 5
 console.log('pad:', midi.splice(0).join(' | '));

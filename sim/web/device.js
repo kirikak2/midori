@@ -100,7 +100,10 @@ export class MidoriDevice {
   // /sd/*.rb), or null for none; scriptPath: the running script's path (its
   // [Running] badge); onSdRefresh: the Scripts screen's reload
   constructor({ canvas, script, mode, onScriptEnd, onOutput, onMidiOut, webMidiPorts, onWebMidiOut, amyAudio,
-                files, bootAutorun, onRequestScript, scripts, scriptPath, onSdRefresh }) {
+                files, bootAutorun, onRequestScript, scripts, scriptPath, onSdRefresh, live }) {
+    // live: the designer's live patching ({ take() -> Ruby | null, failed(msg),
+    // values(json) }); Ruby asks between UI.process passes (sim_boot.rb)
+    this.live = live || null;
     this.files = files || [];
     this.scripts = scripts || [];
     this.scriptPath = scriptPath || '';
@@ -173,6 +176,9 @@ export class MidoriDevice {
     globalThis.__midoriSim = {
       scriptEnded: () => { if (this.running) this.onScriptEnd('end'); },
       requestScript: path => { if (this.running) this.onRequestScript(String(path)); },
+      takeLive: () => (this.running && this.live ? this.live.take() ?? null : null),
+      liveFailed: msg => { if (this.running && this.live) this.live.failed(String(msg)); },
+      liveValues: json => { if (this.running && this.live) this.live.values(String(json)); },
     };
     this._attachPointer();
     this.running = true;
