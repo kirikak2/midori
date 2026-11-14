@@ -296,9 +296,15 @@ rescue => e
   puts "AMY panel setup failed: #{e.message}"
 end
 
-# ---- The MIDoRI simulator (sim/build.sh) takes this file up to here: the
-# ---- part above must not depend on the SD card, ScriptManager or the modes.
-# Plugins: Ruby kept in /sd/plugins, loaded at every start, in every mode.
+# Where the start-up looks, on the device and in the simulator alike
+# (docs/WEB_SIMULATOR.md §13): plugins from the internal flash first, then
+# the SD card's; the startup script runs once after power-up, in place of UI
+# mode (Stop, or the script ending, leaves the device in UI mode).
+PLUGIN_DIRS = ["/plugins", "/sd/plugins"]
+APP_SCRIPT = "/app.rb"
+
+# Plugins: Ruby kept in /plugins (the internal flash) and /sd/plugins, in
+# that order (PLUGIN_DIRS), loaded at every start, in every mode.
 # A plugin may define anything -- named MIDI filters (MIDI.register_filter,
 # docs/MIDI_FILTER_REGISTRY.md), MIDI devices (UI::MIDIDevices.register /
 # register_builtin), layouts (UI.layout, each a Home tile) -- and checks
@@ -316,8 +322,6 @@ end
 # Meanwhile the screen shows a loading box and takes no touches
 # (UI._loading): on from power-up, and from the start of every other mode,
 # until SDLoader.finish.
-PLUGIN_DIR = "/sd/plugins"
-
 module SDLoader
   @files = {}
   @done = 0
@@ -360,9 +364,9 @@ module SDLoader
   end
 
   # *.rb and *.mrb in dir, by name, as paths; foo.mrb hides foo.rb
-  # ([] without the SD card or the directory)
+  # ([] without the volume or the directory)
   def self.ruby_files(dir)
-    return [] unless $sd_available
+    return [] unless volume_ready?(dir)
     exts = {}   # base name => ".rb" / ".mrb"
     begin
       Dir.open(dir) do |d|
@@ -383,13 +387,22 @@ module SDLoader
     end
     exts.keys.sort.map { |base| "#{dir}/#{base}#{exts[base]}" }
   end
+
+  # Whether the volume holding path is mounted (/sd: the card; anything
+  # else: the internal flash)
+  def self.volume_ready?(path)
+    path == "/sd" || path.start_with?("/sd/") ? $sd_available : $flash_available
+  end
 end
 
 def load_plugins
-  SDLoader.load_dir(PLUGIN_DIR, "Plugin")
+  PLUGIN_DIRS.each { |dir| SDLoader.load_dir(dir, "Plugin") }
   puts "Filters: #{MIDI.filters.keys.join(', ')}" if MIDI.filters.size > 0
 end
 
+# ---- The MIDoRI simulator (sim/build.sh) takes this file up to here: the
+# ---- part above must not depend on ScriptManager or the modes (the simulator's
+# ---- files are in Emscripten's FS: SDLoader and the plugins work the same).
 # Scan SD card for Ruby scripts and notify C side
 def notify_scripts_to_c
   sm = ScriptManager.new
@@ -438,6 +451,54 @@ def unmount_sd_card
   rescue => e
     puts "SD unmount error: #{e.message}"
   end
+end
+
+# The internal flash, "/" (littlefs; formatted the first time). Every mode
+# mounts it: each VM starts with an empty VFS, and /app.rb and /plugins live
+# there.
+def mount_flash
+  Shell.setup_root_volume(:flash, label: 'storage')
+  $flash_available = true
+rescue => e
+  puts "FLASH disk not available: #{e.message} (#{e.class})"
+  $flash_available = false
+end
+
+# The console's ls / rm (console_input.c queues them for UI mode; the PicoRuby
+# VFS is only reachable from here). The answers are framed for the web
+# simulator and name what they answer, so a late answer is never taken for
+# the next command's: "#<ls <dir>", a line per entry "f|d <TAB> size <TAB>
+# name", then "#>ls <dir> ok <count>" or "#>ls <dir> err <message>";
+# "#>rm <path> ok" or "#>rm <path> err <message>".
+def console_command(line)
+  name, arg = line.split(" ", 2)
+  arg = (arg || "").strip
+  case name
+  when "ls"
+    arg = "/" if arg.empty?
+    arg = arg[0, arg.size - 1] while arg.size > 1 && arg.end_with?("/")
+    raise "no such volume" unless SDLoader.volume_ready?(arg)
+    entries = []
+    Dir.open(arg) do |d|
+      while entry = d.read
+        next if entry == "." || entry == ".."
+        path = arg == "/" ? "/#{entry}" : "#{arg}/#{entry}"
+        st = File::Stat.new(path) rescue nil
+        entries << [st && st.directory? ? "d" : "f", st && !st.directory? ? st.size : 0, entry]
+      end
+    end
+    puts "#<ls #{arg}"
+    entries.each { |e| puts "#{e[0]}\t#{e[1]}\t#{e[2]}" }
+    puts "#>ls #{arg} ok #{entries.size}"
+  when "rm"
+    raise "no such file" unless SDLoader.volume_ready?(arg) && File.file?(arg)
+    File.unlink(arg)
+    puts "#>rm #{arg} ok"
+  else
+    puts "#>#{name} #{arg} err unknown command"
+  end
+rescue => e
+  puts "#>#{name} #{arg} err #{e.message}"
 end
 
 # The SD card is FAT (picoruby-filesystem-fat, a midori gem), mounted as
@@ -511,8 +572,8 @@ def run_script(script_path)
   puts "Running: #{script_path}"
   sm = ScriptManager.new
   begin
-    unless $sd_available
-      puts "SD card not available, skipping script"
+    unless SDLoader.volume_ready?(script_path)
+      puts "#{script_path.start_with?('/sd') ? 'SD card' : 'FLASH disk'} not available, skipping script"
       return true
     end
 
@@ -638,6 +699,7 @@ if sm.irb_requested?
 
   puts "irb Mode"
   $midori_mode = :irb
+  mount_flash
 
   # Each script gets a fresh VM, so VFS starts empty: check and re-init if needed
   $sd_available = VFS.volume_index("/sd") ? true : false
@@ -646,7 +708,7 @@ if sm.irb_requested?
     $sd_available = try_init_sd_card
   end
 
-  SDLoader.scan([PLUGIN_DIR])
+  SDLoader.scan(PLUGIN_DIRS)
   setup_midi_devices   # loads the plugins
   setup_sequencer
   SDLoader.finish
@@ -665,6 +727,7 @@ elsif script_to_run
 
   puts "Script Mode: #{script_to_run}"
   $midori_mode = :script
+  mount_flash
 
   # Each script gets a fresh VM, so VFS starts empty: check and re-init if needed
   $sd_available = VFS.volume_index("/sd") ? true : false
@@ -678,7 +741,7 @@ elsif script_to_run
   # The built-in MIDI devices start here (setup_midi_devices); AMY and the
   # rest of MIDIDevices stay lazy
 
-  SDLoader.scan([PLUGIN_DIR])
+  SDLoader.scan(PLUGIN_DIRS)
   setup_midi_devices   # loads the plugins
   setup_sequencer
   SDLoader.finish
@@ -721,118 +784,139 @@ else
   $midori_mode = :ui
 
   # Setup flash disk
-  begin
-    STDIN.echo = false
-    puts "Initializing FLASH disk as the root volume... "
-    Shell.setup_root_volume(:flash, label: 'storage')
-    Shell.setup_system_files
-    puts "Available"
-  rescue => e
-    puts "Not available"
-    puts "#{e.message} (#{e.class})"
+  STDIN.echo = false
+  puts "Initializing FLASH disk as the root volume... "
+  mount_flash
+  if $flash_available
+    begin
+      Shell.setup_system_files
+      puts "Available"
+    rescue => e
+      puts "#{e.message} (#{e.class})"
+    end
   end
 
-  # Setup SD card
-  $sd_available = false
-  if BoardConfig::SD_MODE == "none"
-    puts "SD card disabled (GPIO conflict with PSRAM)"
-  else
-    $sd_available = try_init_sd_card
+  # The startup script: once after power-up (not after a crash), before the
+  # rest of UI mode. The supervisor starts it as any script, with its own VM,
+  # and comes back to UI mode when it ends or is stopped.
+  if $flash_available && sm.boot_autorun? && File.file?(APP_SCRIPT)
+    puts "Startup script: #{APP_SCRIPT}"
+    SDLoader.finish
+    sm.request_script(APP_SCRIPT)
+    $midori_autorun = true
   end
 
-  # Always notify C side about scripts (even if SD card failed)
-  notify_scripts_to_c
-
-  # The built-in MIDI devices start here (setup_midi_devices), so the MIDI
-  # Devices screen can patch between them; AMY stays lazy. The plugins load
-  # in there too.
-  SDLoader.scan([PLUGIN_DIR])
-  setup_midi_devices
-  setup_sequencer
-  setup_amy_panel
-
-  GC.start
-  SDLoader.finish
-
-  puts "Initialization complete."
-  puts "UI Mode: Waiting for script selection"
-  puts ""
-  puts "Available commands:"
-  puts "  load /sd/app.rb  - Load and run a script"
-  puts "  irb              - Start an interactive Ruby session"
-  puts "  heap             - Show free heap memory"
-  puts "  restart          - Restart ESP32"
-  print "> "
-
-  loop do
-    # Check for a file transfer requested by the PicoRuby web terminal.
-    # The console task has already answered the STX handshake and is
-    # feeding raw bytes to STDIN; run one PicoModem command and return.
-    if sm.modem_requested?
-      begin
-        PicoModem.session($stdin, ConsoleIO.new)
-      rescue => e
-        puts "[PicoModem] error: #{e.message}"
-      end
-      sm.modem_end
-      GC.start
-      next
-    end
-
-    # Check for console input (load command)
-    console_script = sm.check_console
-    if console_script
-      puts "[Console] Load: #{console_script}"
-      # MIDI cleanup is handled by Supervisor C code
-      # Request supervisor to load this script
-      sm.request_script(console_script)
-      # Exit UI loop - supervisor will restart with the new script
-      break
-    end
-
-    # Check for script request from UI (M5Stack touch)
-    script_path = sm.get_requested
-    if script_path
-      puts "[UI] Load: #{script_path}"
-      sm.clear_request
-      # MIDI cleanup is handled by Supervisor C code
-      # Request supervisor to load this script
-      sm.request_script(script_path)
-      # Exit UI loop - supervisor will restart with the new script
-      break
-    end
-
-    # Check for SD card refresh request from UI
-    if sm.sd_refresh_requested?
-      puts "[UI] SD refresh requested"
-      sm.clear_sd_refresh
-      # Always unmount/remount so a physically swapped card is re-read.
-      # FatFs otherwise serves a cached directory listing.
-      unmount_sd_card
+  # The startup script follows: no SD card, devices or UI loop here
+  unless $midori_autorun
+    # Setup SD card
+    $sd_available = false
+    if BoardConfig::SD_MODE == "none"
+      puts "SD card disabled (GPIO conflict with PSRAM)"
+    else
       $sd_available = try_init_sd_card
-      if $sd_available
-        notify_scripts_to_c
-        # The plugins are read again at the next start (UI mode starts
-        # again after every script): loading one twice could make its
-        # transports again
-        UI::Sequencer._send_list rescue nil
-        puts "SD card re-initialized successfully"
-      else
-        puts "SD card not available"
-        notify_scripts_to_c  # still notify so UI can clear its list
-      end
     end
 
-    # Filters, their panels (layouts) and what the MIDI Devices screen
-    # changed (UI.process runs MIDI.run_filters and UI::MIDIDevices._poll);
-    # MIDI.sleep_ms wakes as soon as a filter has something to do
-    UI.process
-    # A layout's pads and knobs (the AMY panel, /sd/plugins) run their
-    # blocks here: they would lag by the 100 ms otherwise
-    MIDI.sleep_ms(UI._requested_screen[0] == UI::SCREEN_LAYOUT ? 10 : 100)
-  end
+    # Always notify C side about scripts (even if SD card failed)
+    notify_scripts_to_c
 
-  puts "Exiting UI loop"
+    # The built-in MIDI devices start here (setup_midi_devices), so the MIDI
+    # Devices screen can patch between them; AMY stays lazy. The plugins load
+    # in there too.
+    SDLoader.scan(PLUGIN_DIRS)
+    setup_midi_devices
+    setup_sequencer
+    setup_amy_panel
+
+    GC.start
+    SDLoader.finish
+
+    puts "Initialization complete."
+    puts "UI Mode: Waiting for script selection"
+    puts ""
+    puts "Available commands:"
+    puts "  load /sd/app.rb  - Load and run a script"
+    puts "  ls [dir] / rm    - List a directory / delete a file"
+    puts "  irb              - Start an interactive Ruby session"
+    puts "  heap             - Show free heap memory"
+    puts "  restart          - Restart ESP32"
+    print "> "
+
+    loop do
+      # Check for a file transfer requested by the PicoRuby web terminal.
+      # The console task has already answered the STX handshake and is
+      # feeding raw bytes to STDIN; run one PicoModem command and return.
+      if sm.modem_requested?
+        begin
+          PicoModem.session($stdin, ConsoleIO.new)
+        rescue => e
+          puts "[PicoModem] error: #{e.message}"
+        end
+        sm.modem_end
+        GC.start
+        next
+      end
+
+      # Check for console input (load command)
+      console_script = sm.check_console
+      # ls / rm (console_input.c marks them with a 0x01 byte)
+      if console_script && console_script.getbyte(0) == 1
+        console_command(console_script[1, console_script.size - 1])
+        print "> "
+        next
+      end
+      if console_script
+        puts "[Console] Load: #{console_script}"
+        # MIDI cleanup is handled by Supervisor C code
+        # Request supervisor to load this script
+        sm.request_script(console_script)
+        # Exit UI loop - supervisor will restart with the new script
+        break
+      end
+
+      # Check for script request from UI (M5Stack touch)
+      script_path = sm.get_requested
+      if script_path
+        puts "[UI] Load: #{script_path}"
+        sm.clear_request
+        # MIDI cleanup is handled by Supervisor C code
+        # Request supervisor to load this script
+        sm.request_script(script_path)
+        # Exit UI loop - supervisor will restart with the new script
+        break
+      end
+
+      # Check for SD card refresh request from UI
+      if sm.sd_refresh_requested?
+        puts "[UI] SD refresh requested"
+        sm.clear_sd_refresh
+        # Always unmount/remount so a physically swapped card is re-read.
+        # FatFs otherwise serves a cached directory listing.
+        unmount_sd_card
+        $sd_available = try_init_sd_card
+        if $sd_available
+          notify_scripts_to_c
+          # The plugins are read again at the next start (UI mode starts
+          # again after every script): loading one twice could make its
+          # transports again
+          UI::Sequencer._send_list rescue nil
+          puts "SD card re-initialized successfully"
+        else
+          puts "SD card not available"
+          notify_scripts_to_c  # still notify so UI can clear its list
+        end
+      end
+
+      # Filters, their panels (layouts) and what the MIDI Devices screen
+      # changed (UI.process runs MIDI.run_filters and UI::MIDIDevices._poll);
+      # MIDI.sleep_ms wakes as soon as a filter has something to do
+      UI.process
+      # A layout's pads and knobs (the AMY panel, /sd/plugins) run their
+      # blocks here: they would lag by the 100 ms otherwise
+      MIDI.sleep_ms(UI._requested_screen[0] == UI::SCREEN_LAYOUT ? 10 : 100)
+    end
+
+    puts "Exiting UI loop"
+  end
 end
 
 # main_task.rb ends - supervisor will handle next step

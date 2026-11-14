@@ -269,6 +269,9 @@ mruby/c 用のビルド設定・分岐は削除した。ただし `mrbgems/` の
 - `components/midori-runtime/board_config.rb.in` - ボード設定テンプレート
 
 ビルド時にこれらが結合されて`main_task.rb`が生成される。
+結合は CMake の configure 時に行う。2026-11-14 まで `main_task_base.rb` は configure の依存に入っておらず、
+`idf.py build` では古い `main_task.rb` のまま（C だけ新しい）になっていた。今は `CMAKE_CONFIGURE_DEPENDS` に
+入れているので、通常の `idf.py build` で反映される
 
 ### ESP32環境でのDir操作
 
@@ -439,7 +442,7 @@ M5Stack以外のボード（Freenove等）では、USB-MIDIを使用するため
   MIDI TX タスクと同様に **tud_task と同じ Core 1 に固定**する
 
 コマンド: `load <path>`（キュー経由で Ruby に渡す）/ `irb` / `stop` / `heap` /
-`restart` / `help`。
+`restart` / `help`、2026-11-14 から `info` / `ls` / `rm` / `rescan`（「起動時のスクリプト」の節）。
 `load` の実ロードは PicoRuby VFS が必要なため Ruby 側で行う（C の `fopen` は不可）。
 `stop` と `irb` だけは C 側で完結させる（`supervisor_stop_script()` /
 `supervisor_request_irb()` を直接呼ぶ）。スクリプト
@@ -1250,9 +1253,10 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   （以前の素の `sleep_ms` では filter もパネルも動かない）
 - サンプル: [examples/plugins/](examples/plugins/)（chord / arp / channel（チャンネル変換、`:chmap`）/ lumi。`/sd/plugins/` にコピー）
 
-## プラグイン（/sd/plugins）とロード画面（2026-10-30）
+## プラグイン（/plugins・/sd/plugins）とロード画面（2026-10-30）
 
-- 起動時に `/sd/plugins` の `*.rb` / `*.mrb` を名前順に `load` する（`main_task_base.rb` の `SDLoader` / `load_plugins`）。
+- 起動時に `/plugins`（内蔵フラッシュ）、続けて `/sd/plugins` の `*.rb` / `*.mrb` をそれぞれ名前順に `load` する
+  （`main_task_base.rb` の `PLUGIN_DIRS` / `SDLoader` / `load_plugins`。`/plugins` は 2026-11-14 から）。
   filter（`MIDI.register_filter`）・デバイス（`UI::MIDIDevices.register_builtin`）・レイアウト（`UI.layout`）など
   何を定義してもよい。同じ日の途中までは `/sd/filters` / `/sd/devices` / `/sd/layouts` に分けていたが、この 1 つにまとめた
 - `foo.rb` と `foo.mrb` が両方あれば `.mrb` だけ。`.mrb` は `load` が RITE ヘッダで見分ける。
@@ -1274,6 +1278,21 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   全画面合成で描き、タッチはどこにも渡さない（ロック中に置いた指は離すまで無視）。`screen->update()` も呼ばない
 - **電源投入時からロック状態**（`m_loading = true` で始まる）。各モードの先頭で `SDLoader.start`、読み込み後に
   `SDLoader.finish`。VM が途中で終わっても `scriptCleanup()` が解除する
+- **`PLUGIN_DIRS` / `APP_SCRIPT` / `SDLoader` / `load_plugins` は Web シミュレーターと共有する部分**（main_task_base.rb の
+  シミュレーター用マーカーより上）にある。シミュレーターは Emscripten の FS に、つないだ実機のファイルを写して同じコードで読む
+  （docs/WEB_SIMULATOR.md §13）。マーカーより上では ScriptManager とモードに触らない
+
+## 起動時のスクリプト（/app.rb / 2026-11-14）
+
+詳細は docs/WEB_SIMULATOR.md §13.1。**実機未確認**。
+
+- 内蔵フラッシュの `/app.rb` があれば、電源投入後の最初の UI モードがその代わりに 1 回だけ実行を要求する
+  （`ScriptManager#boot_autorun?`: リセット後の最初の 1 回だけ true、直前のリセットが panic / ウォッチドッグなら false）。
+  Stop・終了の後は UI モードのまま。消すのはコンソールの `rm /app.rb`
+- 内蔵フラッシュ（`/`）は全モードでマウントする（`mount_flash`。以前は UI モードだけ）。`run_script` が SD を要るのは `/sd` のスクリプトだけ
+- コンソールに `info`（C。ボード・モード・実行中のスクリプトを 1 行で）/ `ls [dir]` / `rm <path>`（Ruby の UI モードが答える。
+  `load` と同じキューに先頭 0x01 で積む。スクリプト実行中は C が `#>ls err busy` を返す）/ `rescan` を足した。答えは
+  `#<` / `#>` の印付きで、Web シミュレーターの実機パネル（`sim/web/midori_link.js`、Web Serial + PicoModem）が読む
 
 ## BLE-MIDI（picoruby-ble_midi_device / _host / 2026-11-07）
 

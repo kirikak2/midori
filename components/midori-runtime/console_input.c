@@ -63,6 +63,7 @@
 
 #include "console_input.h"
 #include "picoruby_supervisor.h"
+#include "picoruby-esp32.h"
 
 #if CONFIG_USB_MIDI_CONSOLE_ON_CDC
 #include "usb_midi_device.h"
@@ -150,6 +151,10 @@ static void console_help(void)
     printf("  load /sd/app.rb  - Load and run a script\n");
     printf("  irb              - Start an interactive Ruby session\n");
     printf("  stop             - Stop the running script (back to UI mode)\n");
+    printf("  ls [dir]         - List a directory (/, /sd, /plugins ...; UI mode)\n");
+    printf("  rm <path>        - Delete a file (UI mode)\n");
+    printf("  rescan           - Read the SD card again (the Scripts screen's list)\n");
+    printf("  info             - Board, mode and running script, in one line\n");
     printf("  heap             - Show free heap memory\n");
     printf("  restart          - Restart ESP32\n");
     fflush(stdout);
@@ -385,12 +390,91 @@ static void console_queue_script(const char *path)
     }
 }
 
+/* The board as the web simulator names it (sim/web/device.js BOARDS) */
+#if CONFIG_USB_MIDI_BOARD_M5STACK_TAB5
+#define CONSOLE_BOARD_ID "tab5"
+#elif CONFIG_USB_MIDI_BOARD_M5STACK_CORES3
+#define CONSOLE_BOARD_ID "cores3"
+#elif CONFIG_USB_MIDI_BOARD_ELECROW_CROWPANEL
+#define CONSOLE_BOARD_ID "crowpanel"
+#else
+#define CONSOLE_BOARD_ID "freenove"
+#endif
+
+/* A command the Ruby side answers (it needs the PicoRuby VFS). They share
+ * the queue with "load"'s paths, so they start with a byte no path does.
+ * Only UI mode reads the queue: while a script or irb runs they are
+ * refused here rather than left waiting. Answers are framed for machines
+ * (the web simulator) and name their target: "#<name arg", lines,
+ * "#>name arg ok|err ..." */
+#define CONSOLE_RUBY_CMD '\x01'
+
+static void console_queue_ruby(const char *name, const char *arg)
+{
+    /* UI mode is the supervisor's task too (RUNNING, no script path) */
+    if (supervisor_is_script_running() || supervisor_get_state() == SUPERVISOR_STATE_STOPPING) {
+        printf("#>%s %s err busy: a script is running (stop it first)\n", name, arg);
+        fflush(stdout);
+        return;
+    }
+    char cmd[CONSOLE_CMD_MAX];
+    int n = snprintf(cmd, sizeof(cmd), "%c%s %s", CONSOLE_RUBY_CMD, name, arg);
+    if (n < 0 || n >= (int)sizeof(cmd)) {
+        printf("#>%s %s err path too long (max %d)\n", name, arg, CONSOLE_CMD_MAX - 8);
+        fflush(stdout);
+        return;
+    }
+    console_queue_script(cmd);
+}
+
 /* Runs in the console task. Anything that needs the PicoRuby VFS (i.e.
  * actually loading a script) is queued for the Ruby side instead. */
 static void console_execute(const char *line)
 {
     if (line[0] == '\0') {
         return;                     /* bare Enter */
+    }
+
+    /* One line about the device for the web simulator: which board, and
+     * whether UI mode (which answers ls / rm and file transfers) is up.
+     * proto: 2 = ls / rm answers name their target ("#>ls /sd ok 3") */
+    if (strcmp(line, "info") == 0) {
+        const char *script = supervisor_get_current_script();
+        const char *mode = supervisor_get_state() == SUPERVISOR_STATE_STOPPING ? "stopping"
+                         : !supervisor_is_script_running() ? "ui"
+                         : strcmp(script, SUPERVISOR_IRB_PATH) == 0 ? "irb" : "script";
+        printf("#info proto=2 board=%s mode=%s script=%s\n", CONSOLE_BOARD_ID, mode,
+               (script && strcmp(mode, "script") == 0) ? script : "");
+        fflush(stdout);
+        return;
+    }
+
+    if (strcmp(line, "ls") == 0 || strncmp(line, "ls ", 3) == 0) {
+        const char *dir = line[2] ? line + 3 : "/";
+        while (*dir == ' ') dir++;
+        console_queue_ruby("ls", *dir ? dir : "/");
+        return;
+    }
+
+    if (strncmp(line, "rm ", 3) == 0) {
+        const char *path = line + 3;
+        while (*path == ' ') path++;
+        if (*path == '\0') {
+            printf("#>rm  err usage: rm <path>\n");
+            fflush(stdout);
+            return;
+        }
+        console_queue_ruby("rm", path);
+        return;
+    }
+
+    /* The Scripts screen's reload: UI mode reads the card again and
+     * hands the new list to C */
+    if (strcmp(line, "rescan") == 0) {
+        picoruby_esp32_request_sd_refresh();
+        printf("#>rescan ok\n");
+        fflush(stdout);
+        return;
     }
 
     if (strncmp(line, "load ", 5) == 0) {
