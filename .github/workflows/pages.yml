@@ -55,15 +55,15 @@ jobs:
           ruby-version: '3.3'
 
       # The simulator (sim/build.sh): Emscripten at the version it is built
-      # and tested with, and M5GFX (LovyanGFX) at the version the firmware's
-      # component manager locks (dependencies.lock), where the build looks for it
+      # and tested with. M5GFX (LovyanGFX) comes from managed_components/,
+      # which is checked in (the version the firmware builds with)
       - name: Emscripten 6.0.12
         run: |
           git clone --depth 1 --branch 6.0.12 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
           "$HOME/emsdk/emsdk" install 6.0.12
           "$HOME/emsdk/emsdk" activate 6.0.12
-      - name: M5GFX 0.2.24
-        run: git clone --depth 1 --branch 0.2.24 https://github.com/m5stack/M5GFX.git managed_components/m5stack__m5gfx
+      - name: M5GFX (checked in)
+        run: grep -m1 '^version:' managed_components/m5stack__m5gfx/idf_component.yml
 
       - name: Build the simulator
         run: |

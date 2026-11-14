@@ -800,8 +800,8 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
   `t('日本語', 'English')`、ページの文言は `data-en`（と `data-en-title` など）。ヘッダーに相手の言語へのリンク。wasm を言語ごとに
   持たないよう、ページは 1 つ（`site/simulator/`）で、サイトの日本語ページからは `?lang=ja` でリンクする
 - **サイト**: 各ページのナビに「Simulator / シミュレーター」。Pages のワークフローが `sim/web` を `site/simulator/` に写す
-- **CI**（`.github/workflows/pages.yml`）: サブモジュール、Ruby 3.3、emsdk 6.0.12、M5GFX 0.2.24（`dependencies.lock` と同じ
-  コミット）→ `sim/build.sh` → サイズ（各ボードの wasm の gzip を Job Summary に出し、3 MB を超えたら失敗）→ Node のスモークテスト →
+- **CI**（`.github/workflows/pages.yml`）: サブモジュール、Ruby 3.3、emsdk 6.0.12、M5GFX はリポジトリに入っている `managed_components/` の
+  0.2.24 をそのまま使う → `sim/build.sh` → サイズ（各ボードの wasm の gzip を Job Summary に出し、3 MB を超えたら失敗）→ Node のスモークテスト →
   `site/simulator/`。どこかで失敗したら公開しない（前のサイトが残る）。`sim/**`・`main/ui/**`・`mrbgems/**`・
   `components/midori-runtime/**`・`examples/**` の変更でも走る
 - **サイズ**（2026-11-14）: 各ボードの wasm 2.4 MB、gzip 0.98 MB（目標 3 MB の 1/3）。JS 31 KB、CodeMirror 114 KB（gzip）
