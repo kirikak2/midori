@@ -798,7 +798,7 @@ GitHub Pages では付けられない）と ASYNCIFY / `SUPPORT_LONGJMP=emscript
 
 - **日本語 / 英語**: `sim/web/i18n.js`。言語は `?lang=ja|en`、前に選んだもの（localStorage）、ブラウザの言語の順。JS の文言は
   `t('日本語', 'English')`、ページの文言は `data-en`（と `data-en-title` など）。ヘッダーに相手の言語へのリンク。wasm を言語ごとに
-  持たないよう、ページは 1 つ（`site/simulator/`）で、サイトの日本語ページからは `?lang=ja` でリンクする
+  持たないよう、ページは 1 つ（`site/simulator/`）で、サイトの日本語ページからは `?lang=ja`、英語ページからは `?lang=en` でリンクする
 - **サイト**: 各ページのナビに「Simulator / シミュレーター」。Pages のワークフローが `sim/web` を `site/simulator/` に写す
 - **CI**（`.github/workflows/pages.yml`）: サブモジュール、Ruby 3.3 + prism 1.9.0 / rbs 4.2.0（picoruby-aot の生成器が使う。picoruby の Gemfile.lock と同じ版）、emsdk 6.0.12、M5GFX はリポジトリに入っている `managed_components/` の
   0.2.24 をそのまま使う → `sim/build.sh` → サイズ（各ボードの wasm の gzip を Job Summary に出し、3 MB を超えたら失敗）→ Node のスモークテスト →
