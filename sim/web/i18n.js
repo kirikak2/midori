@@ -2,7 +2,7 @@
 //
 // The language: ?lang=ja|en, else the one chosen before (localStorage), else
 // the browser's (ja for Japanese, en otherwise). The site's Japanese pages
-// link with ?lang=ja.
+// link with ?lang=ja, the English ones with ?lang=en.
 //
 //   t('日本語', 'English')                    in the scripts
 //   <b data-en="English">日本語</b>           in the pages (title / placeholder /

@@ -19,7 +19,7 @@ require "fileutils"
 
 ROOT = File.expand_path("..", __dir__)
 PAGES = {
-  "site/reference/index.html" => { href: "../simulator/", lang: nil, label: "Open in the simulator ▶" },
+  "site/reference/index.html" => { href: "../simulator/", lang: "en", label: "Open in the simulator ▶" },
   "site/ja/reference/index.html" => { href: "../../simulator/", lang: "ja", label: "シミュレーターで開く ▶" },
 }
 PRELUDE = <<~RUBY
@@ -60,9 +60,9 @@ PAGES.each do |rel, opt|
     next "#{head}#{body}#{close}#{tail}" if SKIP.any? { |re| snippet.match?(re) }
     script = PRELUDE + snippet.rstrip + "\n" + (snippet.include?("loop do") ? "" : LOOP)
     if dump
-      File.write(File.join(dump, "#{File.basename(File.dirname(rel))}-#{opt[:lang] || 'en'}-#{format('%02d', n)}.rb"), script)
+      File.write(File.join(dump, "#{File.basename(File.dirname(rel))}-#{opt[:lang]}-#{format('%02d', n)}.rb"), script)
     end
-    query = opt[:lang] ? "?lang=#{opt[:lang]}" : ""
+    query = "?lang=#{opt[:lang]}"
     href = "#{opt[:href]}#{query}#code=#{share_code(script)}&board=tab5"
     linked += 1
     "#{head}#{body}#{close}<a class=\"sim-link\" href=\"#{CGI.escapeHTML(href)}\" target=\"_blank\" rel=\"noopener\">#{opt[:label]}</a>#{tail}"
