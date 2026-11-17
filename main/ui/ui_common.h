@@ -431,7 +431,8 @@ typedef struct {
         } knob;
         uint8_t knob_bank;   // For UI_EVENT_KNOB_BANK
         struct {
-            uint8_t slot;    // For UI_EVENT_XYPAD_TOUCH (0-based)
+            uint8_t pad;     // For UI_EVENT_XYPAD_TOUCH: which pad (ui_xypad_* id)
+            uint8_t slot;    // 0-based
             uint8_t phase;   // xypad_phase_t
             uint8_t channel;
             uint8_t note;
@@ -598,9 +599,30 @@ typedef struct {
     float    touch_glide_range;
 } xypad_slot_t;
 
-void ui_xypad_reset(void);                     // Every slot back to defaults, drops all touches
-void ui_xypad_set_max_touches(uint8_t n);      // Clamped to UI_XYPAD_MAX_TOUCHES
-uint8_t ui_xypad_get_max_touches(void);
+// Any number of pads up to UI_XYPAD_MAX_PADS, each with its slots and a
+// transport bit of its own (a device of its own on the MIDI Devices screen,
+// its own routes out): 0 is the default pad (the one main_task.rb registers as
+// the built-in "xypad" and the XYPad screen starts on), 1.. the ones scripts
+// make (UI::XYPad.new). Every call names the pad first; one that is not open
+// is ignored (getters give defaults). Implemented in ui_xypad.cpp.
+#define UI_XYPAD_MAX_PADS     4
+#define UI_XYPAD_DEFAULT      0
+
+int  ui_xypad_default(void);                   // UI_XYPAD_DEFAULT, made on first use (-1: no memory)
+int  ui_xypad_create(void);                    // A fresh pad: its id, or -1 if none is free
+void ui_xypad_destroy(int pad);                // Its transport goes; the default is only reset
+bool ui_xypad_alive(int pad);
+uint32_t ui_xypad_generation(int pad);         // Bumped by reset / close: views drop their touches
+// The pad the XYPad screen shows (the default unless another was shown and
+// is still open)
+void ui_xypad_set_shown(int pad);
+int  ui_xypad_shown(void);
+// A script ended: its pads close, the default goes back to defaults
+void ui_xypad_cleanup(void);
+
+void ui_xypad_reset(int pad);                  // Every slot back to defaults, drops all touches
+void ui_xypad_set_max_touches(int pad, uint8_t n);   // Clamped to UI_XYPAD_MAX_TOUCHES
+uint8_t ui_xypad_get_max_touches(int pad);
 
 // Named-parameter access per slot (index 0-based), the same shape as Tombola's
 // ui_tombola_set_f/set_i: keeps the mrubyc binding two functions wide no
@@ -611,35 +633,35 @@ uint8_t ui_xypad_get_max_touches(void);
 //              touch_glide_range (read-only; the glide_range snapshotted for
 //              whichever touch currently occupies the slot, see xypad_slot_t)
 // Int keys   : x_mode y_invert gate_note channel hold
-bool  ui_xypad_set_f(uint8_t index, const char* name, float value);
-bool  ui_xypad_set_i(uint8_t index, const char* name, int value);
-float ui_xypad_get_f(uint8_t index, const char* name);
-int   ui_xypad_get_i(uint8_t index, const char* name);
+bool  ui_xypad_set_f(int pad, uint8_t index, const char* name, float value);
+bool  ui_xypad_set_i(int pad, uint8_t index, const char* name, int value);
+float ui_xypad_get_f(int pad, uint8_t index, const char* name);
+int   ui_xypad_get_i(int pad, uint8_t index, const char* name);
 
-void    ui_xypad_set_scale(uint8_t index, const uint8_t* notes, uint8_t len);
-uint8_t ui_xypad_get_scale(uint8_t index, uint8_t* out, uint8_t max_len);  // Returns the count
+void    ui_xypad_set_scale(int pad, uint8_t index, const uint8_t* notes, uint8_t len);
+uint8_t ui_xypad_get_scale(int pad, uint8_t index, uint8_t* out, uint8_t max_len);  // Returns the count
 
-// The XYPad as a picoruby-midi transport that only sends (docs/XYPAD.md).
+// A pad as a picoruby-midi transport that only sends (docs/XYPAD.md).
 // Ruby still makes its MIDI (UI::XYPad); it hands each message to dispatch,
 // which forwards it along the routes from the pad's bit (filters and
 // listeners included). targets is where a message would go, taken at a
-// touch's down and kept for the rest of it. init registers it (UIManager::init).
-void         ui_xypad_init(void);
-midi_tmask_t ui_xypad_transport_bit(void);   // 0 if the registry was full
-midi_tmask_t ui_xypad_targets(uint8_t cin, uint8_t b1);
-void         ui_xypad_dispatch(midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
+// touch's down and kept for the rest of it.
+midi_tmask_t ui_xypad_transport_bit(int pad);   // 0 if none (closed, or the registry was full)
+midi_tmask_t ui_xypad_targets(int pad, uint8_t cin, uint8_t b1);
+void         ui_xypad_dispatch(int pad, midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3);
 
-// NULL for an out-of-range index; the screen draws it as an empty slot.
-const xypad_slot_t* ui_xypad_get_slot(uint8_t index);
+// NULL for an out-of-range index or a pad never opened (a closed one still
+// answers, so a view can fade it out); the screen draws it as an empty slot.
+const xypad_slot_t* ui_xypad_get_slot(int pad, uint8_t index);
 
-// Driven by ScreenXYPad's touch handlers. content_x/y/w/h describe the content
+// Driven by an XYPadView's touch handlers. content_x/y/w/h describe the pad's
 // area in screen pixels, which is what X/Y get mapped against. Finds/frees the
 // slot itself and returns which one it used (-1 when down finds no free slot,
-// or move/up are called for a touch that never claimed one), so the screen
+// or move/up are called for a touch that never claimed one), so the view
 // knows what to (re)draw without keeping its own touch-to-slot map.
-int ui_xypad_touch_down(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
-int ui_xypad_touch_move(int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
-int ui_xypad_touch_up(int touch_id);
+int ui_xypad_touch_down(int pad, int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
+int ui_xypad_touch_move(int pad, int touch_id, int x, int y, int content_x, int content_y, int content_w, int content_h);
+int ui_xypad_touch_up(int pad, int touch_id);
 
 // --- Keys -------------------------------------------------------------------
 // An on-screen keyboard of 1 to 7 octaves (13 to 85 keys) that is also a
@@ -833,7 +855,7 @@ void ui_seq_set_status(const char* message);        // Shown in the header for a
 typedef enum {
     UI_WIDGET_PAD = 0,
     UI_WIDGET_KNOB,
-    UI_WIDGET_XYPAD,      // The XYPad screen's view, drawn in the widget's cell
+    UI_WIDGET_XYPAD,      // A pad (xypad.id), drawn by an XYPadView of its own
     UI_WIDGET_TOMBOLA,    // Likewise the Tombola's
     UI_WIDGET_KEYS,       // A keyboard (keys.id), drawn by a KeysView of its own
     UI_WIDGET_TEMPO,      // Likewise the Tempo screen's
@@ -869,6 +891,9 @@ typedef struct {
         struct {
             int8_t id;     // UI_WIDGET_KEYS: which keyboard (ui_keys_*)
         } keys;
+        struct {
+            int8_t id;     // UI_WIDGET_XYPAD: which pad (ui_xypad_*)
+        } xypad;
     };
 } ui_widget_t;
 
@@ -889,6 +914,8 @@ int  ui_layout_add_envelope(int x, int y, int w, int h, const char* label,
 int  ui_layout_add_view(uint8_t kind, int x, int y, int w, int h);
 // A keyboard (ui_keys_* id). Any number per layout, each a keyboard of its own.
 int  ui_layout_add_keys(int x, int y, int w, int h, int keys_id);
+// An XYPad (ui_xypad_* id). Any number per layout, each a pad of its own.
+int  ui_layout_add_xypad(int x, int y, int w, int h, int pad_id);
 bool ui_layout_commit(void);
 void ui_layout_delete(int slot);
 
@@ -968,6 +995,8 @@ bool ui_mididev_unregister(midi_tmask_t bit);
 bool ui_mididev_activate(const char* key, midi_tmask_t bit);
 // Mark a built-in as only sending (UI_MIDIDEV_NO_OUT)
 void ui_mididev_set_no_out(const char* key);
+// The same for any listed device, by its bit (a script's UI::XYPad)
+void ui_mididev_set_no_out_bit(midi_tmask_t bit);
 
 // Reading (any task)
 int  ui_mididev_count(void);
@@ -1185,7 +1214,7 @@ void ui_knob_event_post(uint8_t bank, uint8_t index, float value, bool final);
 // Queues an XYPad touch phase. MOVE replaces a pending MOVE for the same slot
 // the same way knob changes coalesce; DOWN and UP are never coalesced away
 // since they are what tells Ruby to gate a note on or off.
-void ui_xypad_event_post(uint8_t slot, xypad_phase_t phase, uint8_t channel,
+void ui_xypad_event_post(uint8_t pad, uint8_t slot, xypad_phase_t phase, uint8_t channel,
                          uint8_t note, float bend_semitones, float x, float y);
 bool ui_event_pop(ui_event_t* event);
 int ui_event_available(void);

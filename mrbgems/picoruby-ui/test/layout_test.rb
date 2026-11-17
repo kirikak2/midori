@@ -102,10 +102,17 @@ check_raises("outside the grid", "outside 0..3") do
   UI::Layout.resolve(CORES3, cols: 4) { pad col: 4 }
 end
 
-check_raises("one xypad per layout", "only one xypad") do
+specs, = UI::Layout.resolve(CORES3, cols: 2) do
+  xypad col: 0
+  xypad col: 1, y_cc: 71
+end
+check "any number of XYPads per layout", [:xypad, :xypad], specs.map { |sp| sp[:kind] }
+
+shared_pad = Object.new
+check_raises("the same XYPad twice", "the same XYPad twice") do
   UI::Layout.resolve(CORES3, cols: 2) do
-    xypad col: 0
-    xypad col: 1
+    xypad col: 0, pad: shared_pad
+    xypad col: 1, pad: shared_pad
   end
 end
 
@@ -275,6 +282,15 @@ module UI
   end
   def self._layout_add_keys(*a); $calls << [:keys] + a; @next_id += 1; @next_id - 1; end
   def self._layout_commit; $calls << [:commit]; true; end
+  def self._layout_add_xypad(*a); $calls << [:xypad] + a; @next_id += 1; @next_id - 1; end
+  # A pad per UI::XYPad.new, as the C side hands out
+  class XYPad
+    @@next = 1
+    attr_reader :id, :opts
+    def initialize(**opts); @id = @@next; @@next += 1; @opts = opts; @closed = false; end
+    def close; @closed = true; end
+    def closed?; @closed; end
+  end
   # A keyboard per UI::Keys.new, as the C side hands out
   class Keys
     @@next = 1
@@ -495,6 +511,21 @@ first = two[:a]
 UI.layout("Two", cols: 1, gap: 0) { pad label: "x" }
 check "redefining closes the keyboards the layout made", true, first.closed?
 two.delete
+
+$calls.clear
+xy2 = UI.layout("XY2", cols: 2, gap: 0) do
+  xypad col: 0, id: :a, scale: [60, 62]
+  xypad col: 1, id: :b
+end
+check "two pads, two ids", true, xy2[:a].id != xy2[:b].id
+check "...each its own add, with its pad's id", [[:xypad, 0, 20, 160, 180, xy2[:a].id], [:xypad, 160, 20, 160, 180, xy2[:b].id]], $calls[1, 2]
+check "keywords go to UI::XYPad.new", { scale: [60, 62] }, xy2[:a].opts
+given_pad = UI::XYPad.new
+first_pad = xy2[:a]
+UI.layout("XY2", cols: 1, gap: 0) { xypad pad: given_pad }
+check "redefining closes the pads the layout made", true, first_pad.closed?
+xy2.delete
+check "a given pad stays open", false, given_pad.closed?
 
 puts "#{$passed} passed, #{$failed} failed"
 # A bare mruby has no exit; the failure count above is the result there

@@ -4,6 +4,7 @@
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
+#include <new>
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -55,8 +56,11 @@ static uint16_t fadeColor(uint16_t color, float t)
     return (uint16_t)((r << 11) | (g << 5) | b);
 }
 
-ScreenXYPad::ScreenXYPad()
-    : m_isActive(false)
+XYPadView::XYPadView()
+    : m_pad(UI_XYPAD_DEFAULT)
+    , m_areaX(0), m_areaY(UI_CONTENT_Y), m_areaW(UI_SCREEN_WIDTH), m_areaH(UI_CONTENT_HEIGHT)
+    , m_gen(0)
+    , m_isActive(false)
     , m_lastDrawUs(0)
     , m_hadContent(false)
 {
@@ -69,10 +73,20 @@ ScreenXYPad::ScreenXYPad()
     memset(m_lastTrailPushUs, 0, sizeof(m_lastTrailPushUs));
     memset(m_ripples, 0, sizeof(m_ripples));
     memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
-    resetArea();
 }
 
-void ScreenXYPad::setArea(int x, int y, int w, int h)
+void XYPadView::setPad(int pad)
+{
+    if (pad == m_pad) return;
+    m_pad = pad;
+    memset(m_touchKnown, 0, sizeof(m_touchKnown));
+    memset(m_trailHead, 0, sizeof(m_trailHead));
+    memset(m_trailCount, 0, sizeof(m_trailCount));
+    memset(m_ripples, 0, sizeof(m_ripples));
+    memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
+}
+
+void XYPadView::setArea(int x, int y, int w, int h)
 {
     m_areaX = x;
     m_areaY = y;
@@ -80,12 +94,7 @@ void ScreenXYPad::setArea(int x, int y, int w, int h)
     m_areaH = h;
 }
 
-void ScreenXYPad::resetArea()
-{
-    setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
-}
-
-void ScreenXYPad::contentRect(int& x, int& y, int& w, int& h)
+void XYPadView::contentRect(int& x, int& y, int& w, int& h)
 {
     x = m_areaX;
     y = m_areaY;
@@ -93,13 +102,13 @@ void ScreenXYPad::contentRect(int& x, int& y, int& w, int& h)
     h = m_areaH;
 }
 
-uint16_t ScreenXYPad::slotColor(int index)
+uint16_t XYPadView::slotColor(int index)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return UI_COLOR_WHITE;
     return SLOT_COLORS[index];
 }
 
-void ScreenXYPad::noteName(uint8_t note, char* buf, int bufSize)
+void XYPadView::noteName(uint8_t note, char* buf, int bufSize)
 {
     static const char* NAMES[12] = { "C", "C#", "D", "D#", "E", "F",
                                      "F#", "G", "G#", "A", "A#", "B" };
@@ -109,7 +118,7 @@ void ScreenXYPad::noteName(uint8_t note, char* buf, int bufSize)
 
 // --- Animation state -----------------------------------------------------
 
-void ScreenXYPad::pushTrailPoint(int index, int x, int y, int64_t now)
+void XYPadView::pushTrailPoint(int index, int x, int y, int64_t now)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return;
     if (now - m_lastTrailPushUs[index] < TRAIL_MIN_INTERVAL_US) return;
@@ -123,7 +132,7 @@ void ScreenXYPad::pushTrailPoint(int index, int x, int y, int64_t now)
     if (m_trailCount[index] < TRAIL_MAX_POINTS) m_trailCount[index]++;
 }
 
-void ScreenXYPad::spawnRipple(int x, int y, uint16_t color, int64_t now)
+void XYPadView::spawnRipple(int x, int y, uint16_t color, int64_t now)
 {
     int victim = -1;
     for (int i = 0; i < RIPPLE_MAX; i++) {
@@ -143,7 +152,7 @@ void ScreenXYPad::spawnRipple(int x, int y, uint16_t color, int64_t now)
     m_ripples[victim].color = color;
 }
 
-void ScreenXYPad::pruneTrails(int64_t now)
+void XYPadView::pruneTrails(int64_t now)
 {
     for (int s = 0; s < UI_XYPAD_MAX_TOUCHES; s++) {
         while (m_trailCount[s] > 0) {
@@ -159,10 +168,10 @@ void ScreenXYPad::pruneTrails(int64_t now)
     }
 }
 
-bool ScreenXYPad::hasAnythingToDraw()
+bool XYPadView::hasAnythingToDraw()
 {
     for (int s = 0; s < UI_XYPAD_MAX_TOUCHES; s++) {
-        const xypad_slot_t* slot = ui_xypad_get_slot((uint8_t)s);
+        const xypad_slot_t* slot = ui_xypad_get_slot(m_pad, (uint8_t)s);
         if (slot && (slot->active || slot->latched)) return true;
         if (m_trailCount[s] > 0) return true;
     }
@@ -174,7 +183,7 @@ bool ScreenXYPad::hasAnythingToDraw()
 
 // --- Drawing ---------------------------------------------------------------
 
-void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int64_t now)
+void XYPadView::renderFrame(LovyanGFX* g, int ox, int oy, int64_t now)
 {
     // Ripples: an expanding two-pixel-thick ring per touchdown, fading to
     // black as it grows.
@@ -209,7 +218,7 @@ void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int64_t now)
 
     // Current dot + label, on top of everything else.
     for (int s = 0; s < UI_XYPAD_MAX_TOUCHES; s++) {
-        const xypad_slot_t* slot = ui_xypad_get_slot((uint8_t)s);
+        const xypad_slot_t* slot = ui_xypad_get_slot(m_pad, (uint8_t)s);
         if (!slot || (!slot->active && !slot->latched) || !m_touchKnown[s]) continue;
 
         int x = m_touchX[s] - ox;
@@ -250,7 +259,7 @@ void ScreenXYPad::renderFrame(LovyanGFX* g, int ox, int oy, int64_t now)
     }
 }
 
-void ScreenXYPad::paintFrame(int64_t now)
+void XYPadView::paintFrame(int64_t now)
 {
     int cx, cy, cw, ch;
     contentRect(cx, cy, cw, ch);
@@ -267,7 +276,7 @@ void ScreenXYPad::paintFrame(int64_t now)
     // label, incrementally erased and redrawn like the very first version of
     // this screen.
     for (int s = 0; s < UI_XYPAD_MAX_TOUCHES; s++) {
-        const xypad_slot_t* slot = ui_xypad_get_slot((uint8_t)s);
+        const xypad_slot_t* slot = ui_xypad_get_slot(m_pad, (uint8_t)s);
         bool show = slot && (slot->active || slot->latched) && m_touchKnown[s];
         if (show) {
             fallbackRefresh(s, m_touchX[s], m_touchY[s]);
@@ -277,7 +286,7 @@ void ScreenXYPad::paintFrame(int64_t now)
     }
 }
 
-void ScreenXYPad::fallbackEraseSlot(int index)
+void XYPadView::fallbackEraseSlot(int index)
 {
     DrawnSlot& d = m_drawnFallback[index];
     if (!d.shown) return;
@@ -285,9 +294,9 @@ void ScreenXYPad::fallbackEraseSlot(int index)
     d.shown = false;
 }
 
-void ScreenXYPad::fallbackPaintSlot(int index, int x, int y)
+void XYPadView::fallbackPaintSlot(int index, int x, int y)
 {
-    const xypad_slot_t* slot = ui_xypad_get_slot((uint8_t)index);
+    const xypad_slot_t* slot = ui_xypad_get_slot(m_pad, (uint8_t)index);
     if (!slot) return;
 
     DrawnSlot& d = m_drawnFallback[index];
@@ -333,7 +342,7 @@ void ScreenXYPad::fallbackPaintSlot(int index, int x, int y)
     d.eraseH = DOT_RADIUS * 2 + 2;
 }
 
-void ScreenXYPad::fallbackRefresh(int index, int x, int y)
+void XYPadView::fallbackRefresh(int index, int x, int y)
 {
     fallbackEraseSlot(index);
     fallbackPaintSlot(index, x, y);
@@ -341,24 +350,35 @@ void ScreenXYPad::fallbackRefresh(int index, int x, int y)
 
 // --- Screen lifecycle --------------------------------------------------
 
-void ScreenXYPad::enter()
+void XYPadView::enter()
 {
     m_isActive = true;
+    m_gen = ui_xypad_generation(m_pad);
     // UIManager repaints the whole screen right after this (draw()), which
     // also shows a slot latched via Hold on a previous visit.
 }
 
-void ScreenXYPad::leave()
+void XYPadView::leave()
 {
+    // Fingers cannot reach a pad that is not showing: let go of them (their
+    // up events reach Ruby, which sends the note offs). Slots latched by Hold
+    // stay latched, as before.
+    for (int t = 0; t < MAX_TOUCH_POINTS; t++) ui_xypad_touch_up(m_pad, t);
     m_isActive = false;
-    // Trails/ripples simply stop being painted; touches cannot arrive here
-    // while another screen is active, so there is nothing left to animate
-    // anyway.
+    // Trails/ripples simply stop being painted.
 }
 
-void ScreenXYPad::update()
+void XYPadView::update()
 {
     if (!m_isActive) return;
+
+    // The pad was reset or closed: its slots are gone, so are the touches'
+    // positions
+    uint32_t gen = ui_xypad_generation(m_pad);
+    if (gen != m_gen) {
+        m_gen = gen;
+        memset(m_touchKnown, 0, sizeof(m_touchKnown));
+    }
 
     int64_t now = esp_timer_get_time();
     if (now - m_lastDrawUs < DRAW_INTERVAL_US) return;
@@ -374,7 +394,7 @@ void ScreenXYPad::update()
     paintFrame(now);
 }
 
-void ScreenXYPad::draw()
+void XYPadView::draw()
 {
     ui_gfx().fillRect(m_areaX, m_areaY, m_areaW, m_areaH, UI_COLOR_BLACK);
     memset(m_drawnFallback, 0, sizeof(m_drawnFallback));
@@ -382,7 +402,7 @@ void ScreenXYPad::draw()
     paintFrame(esp_timer_get_time());
 }
 
-void ScreenXYPad::onTouch(int touchId, int x, int y, bool pressed)
+void XYPadView::onTouch(int touchId, int x, int y, bool pressed)
 {
     if (!m_isActive) return;
 
@@ -390,7 +410,7 @@ void ScreenXYPad::onTouch(int touchId, int x, int y, bool pressed)
     contentRect(cx, cy, cw, ch);
 
     if (pressed) {
-        int idx = ui_xypad_touch_down(touchId, x, y, cx, cy, cw, ch);
+        int idx = ui_xypad_touch_down(m_pad, touchId, x, y, cx, cy, cw, ch);
         if (idx < 0) return;
 
         m_touchKnown[idx] = true;
@@ -410,18 +430,18 @@ void ScreenXYPad::onTouch(int touchId, int x, int y, bool pressed)
         // Position/trail/ripple are left as they are -- the fade continues
         // via update(), which is also what will erase the dot once neither
         // active nor latched is true anymore.
-        ui_xypad_touch_up(touchId);
+        ui_xypad_touch_up(m_pad, touchId);
     }
 }
 
-void ScreenXYPad::onTouchMove(int touchId, int x, int y)
+void XYPadView::onTouchMove(int touchId, int x, int y)
 {
     if (!m_isActive) return;
 
     int cx, cy, cw, ch;
     contentRect(cx, cy, cw, ch);
 
-    int idx = ui_xypad_touch_move(touchId, x, y, cx, cy, cw, ch);
+    int idx = ui_xypad_touch_move(m_pad, touchId, x, y, cx, cy, cw, ch);
     if (idx < 0) return;
 
     m_touchKnown[idx] = true;
@@ -432,7 +452,74 @@ void ScreenXYPad::onTouchMove(int touchId, int x, int y)
     // of move events, which is what keeps a fast drag from flooding repaints.
 }
 
+// --- The XYPad screen ---------------------------------------------------
+
+ScreenXYPad::ScreenXYPad()
+    : m_view(nullptr)
+    , m_isActive(false)
+{
+    m_title[0] = '\0';
+}
+
+XYPadView* ScreenXYPad::view()
+{
+    if (!m_view) m_view = new (std::nothrow) XYPadView();
+    return m_view;
+}
+
+void ScreenXYPad::enter()
+{
+    XYPadView* v = view();
+    if (!v) return;
+    m_isActive = true;
+    int pad = ui_xypad_shown();
+    v->setPad(pad < 0 ? UI_XYPAD_DEFAULT : pad);
+    v->setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
+    v->enter();
+}
+
+void ScreenXYPad::leave()
+{
+    if (m_view) m_view->leave();
+    m_isActive = false;
+}
+
+void ScreenXYPad::update()
+{
+    if (!m_isActive || !m_view) return;
+    // A script showed another pad, or the one shown was closed
+    int pad = ui_xypad_shown();
+    if (pad >= 0 && pad != m_view->pad()) {
+        m_view->leave();
+        m_view->setPad(pad);
+        m_view->enter();
+        ui_request_redraw();
+        return;
+    }
+    m_view->update();
+}
+
+void ScreenXYPad::draw()
+{
+    if (m_view) m_view->draw();
+}
+
+void ScreenXYPad::onTouch(int touchId, int x, int y, bool pressed)
+{
+    if (m_isActive && m_view) m_view->onTouch(touchId, x, y, pressed);
+}
+
+void ScreenXYPad::onTouchMove(int touchId, int x, int y)
+{
+    if (m_isActive && m_view) m_view->onTouchMove(touchId, x, y);
+}
+
 const char* ScreenXYPad::getTitle()
 {
-    return "XYPad";
+    // "XYPad" for the default pad, "XYPad 2" .. for the scripts' (as the MIDI
+    // Devices screen names them)
+    int pad = (m_isActive && m_view) ? m_view->pad() : ui_xypad_shown();
+    if (pad <= UI_XYPAD_DEFAULT) return "XYPad";
+    snprintf(m_title, sizeof(m_title), "XYPad %d", pad + 1);
+    return m_title;
 }

@@ -14,11 +14,11 @@ $ui_knob_callbacks = {}
 # Tombola hit callback (single sequencer instance)
 $ui_tombola_handler = nil
 
-# The live UI::XYPad instance (single instance, like Tombola -- the C-side
-# model is a global singleton). Holds the Ruby-only per-slot state (CC
-# numbers, velocity, device, auto_midi) that ui_xypad_* on the C side does not
-# know about.
-$ui_xypad_instance = nil
+# The open UI::XYPad by pad id (UI.dispatch_event finds its built-in MIDI
+# handler and on_touch here). Each holds the Ruby-only per-slot state (CC
+# numbers, velocity, device, auto_midi) that ui_xypad_* on the C side does
+# not know about.
+$ui_xypad_instances = {}
 
 # The open UI::Keys by keyboard id (UI.dispatch_event finds on_note's here)
 $ui_keys_instances = {}
@@ -420,9 +420,9 @@ module UI
     log("Error in tombola callback: " + e.message)
   end
 
-  # Internal: dispatch an XYPad touch phase to the live instance
+  # Internal: dispatch an XYPad touch phase to its pad
   def self.dispatch_xypad_event(event)
-    pad = $ui_xypad_instance
+    pad = $ui_xypad_instances[event[:pad]]
     return unless pad
     pad.dispatch_touch(event)
   end
@@ -1160,7 +1160,16 @@ module UI
   # messages go is taken at its down, so its note off follows its note on.
   #
   #   MIDI.route(pad, MIDIDevices.amy)               # every slot plays AMY too
+  #
+  # Every UI::XYPad.new is a pad of its own (up to MAX at once): its own
+  # slots and its own transport bit -- a device of its own on the MIDI
+  # Devices screen ("XYPad 2", ...; MIDI IN only), with routes of its own.
+  # The script's pads close when it ends (or with #close). UI::XYPad.default
+  # is the firmware's pad, the built-in "XYPad" device (main_task.rb makes it
+  # at every start) whose patches are saved.
   class XYPad
+    MAX = 4            # Pads open at once (UI_XYPAD_MAX_PADS), the default included
+    DEFAULT_ID = 0
     MAX_TOUCHES = 5
     XMODE_NOTE = 0
     XMODE_CC   = 1
@@ -1170,21 +1179,16 @@ module UI
                    y_cc: nil, y_range: nil, y_invert: nil,
                    note: nil, velocity: nil,
                    channel: nil, channel_base: nil, hold: nil,
-                   auto_midi: nil, device: nil, max_touches: nil)
-      # UI._xypad_reset does not itself send MIDI (nothing in C does, see
-      # docs/XYPAD.md), so a previous instance's slots latched via Hold would
-      # otherwise go silently stuck the moment the model resets under them.
-      # Releasing them here, through the *old* instance while it is still
-      # $ui_xypad_instance, sends a proper note-off on whatever device/channel
-      # that instance was actually using.
-      prev = $ui_xypad_instance
-      if prev
-        prev.hold = false
-        UI.process
-      end
-
-      UI._xypad_reset
-      $ui_xypad_instance = self
+                   auto_midi: nil, device: nil, max_touches: nil, name: nil,
+                   _default: false)
+      @id = _default ? UI._xypad_default : UI._xypad_create
+      raise "UI::XYPad: no free pad (at most #{MAX} at once)" if @id < 0
+      @closed = false
+      @name = (name || (_default ? "XYPad" : "XYPad #{@id + 1}")).to_s
+      # A pad made now starts from the defaults (the default pad was reset
+      # when the previous script ended; this makes it so within a VM too)
+      UI._xypad_reset(@id) if _default
+      $ui_xypad_instances[@id] = self
       @on_touch = nil
       @channel_base = 0
       @slots = []
@@ -1216,6 +1220,106 @@ module UI
                        auto_midi: auto_midi, device: device)
         i += 1
       end
+      # A device of its own on the MIDI Devices screen. The default pad is
+      # the built-in "XYPad", which main_task.rb registers.
+      _register unless _default
+    end
+
+    # The firmware's pad: the built-in "XYPad" on the MIDI Devices screen,
+    # the one the XYPad screen shows unless another is shown. Keywords are
+    # UI::XYPad.new's, applied to every slot when given; it goes back to its
+    # defaults when the script ends.
+    def self.default(**opts)
+      pad = $ui_xypad_instances[DEFAULT_ID]
+      if pad.nil?
+        opts[:_default] = true
+        return new(**opts)
+      end
+      pad.configure(**opts) unless opts.empty?
+      pad
+    end
+
+    # The open pads, the default first
+    def self.all
+      $ui_xypad_instances.keys.sort.map { |id| $ui_xypad_instances[id] }
+    end
+
+    # Its id (0 for the default pad, 1.. for the others)
+    attr_reader :id
+
+    # Its name on the MIDI Devices screen
+    attr_reader :name
+
+    def default?
+      @id == DEFAULT_ID
+    end
+
+    def closed?
+      @closed
+    end
+
+    # Changes every slot at once, with UI::XYPad.new's keywords (only those
+    # given)
+    def configure(x_mode: nil, scale: nil, glide_range: nil,
+                  x_cc: nil, x_range: nil,
+                  y_cc: nil, y_range: nil, y_invert: nil,
+                  note: nil, velocity: nil,
+                  channel: nil, hold: nil,
+                  auto_midi: nil, device: nil, max_touches: nil)
+      _id   # A closed pad refuses
+      self.max_touches = max_touches unless max_touches.nil?
+      i = 0
+      while i < MAX_TOUCHES
+        configure_slot(i, x_mode: x_mode, scale: scale, glide_range: glide_range,
+                       x_cc: x_cc, x_range: x_range,
+                       y_cc: y_cc, y_range: y_range, y_invert: y_invert,
+                       note: note, velocity: velocity,
+                       channel: channel, hold: hold,
+                       auto_midi: auto_midi, device: device)
+        i += 1
+      end
+      self
+    end
+
+    # Closes the pad: its latched slots let go (their note offs go out
+    # through the built-in handler), off the MIDI Devices screen with its
+    # patches, its transport bit freed. The default pad is not closed, only
+    # reset.
+    def close
+      return nil if @closed
+      self.hold = false
+      UI.process
+      if default?
+        UI._xypad_reset(@id)
+        return nil
+      end
+      if transport_id != 0 && UI.const_defined?(:MIDIDevices)
+        begin
+          UI::MIDIDevices.unregister(self)
+        rescue => e
+          UI.log("UI::XYPad#close: " + e.message)
+        end
+      end
+      UI._xypad_destroy(@id)
+      $ui_xypad_instances.delete(@id) if $ui_xypad_instances[@id].equal?(self)
+      @closed = true
+      nil
+    end
+
+    # Internal: its id, for the C side; a closed pad's id may already be
+    # another pad's
+    def _id
+      raise "UI::XYPad: the pad is closed" if @closed
+      @id
+    end
+
+    # Internal: on the MIDI Devices screen as a device of the script's (it
+    # only sends: no MIDI OUT column)
+    def _register
+      return if transport_id == 0 || !UI.const_defined?(:MIDIDevices)
+      UI::MIDIDevices.register(self, name: @name, color: :red, output: false)
+    rescue => e
+      UI.log("UI::XYPad: not on the MIDI Devices screen: " + e.message)
     end
 
     def max_touches
@@ -1224,7 +1328,7 @@ module UI
 
     def max_touches=(n)
       @max_touches = n.to_i
-      UI._xypad_set_max_touches(@max_touches)
+      UI._xypad_set_max_touches(_id, @max_touches)
       n
     end
 
@@ -1246,6 +1350,7 @@ module UI
              note: nil, velocity: nil,
              channel: nil, hold: nil,
              auto_midi: nil, device: nil)
+      _id   # A closed pad refuses
       idx = index - 1
       return nil unless idx >= 0 && idx < MAX_TOUCHES
 
@@ -1270,7 +1375,7 @@ module UI
     def hold=(value)
       i = 0
       while i < MAX_TOUCHES
-        UI._xypad_set_i(i, :hold, value ? 1 : 0)
+        UI._xypad_set_i(_id, i, :hold, value ? 1 : 0)
         i += 1
       end
       value
@@ -1281,8 +1386,9 @@ module UI
       @on_touch = block
     end
 
-    # Bring the XYPad screen to the front
+    # The XYPad screen, showing this pad
     def show
+      UI._xypad_show(_id)
       UI.show(:xypad)
     end
 
@@ -1291,11 +1397,12 @@ module UI
     # Its bit in picoruby-midi's transport registry (0 on a board without a
     # display, where it is no transport)
     def transport_id
-      UI._xypad_transport_bit
+      @closed ? 0 : UI._xypad_transport_bit(@id)
     end
 
+    # The default pad's bit
     def self.transport_id
-      UI._xypad_transport_bit
+      UI._xypad_transport_bit(DEFAULT_ID)
     end
 
     # Nothing is sent to the pad: it only sends
@@ -1316,7 +1423,7 @@ module UI
     end
 
     def device_info
-      "XYPad"
+      @name
     end
 
     # Internal: applies the built-in MIDI handler for one slot's touch event,
@@ -1332,7 +1439,7 @@ module UI
       # changing x_mode mid-drag cannot flip how bend_semitones/x are read
       # for a touch already in progress.
       if event[:phase] == :down
-        @touch_x_mode[idx] = (UI._xypad_get_i(idx, :x_mode) == XMODE_CC) ? :cc : :note
+        @touch_x_mode[idx] = (UI._xypad_get_i(_id, idx, :x_mode) == XMODE_CC) ? :cc : :note
       end
 
       send_midi(s, @touch_x_mode[idx], idx, event) if s[:auto_midi]
@@ -1346,20 +1453,20 @@ module UI
 
     def slot_info(idx)
       s = @slots[idx]
-      x_mode = (UI._xypad_get_i(idx, :x_mode) == XMODE_CC) ? :cc : :note
+      x_mode = (UI._xypad_get_i(_id, idx, :x_mode) == XMODE_CC) ? :cc : :note
       {
         x_mode: x_mode,
-        scale: UI._xypad_get_scale(idx),
-        glide_range: UI._xypad_get_f(idx, :glide_range),
+        scale: UI._xypad_get_scale(_id, idx),
+        glide_range: UI._xypad_get_f(_id, idx, :glide_range),
         x_cc: s[:x_cc],
-        x_range: UI._xypad_get_f(idx, :x_min)..UI._xypad_get_f(idx, :x_max),
+        x_range: UI._xypad_get_f(_id, idx, :x_min)..UI._xypad_get_f(_id, idx, :x_max),
         y_cc: s[:y_cc],
-        y_range: UI._xypad_get_f(idx, :y_min)..UI._xypad_get_f(idx, :y_max),
-        y_invert: UI._xypad_get_i(idx, :y_invert) != 0,
-        note: UI._xypad_get_i(idx, :gate_note),
+        y_range: UI._xypad_get_f(_id, idx, :y_min)..UI._xypad_get_f(_id, idx, :y_max),
+        y_invert: UI._xypad_get_i(_id, idx, :y_invert) != 0,
+        note: UI._xypad_get_i(_id, idx, :gate_note),
         velocity: s[:velocity],
-        channel: UI._xypad_get_i(idx, :channel),
-        hold: UI._xypad_get_i(idx, :hold) != 0,
+        channel: UI._xypad_get_i(_id, idx, :channel),
+        hold: UI._xypad_get_i(_id, idx, :hold) != 0,
         auto_midi: s[:auto_midi],
         device: s[:device]
       }
@@ -1378,21 +1485,21 @@ module UI
       s[:device] = device unless device.nil?
       s[:auto_midi] = auto_midi unless auto_midi.nil?
 
-      UI._xypad_set_i(idx, :x_mode, x_mode == :cc ? XMODE_CC : XMODE_NOTE) unless x_mode.nil?
-      UI._xypad_set_scale(idx, scale) unless scale.nil?
-      UI._xypad_set_f(idx, :glide_range, glide_range.to_f) unless glide_range.nil?
+      UI._xypad_set_i(_id, idx, :x_mode, x_mode == :cc ? XMODE_CC : XMODE_NOTE) unless x_mode.nil?
+      UI._xypad_set_scale(_id, idx, scale) unless scale.nil?
+      UI._xypad_set_f(_id, idx, :glide_range, glide_range.to_f) unless glide_range.nil?
       unless x_range.nil?
-        UI._xypad_set_f(idx, :x_min, x_range.first.to_f)
-        UI._xypad_set_f(idx, :x_max, x_range.last.to_f)
+        UI._xypad_set_f(_id, idx, :x_min, x_range.first.to_f)
+        UI._xypad_set_f(_id, idx, :x_max, x_range.last.to_f)
       end
       unless y_range.nil?
-        UI._xypad_set_f(idx, :y_min, y_range.first.to_f)
-        UI._xypad_set_f(idx, :y_max, y_range.last.to_f)
+        UI._xypad_set_f(_id, idx, :y_min, y_range.first.to_f)
+        UI._xypad_set_f(_id, idx, :y_max, y_range.last.to_f)
       end
-      UI._xypad_set_i(idx, :y_invert, y_invert ? 1 : 0) unless y_invert.nil?
-      UI._xypad_set_i(idx, :gate_note, note) unless note.nil?
-      UI._xypad_set_i(idx, :channel, channel) unless channel.nil?
-      UI._xypad_set_i(idx, :hold, hold ? 1 : 0) unless hold.nil?
+      UI._xypad_set_i(_id, idx, :y_invert, y_invert ? 1 : 0) unless y_invert.nil?
+      UI._xypad_set_i(_id, idx, :gate_note, note) unless note.nil?
+      UI._xypad_set_i(_id, idx, :channel, channel) unless channel.nil?
+      UI._xypad_set_i(_id, idx, :hold, hold ? 1 : 0) unless hold.nil?
     end
 
     # Sends the actual MIDI for one touch phase. mode is this touch's frozen
@@ -1404,7 +1511,7 @@ module UI
     def send_midi(s, mode, idx, event)
       ch = event[:channel].to_i & 0x0F
       if event[:phase] == :down
-        @touch_route[idx] = UI._xypad_targets(0x9, 0x90 | ch)
+        @touch_route[idx] = UI._xypad_targets(_id, 0x9, 0x90 | ch)
       end
       route = @touch_route[idx]
       dev = s[:device]
@@ -1434,10 +1541,10 @@ module UI
       n = note.to_i & 0x7F
       if velocity > 0
         dev.note_on(n, velocity, channel: ch) if dev
-        UI._xypad_dispatch(route, 0x9, 0x90 | ch, n, velocity.to_i & 0x7F)
+        UI._xypad_dispatch(@id, route, 0x9, 0x90 | ch, n, velocity.to_i & 0x7F)
       else
         dev.note_off(n, 0, channel: ch) if dev
-        UI._xypad_dispatch(route, 0x8, 0x80 | ch, n, 0)
+        UI._xypad_dispatch(@id, route, 0x8, 0x80 | ch, n, 0)
       end
     end
 
@@ -1446,14 +1553,14 @@ module UI
       v = 0 if v < 0
       v = 127 if v > 127
       dev.control_change(cc, v, channel: ch) if dev
-      UI._xypad_dispatch(route, 0xB, 0xB0 | ch, cc.to_i & 0x7F, v)
+      UI._xypad_dispatch(@id, route, 0xB, 0xB0 | ch, cc.to_i & 0x7F, v)
     end
 
     # raw: -8192..8191, as MIDI::Device#pitch_bend
     def bend_msg(dev, route, ch, raw)
       dev.pitch_bend(raw, channel: ch) if dev
       u = raw + 8192
-      UI._xypad_dispatch(route, 0xE, 0xE0 | ch, u & 0x7F, (u >> 7) & 0x7F)
+      UI._xypad_dispatch(@id, route, 0xE, 0xE0 | ch, u & 0x7F, (u >> 7) & 0x7F)
     end
 
     # bend_semitones -> the raw +-8192 unit MIDI::Device#pitch_bend takes,
@@ -1461,7 +1568,7 @@ module UI
     # landed (not the slot's current one, which a script may have since
     # changed).
     def bend_raw(idx, bend_semitones)
-      range = UI._xypad_get_f(idx, :touch_glide_range)
+      range = UI._xypad_get_f(_id, idx, :touch_glide_range)
       return 0 if range <= 0.0
       raw = (bend_semitones / range * 8192).to_i
       raw = 8191 if raw > 8191

@@ -7,6 +7,7 @@
 
 struct LayoutDef;
 class KeysView;
+class XYPadView;
 
 // Shows one script-defined layout (docs/UI_LAYOUT_DSL.md): pads, knobs and
 // the XYPad / Tombola / Keys views at the rectangles Ruby resolved from its grid.
@@ -15,7 +16,7 @@ class KeysView;
 //
 // Pads and knobs are drawn and operated here, from the shared widget drawing
 // (ui_widgets.h). Each keyboard has a KeysView of its own here (any number,
-// each a keyboard of its own). The XYPad and Tombola are their own screens' views, narrowed
+// each a keyboard of its own), and each XYPad an XYPadView. The Tombola is its own screen's view, narrowed
 // to the widget's cell while this screen shows: one model each, so at most
 // one of each per layout.
 class ScreenLayout : public Screen {
@@ -40,11 +41,13 @@ private:
     char m_title[UI_LAYOUT_TITLE_LEN];
 
     // Which views are borrowed into this screen, so leave() can return them
-    bool m_hasXYPad;
     bool m_hasTombola;
     // One view per keys widget, by widget id (nullptr for the others)
     KeysView* m_keyViews[UI_LAYOUT_MAX_WIDGETS];
     KeysView* keyView(int id) const;
+    // Likewise one view per xypad widget
+    XYPadView* m_xyViews[UI_LAYOUT_MAX_WIDGETS];
+    XYPadView* xyView(int id) const;
     bool m_hasTempo;
     bool m_hasSequencer;
     bool m_hasTimer;

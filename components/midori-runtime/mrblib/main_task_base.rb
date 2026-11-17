@@ -274,6 +274,12 @@ def setup_midi_devices
   if keys.transport_id != 0
     md.register_builtin(:keys, "Keys", keys.transport_id, color: :yellow) { keys }
   end
+  # Likewise the firmware's XYPad (UI::XYPad.default): the built-in "XYPad",
+  # MIDI IN only. A script's UI::XYPad.new are pads of their own.
+  xypad = UI::XYPad.default
+  if xypad.transport_id != 0
+    md.register_builtin(:xypad, "XYPad", xypad.transport_id, color: :red, output: false) { xypad }
+  end
   # /sd/plugins: after the built-ins, before the saved patches are routed
   load_plugins
   md.boot

@@ -273,7 +273,8 @@ end
 
 - 1 枚あたり約 2.5KB（`LayoutDef`、部品 32 個）。PSRAM に置けば数百枚でも問題にならないので、
   固定の上限は設けない。確保に失敗したら `UI.layout` は例外（filter のパネルは 4.2 のとおり「パネルなし」）
-- XYPad / Tombola / Keys / Tempo は画面のモデルが 1 つなので「1 レイアウトに 1 つまで」は変わらない。
+- Tombola / Tempo は画面のモデルが 1 つなので「1 レイアウトに 1 つまで」は変わらない（XYPad / Keys は
+  2026-11-18 から 1 レイアウトにいくつでも置ける。docs/XYPAD.md / docs/KEYS.md）。
   表示中だけ借りるので、複数のレイアウトがそれぞれ持つのは今までどおり可
 - UI_LAYOUT_DSL.md の 9 章 D 系（最大 4）と UI_NAVIGATION.md の 3.1（「最大 4」）は実装時に書き換える
 

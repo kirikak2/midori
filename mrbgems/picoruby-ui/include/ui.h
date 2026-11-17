@@ -34,7 +34,8 @@ typedef struct {
     uint8_t knob_index;  /* For knob change events (0-based) */
     bool knob_final;     /* For knob change events */
     float knob_value;    /* For knob change events */
-    uint8_t xypad_slot;    /* For XYPad touch events (0-based) */
+    uint8_t xypad_pad;     /* For XYPad touch events: which pad (UI::XYPad id) */
+    uint8_t xypad_slot;    /* ...0-based */
     uint8_t xypad_phase;   /* 0=down 1=move 2=up */
     uint8_t xypad_channel;
     uint8_t xypad_note;
@@ -155,6 +156,7 @@ int   picoruby_ui_layout_add_envelope(int x, int y, int w, int h, const char *la
                                       bool notify);
 int   picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h);
 int   picoruby_ui_layout_add_keys(int x, int y, int w, int h, int keys_id);
+int   picoruby_ui_layout_add_xypad(int x, int y, int w, int h, int pad_id);
 bool  picoruby_ui_layout_commit(void);
 void  picoruby_ui_layout_delete(int slot);
 bool  picoruby_ui_layout_pad_state(int slot, int id);
@@ -201,21 +203,24 @@ void  picoruby_ui_tombola_receive(int cin, int b1, int b2, int b3);
  * X meaning (scale + glide, or a raw CC), Y range, channel and hold flag.
  * Parameters are string-keyed like Tombola's so this bridge stays fixed in
  * size; see ui_common.h for the accepted names. index is 0-based. */
-void    picoruby_ui_xypad_reset(void);
-void    picoruby_ui_xypad_set_max_touches(int n);
-int     picoruby_ui_xypad_get_max_touches(void);
-bool    picoruby_ui_xypad_set_f(int index, const char *name, float value);
-bool    picoruby_ui_xypad_set_i(int index, const char *name, int value);
-float   picoruby_ui_xypad_get_f(int index, const char *name);
-int     picoruby_ui_xypad_get_i(int index, const char *name);
-void    picoruby_ui_xypad_set_scale(int index, const uint8_t *notes, int len);
-/* Writes up to max_len notes into out, returns how many. */
-int     picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len);
+int     picoruby_ui_xypad_default(void);
+int     picoruby_ui_xypad_create(void);
+void    picoruby_ui_xypad_destroy(int pad);
+void    picoruby_ui_xypad_set_shown(int pad);
+void    picoruby_ui_xypad_reset(int pad);
+void    picoruby_ui_xypad_set_max_touches(int pad, int n);
+int     picoruby_ui_xypad_get_max_touches(int pad);
+bool    picoruby_ui_xypad_set_f(int pad, int index, const char *name, float value);
+bool    picoruby_ui_xypad_set_i(int pad, int index, const char *name, int value);
+float   picoruby_ui_xypad_get_f(int pad, int index, const char *name);
+int     picoruby_ui_xypad_get_i(int pad, int index, const char *name);
+void    picoruby_ui_xypad_set_scale(int pad, int index, const uint8_t *notes, int len);
+int     picoruby_ui_xypad_get_scale(int pad, int index, uint8_t *out, int max_len);
 /* The XYPad as a transport that only sends: its bit, where a message from it
  * would be routed, and one message along those routes (filters included) */
-int     picoruby_ui_xypad_transport_bit(void);
-int     picoruby_ui_xypad_targets(int cin, int b1);
-void    picoruby_ui_xypad_dispatch(int route, int cin, int b1, int b2, int b3);
+int     picoruby_ui_xypad_transport_bit(int pad);
+int     picoruby_ui_xypad_targets(int pad, int cin, int b1);
+void    picoruby_ui_xypad_dispatch(int pad, int route, int cin, int b1, int b2, int b3);
 
 /* Keys: the on-screen keyboard, also a picoruby-midi transport
  * (docs/KEYS.md). Parameters are string-keyed like Tombola's; see
@@ -306,6 +311,7 @@ int  picoruby_ui_mididev_register(const char *key, const char *name, int bit,
 bool picoruby_ui_mididev_unregister(int bit);
 /* Mark built-in `key` as only sending: no MIDI OUT column */
 void picoruby_ui_mididev_set_no_out(const char *key);
+void picoruby_ui_mididev_set_no_out_bit(int bit);
 bool picoruby_ui_mididev_activate(const char *key, int bit);
 int  picoruby_ui_mididev_count(void);
 /* Copies entry `index`: its bit, flags (1 built-in, 2 standby), key and name */

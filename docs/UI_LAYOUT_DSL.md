@@ -237,7 +237,7 @@ end
 |---|---|---|---|
 | `pad` | 上限内で任意 | 40x32px | |
 | `knob` | 上限内で任意 | 56x56px | リング半径はセルの短辺から決める |
-| `xypad` | **1** | 96x64px | C 側のモデル（5 スロット）がシングルトン |
+| `xypad` | 上限内で任意 | 96x64px | それぞれ別のパッド（docs/XYPAD.md。2026-11-18 まで 1 つ）。同じパッドを 2 回は置けない |
 | `tombola` | **1** | 96x96px | 物理モデルがシングルトン |
 | `keys` | 上限内で任意 | 120x48px | それぞれ別の鍵盤（docs/KEYS.md。2026-11-18 まで 1 つ）。同じ鍵盤を 2 回は置けない |
 | `tempo` | **1** | 120x72px | Tempo 画面（docs/TEMPO.md）をセルに。画面オブジェクトが 1 つ |
@@ -344,7 +344,8 @@ kick.state               # => true / false
   そのため Pads 画面の個数（CoreS3 6 / 大画面 12）に縛られずに並べられる
 - `UI::XYPad.new` / `UI::Tombola.new` も従来どおり専用画面で使える。
   レイアウトの `xypad` は内部で `UI::XYPad.new` を呼び、表示先を部品の矩形にする。
-  シングルトンなので、レイアウトに置いた XYPad と XYPad 画面は**同じモデルを映す**
+  2026-11-18 からは `UI::XYPad.new` のたびに別のパッドなので、XYPad 画面が映すのは `show` したパッド（既定は
+  `UI::XYPad.default`）。同じパッドを映したいときは `pad:` で渡す
 - `UI::SCREEN_LAYOUT = 9` を追加する（`ui_screen_index_t` の末尾に追加。既存番号は変えない）。
   画面番号は 1 つで、どのレイアウトを映すかは画面内の状態として持つ。`UI.show(:layout)` は
   最後に表示したレイアウトを出す
@@ -457,8 +458,8 @@ struct {
 ```
 
 - ノブの変化は**部品ごとに 1 通に間引く**（`ui_knob_event_post` と同じ上書き規則）
-- XYPad / Tombola はシングルトンなので既存の `UI_EVENT_XYPAD_TOUCH` / `UI_EVENT_TOMBOLA_HIT`
-  をそのまま使う
+- XYPad / Tombola は既存の `UI_EVENT_XYPAD_TOUCH` / `UI_EVENT_TOMBOLA_HIT` をそのまま使う
+  （XYPad は 2026-11-18 からパッドが複数あり、イベントにパッドの id が載る）
 - Ruby 側は `$ui_widget_callbacks[id]` からブロックを引いて呼ぶ。例外は既存と同じく
   `UI.log` に出して握りつぶす
 
@@ -526,12 +527,13 @@ seq.pattern(1, "x...x...x...x...")
 - **プラグインのレイアウト**（2026-10-30）: プラグイン（`/sd/plugins/*.rb` / `*.mrb`。
   docs/MIDI_FILTER_REGISTRY.md §5）で `UI.layout(...)` を定義すると Home のタイルになる。プラグインは
   どのモードでも読まれるので、レイアウトのプラグインは先頭で `return unless $midori_mode == :ui` として
-  UI モードだけにする（画面はスクリプトのもの。XYPad のモデルも 1 つ）。
+  UI モードだけにする（画面はスクリプトのもの）。
   書き方: ループと `show` を書かない（ブロックは UI モードのループの `UI.process` で走り、レイアウト表示中は
   10 ms 周期）。起動のたびに読まれるので、Script のパッチ（`midi_out=`）・ルート・テンポなどを書き換えない
-  （つなぎ方は MIDI Devices 画面のパッチに任せる）。XYPad / Tombola はモデルが 1 つなので、
-  `/sd/plugins` 全体でそれぞれ 1 ファイルだけに置く。鍵盤は `UI::Keys.new` のたびに別の鍵盤
-  （MIDI Devices にも別の機器として出る）なので、パッチを保存したいものは `UI::Keys.default` を `keys:` で渡す。（2026-10-30 の途中までは `/sd/layouts` だった。）
+  （つなぎ方は MIDI Devices 画面のパッチに任せる）。Tombola はモデルが 1 つなので、
+  `/sd/plugins` 全体で 1 ファイルだけに置く。鍵盤と XYPad は `UI::Keys.new` / `UI::XYPad.new` のたびに別の
+  鍵盤・パッド（MIDI Devices にも別の機器として出る）なので、パッチを保存したいものは `UI::Keys.default` /
+  `UI::XYPad.default` を `keys:` / `pad:` で渡す。（2026-10-30 の途中までは `/sd/layouts` だった。）
 
 - **検証のタイミング**: 4.7 の違反は「ブロックを抜けたとき」ではなく、その部品を置いた時点で
   `ArgumentError` になる。どちらにしても例外が出たレイアウトは C 側へ何も送らず、
@@ -540,9 +542,10 @@ seq.pattern(1, "x...x...x...x...")
   `value = v`（ブロックも呼ぶ）と `set_value(v, notify: false)`（表示だけ）に分けた。
   `send`（Object#send と衝突）は `send_value` にした
 - **XYPad / Tombola のインスタンス**: `xypad` / `tombola` は既定で `UI::XYPad.new` /
-  `UI::Tombola.new` を呼ぶ。どちらもモデルが 1 つしかないので、2 つのレイアウトにそれぞれ
-  `xypad` を書くと**後から定義した方の設定で上書きされる**。設定を保ったまま置くには
-  `xypad pad: my_pad` / `tombola tombola: my_tombola` で既存のインスタンスを渡す
+  `UI::Tombola.new` を呼ぶ。Tombola はモデルが 1 つしかないので、2 つのレイアウトにそれぞれ
+  `tombola` を書くと**後から定義した方の設定で上書きされる**。設定を保ったまま置くには
+  `tombola tombola: my_tombola` で既存のインスタンスを渡す。XYPad は 2026-11-18 から `UI::XYPad.new` のたびに
+  別のパッドで（レイアウトが作ったパッドは定義し直し・`delete` で閉じる）、既存のパッドは `xypad pad: my_pad` で渡す
 - **ビューの借用**: レイアウトが表示されている間、XYPad / Tombola の画面オブジェクトの描画・
   タッチ領域を部品のセルに狭め（`setArea()`）、離れるときに全画面へ戻す（`resetArea()`）。
   モデルも描画コードも 1 つのまま。Tombola のプレイエリアはセルに収まる最大の正方形

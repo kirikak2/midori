@@ -225,7 +225,7 @@ module UI
     }
 
     # Only one of these per layout: the C side holds a single model of each
-    SINGLETONS = [:xypad, :tombola, :tempo, :sequencer, :timer]
+    SINGLETONS = [:tombola, :tempo, :sequencer, :timer]
 
     # One grid level of a definition: its cells, its named areas, and which
     # cells are taken (overlap is an error).
@@ -354,9 +354,15 @@ module UI
               to: to, env: env })
       end
 
-      # Keywords are UI::XYPad.new's. pad: hands over an existing instance
-      # instead (no reset of its slots).
+      # Keywords are UI::XYPad.new's (a pad of the layout's own, closed when
+      # the layout is redefined or deleted). pad: hands over an existing
+      # instance instead. Any number per layout, each a different pad.
       def xypad(col: nil, row: nil, area: nil, id: nil, pad: nil, **opts)
+        if pad
+          @pads_given ||= []
+          raise ArgumentError, "the same XYPad twice in one layout" if @pads_given.any? { |p| p.equal?(pad) }
+          @pads_given << pad
+        end
         add(:xypad, col, row, area, id, nil, { instance: pad, opts: opts })
       end
 
@@ -505,7 +511,7 @@ module UI
     # just is not showable.
     def commit(specs)
       clear_callbacks
-      close_owned_keys
+      close_owned
       @widgets = []
       @ids = {}
       live = UI._layout_begin(@slot, @title)
@@ -548,7 +554,7 @@ module UI
     def delete
       UI._layout_delete(@slot) if @live
       clear_callbacks
-      close_owned_keys
+      close_owned
       @live = false
       $ui_layouts.delete(@title)
       nil
@@ -556,11 +562,11 @@ module UI
 
     private
 
-    # The keyboards made from keys keywords (not handed over with keys:) go
-    # with the definition that made them
-    def close_owned_keys
-      (@owned_keys || []).each { |k| k.close }
-      @owned_keys = []
+    # The keyboards and XYPads made from keywords (not handed over with
+    # keys: / pad:) go with the definition that made them
+    def close_owned
+      (@owned || []).each { |k| k.close }
+      @owned = []
     end
 
     def clear_callbacks
@@ -611,8 +617,12 @@ module UI
         register(UI::Envelope.new(self, id, v, pr[:max_time], pr[:to], pr[:env],
                                   spec[:block]))
       when :xypad
-        pad = pr[:instance] || UI::XYPad.new(**pr[:opts])
-        UI._layout_add_view(KIND_XYPAD, x, y, w, h) if live
+        pad = pr[:instance]
+        unless pad
+          pad = UI::XYPad.new(**pr[:opts])
+          @owned << pad
+        end
+        UI._layout_add_xypad(x, y, w, h, pad.id) if live
         pad
       when :tombola
         t = pr[:instance] || UI::Tombola.new(**pr[:opts])
@@ -622,7 +632,7 @@ module UI
         k = pr[:instance]
         unless k
           k = UI::Keys.new(**pr[:opts])
-          @owned_keys << k
+          @owned << k
         end
         UI._layout_add_keys(x, y, w, h, k.id) if live
         k

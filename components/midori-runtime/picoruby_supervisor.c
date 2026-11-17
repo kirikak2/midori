@@ -363,13 +363,14 @@ static void reset_ui_state(void)
     extern void ui_pad_clear_all(void);
     extern void ui_knob_clear_all(void);
     extern void ui_event_init(void);
-    extern void ui_xypad_reset(void);
+    extern void ui_xypad_cleanup(void);
     ui_pad_clear_all();
-    // Drops every XYPad slot, including ones latched by Hold. This does not
-    // itself send MIDI (nothing in C does, see docs/XYPAD.md) -- any latched
-    // note is silenced by the existing All Sound Off / All Notes Off sweep
-    // this same stop path already sends across every channel.
-    ui_xypad_reset();
+    // Closes the script's XYPads and drops every slot of the default one,
+    // including ones latched by Hold. This does not itself send MIDI (nothing
+    // in C does, see docs/XYPAD.md) -- any latched note is silenced by the
+    // existing All Sound Off / All Notes Off sweep this same stop path
+    // already sends across every channel.
+    ui_xypad_cleanup();
     // Knobs hold no notes, so there is nothing to silence -- but the previous
     // script's labels and banks must not be left on screen.
     ui_knob_clear_all();

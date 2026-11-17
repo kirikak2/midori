@@ -119,8 +119,9 @@ module UI
       # @param device [MIDI::Device, Object] a MIDI::Device or its transport
       # @param name [String] shown on the screen
       # @param color [Symbol, Integer, nil] colour of its patches
+      # @param output [Boolean] false for one that only sends (no MIDI OUT column)
       # @return [MIDI::Device]
-      def register(device, name: nil, color: nil)
+      def register(device, name: nil, color: nil, output: true)
         dev = _wrap(device)
         bit = MIDI.route_bit(dev)
         raise ArgumentError, "UI::MIDIDevices.register: not a registered MIDI transport" if bit == 0
@@ -132,6 +133,7 @@ module UI
           raise "UI::MIDIDevices.register: the device list is full"
         end
         $ui_mididev_devices[bit] = dev
+        UI._mididev_no_out_bit(bit) unless output
         MIDI._set_source_info(bit, key == "" ? nil : key.to_sym, dev)
         dev
       end

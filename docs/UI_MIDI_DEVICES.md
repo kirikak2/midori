@@ -246,7 +246,7 @@ md.midi_in  ||= MIDIDevices.usb_midi_host
 | `keys` | UI::Keys.default | ○ | ○ | 起動時に決まる | `main_task.rb` の `setup_midi_devices` が既定の鍵盤を登録（2026-11-18 まで C が自分で登録）。スクリプトの `UI::Keys.new` はそれぞれスクリプトの機器（「Keys 2」など） |
 | `tempo` | UI::Tempo | ○ | — | 起動時に決まる | MIDI クロックを送る（docs/TEMPO.md）。UI の初期化時に C 側（`ui_tempo.cpp`）が登録。OUT の列は出さない（`UI_MIDIDEV_NO_OUT`） |
 | `tombola` | UI::Tombola | ○ | ○ | 起動時に決まる | 衝突のノートを送り、受けたノートをボールにする（docs/TOMBOLA.md）。UI の初期化時に C 側（`screen_tombola.cpp`）が登録 |
-| `xypad` | UI::XYPad | ○ | — | 起動時に決まる | Ruby の内蔵ハンドラが鳴らすメッセージをルートへも流す（docs/XYPAD.md）。UI の初期化時に C 側（`ui_common.cpp`）が登録。送るだけ（`UI_MIDIDEV_NO_OUT`） |
+| `xypad` | UI::XYPad | ○ | — | 起動時に決まる | Ruby の内蔵ハンドラが鳴らすメッセージをルートへも流す（docs/XYPAD.md）。既定のパッド（`UI::XYPad.default`）を `main_task.rb` の `setup_midi_devices` が登録（2026-11-18 まで C が登録）。送るだけ（`UI_MIDIDEV_NO_OUT`）。スクリプトの `UI::XYPad.new` はそれぞれスクリプトの機器（「XYPad 2」など、`register(..., output: false)`） |
 
 - UART / USB Device は起動時に工場ブロックを呼んで初期化する（スクリプトモードでも。
   以前は初回アクセスまで遅延していた）。UART は初期化しないと接続扱いにならず受信もしないため

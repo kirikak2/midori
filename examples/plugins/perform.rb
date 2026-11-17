@@ -26,12 +26,13 @@
 #
 # 起動時に読むファイルなので、ループも show も書かない（ブロックは UI モードの
 # ループの UI.process で走る）。ノブの値も、回すまでは送らない。
-# XYPad はモデルが 1 つなので、/sd/plugins で xypad を置くのはこのファイルだけにする。
+# UI::XYPad.new は毎回別のパッド（MIDI Devices にも別の機器として出る）。ここでは既定のパッド
+# （UI::XYPad.default、MIDI Devices の「XYPad」）を使うので、つないだパッチは保存される。
 
 require 'midi'
 require 'ui'
 
-# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad / Keys のモデルも 1 つ）
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの）
 return unless $midori_mode == :ui
 
 md = UI::MIDIDevices
@@ -49,8 +50,9 @@ perform = UI.layout("Perform", cols: [3, 1], rows: large ? [2, 2, 1] : [1, 1, 1]
     p  p
   GRID
 
-  xypad area: :xy, scale: [48, 50, 52, 55, 57, 60, 62, 64],
-        glide_range: 2, y_cc: 74, device: md.output   # 選択に追従する OUT
+  xypad area: :xy, pad: UI::XYPad.default(scale: [48, 50, 52, 55, 57, 60, 62, 64],
+                                          glide_range: 2, y_cc: 74,
+                                          device: md.output)   # 選択に追従する OUT
 
   knob area: :k1, id: :cutoff, label: "Cutoff", color: :cyan, value: 64 do |v|
     md.midi_out&.control_change(74, v.to_i, channel: ch)

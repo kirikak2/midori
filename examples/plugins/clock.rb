@@ -15,7 +15,7 @@
 require 'midi'
 require 'ui'
 
-# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad / Keys のモデルも 1 つ）
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの）
 return unless $midori_mode == :ui
 
 clock = UI.layout("Clock", cols: 4, rows: 3) do

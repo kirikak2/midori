@@ -34,6 +34,7 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->knob_index = 0;
     event->knob_final = false;
     event->knob_value = 0.0f;
+    event->xypad_pad = 0;
     event->xypad_slot = 0;
     event->xypad_phase = 0;
     event->xypad_channel = 0;
@@ -113,6 +114,7 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             break;
         case UI_EVENT_XYPAD_TOUCH:
             event->type = PICORUBY_UI_EVENT_XYPAD_TOUCH;
+            event->xypad_pad = ui_evt.data.xypad.pad;
             event->xypad_slot = ui_evt.data.xypad.slot;
             event->xypad_phase = ui_evt.data.xypad.phase;
             event->xypad_channel = ui_evt.data.xypad.channel;
@@ -437,6 +439,11 @@ int picoruby_ui_layout_add_keys(int x, int y, int w, int h, int keys_id)
     return ui_layout_add_keys(x, y, w, h, keys_id);
 }
 
+int picoruby_ui_layout_add_xypad(int x, int y, int w, int h, int pad_id)
+{
+    return ui_layout_add_xypad(x, y, w, h, pad_id);
+}
+
 bool picoruby_ui_layout_commit(void)
 {
     return ui_layout_commit();
@@ -562,60 +569,80 @@ int picoruby_ui_tombola_ball_count(void)
 
 /* XYPad */
 
-void picoruby_ui_xypad_reset(void)
+int picoruby_ui_xypad_default(void)
 {
-    ui_xypad_reset();
+    return ui_xypad_default();
 }
 
-void picoruby_ui_xypad_set_max_touches(int n)
+int picoruby_ui_xypad_create(void)
+{
+    return ui_xypad_create();
+}
+
+void picoruby_ui_xypad_destroy(int pad)
+{
+    ui_xypad_destroy(pad);
+}
+
+void picoruby_ui_xypad_set_shown(int pad)
+{
+    ui_xypad_set_shown(pad);
+}
+
+void picoruby_ui_xypad_reset(int pad)
+{
+    ui_xypad_reset(pad);
+}
+
+void picoruby_ui_xypad_set_max_touches(int pad, int n)
 {
     if (n < 0) return;
-    ui_xypad_set_max_touches((uint8_t)n);
+    ui_xypad_set_max_touches(pad, (uint8_t)n);
 }
 
-int picoruby_ui_xypad_get_max_touches(void)
+int picoruby_ui_xypad_get_max_touches(int pad)
 {
-    return ui_xypad_get_max_touches();
+    return ui_xypad_get_max_touches(pad);
 }
 
-bool picoruby_ui_xypad_set_f(int index, const char *name, float value)
-{
-    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return false;
-    return ui_xypad_set_f((uint8_t)index, name, value);
-}
-
-bool picoruby_ui_xypad_set_i(int index, const char *name, int value)
+bool picoruby_ui_xypad_set_f(int pad, int index, const char *name, float value)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return false;
-    return ui_xypad_set_i((uint8_t)index, name, value);
+    return ui_xypad_set_f(pad, (uint8_t)index, name, value);
 }
 
-float picoruby_ui_xypad_get_f(int index, const char *name)
+bool picoruby_ui_xypad_set_i(int pad, int index, const char *name, int value)
+{
+    if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return false;
+    return ui_xypad_set_i(pad, (uint8_t)index, name, value);
+}
+
+float picoruby_ui_xypad_get_f(int pad, int index, const char *name)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return 0.0f;
-    return ui_xypad_get_f((uint8_t)index, name);
+    return ui_xypad_get_f(pad, (uint8_t)index, name);
 }
 
-int picoruby_ui_xypad_get_i(int index, const char *name)
+int picoruby_ui_xypad_get_i(int pad, int index, const char *name)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return 0;
-    return ui_xypad_get_i((uint8_t)index, name);
+    return ui_xypad_get_i(pad, (uint8_t)index, name);
 }
 
-void picoruby_ui_xypad_set_scale(int index, const uint8_t *notes, int len)
+void picoruby_ui_xypad_set_scale(int pad, int index, const uint8_t *notes, int len)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return;
     if (len < 0) len = 0;
     if (len > UI_XYPAD_MAX_SCALE) len = UI_XYPAD_MAX_SCALE;
-    ui_xypad_set_scale((uint8_t)index, notes, (uint8_t)len);
+    ui_xypad_set_scale(pad, (uint8_t)index, notes, (uint8_t)len);
 }
 
-int picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len)
+int picoruby_ui_xypad_get_scale(int pad, int index, uint8_t *out, int max_len)
 {
     if (index < 0 || index >= UI_XYPAD_MAX_TOUCHES) return 0;
     if (max_len < 0) max_len = 0;
     if (max_len > UI_XYPAD_MAX_SCALE) max_len = UI_XYPAD_MAX_SCALE;
-    return ui_xypad_get_scale((uint8_t)index, out, (uint8_t)max_len);
+    return ui_xypad_get_scale(pad, (uint8_t)index, out, (uint8_t)max_len);
 }
 
 /* Keys */
@@ -680,19 +707,19 @@ void picoruby_ui_tombola_receive(int cin, int b1, int b2, int b3)
     ui_tombola_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
 }
 
-int picoruby_ui_xypad_transport_bit(void)
+int picoruby_ui_xypad_transport_bit(int pad)
 {
-    return ui_xypad_transport_bit();
+    return ui_xypad_transport_bit(pad);
 }
 
-int picoruby_ui_xypad_targets(int cin, int b1)
+int picoruby_ui_xypad_targets(int pad, int cin, int b1)
 {
-    return ui_xypad_targets((uint8_t)cin, (uint8_t)b1);
+    return ui_xypad_targets(pad, (uint8_t)cin, (uint8_t)b1);
 }
 
-void picoruby_ui_xypad_dispatch(int route, int cin, int b1, int b2, int b3)
+void picoruby_ui_xypad_dispatch(int pad, int route, int cin, int b1, int b2, int b3)
 {
-    ui_xypad_dispatch((midi_tmask_t)route, (uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
+    ui_xypad_dispatch(pad, (midi_tmask_t)route, (uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
 }
 
 void picoruby_ui_keys_receive(int id, int cin, int b1, int b2, int b3)
@@ -953,6 +980,11 @@ int picoruby_ui_mididev_register(const char *key, const char *name, int bit,
                                  int color, bool builtin)
 {
     return ui_mididev_register(key, name, (midi_tmask_t)bit, (uint16_t)color, builtin);
+}
+
+void picoruby_ui_mididev_set_no_out_bit(int bit)
+{
+    ui_mididev_set_no_out_bit((midi_tmask_t)bit);
 }
 
 void picoruby_ui_mididev_set_no_out(const char *key)

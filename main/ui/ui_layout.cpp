@@ -258,7 +258,7 @@ int ui_layout_add_envelope(int x, int y, int w, int h, const char* label,
 
 int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
 {
-    if (kind != UI_WIDGET_XYPAD && kind != UI_WIDGET_TOMBOLA
+    if (kind != UI_WIDGET_TOMBOLA
         && kind != UI_WIDGET_TEMPO && kind != UI_WIDGET_SEQUENCER
         && kind != UI_WIDGET_TIMER) return -1;
     // One of each per layout: there is one model behind each view
@@ -285,6 +285,23 @@ int ui_layout_add_keys(int x, int y, int w, int h, int keys_id)
     ui_widget_t* wd = add_widget(UI_WIDGET_KEYS, x, y, w, h, &id);
     if (!wd) return -1;
     wd->keys.id = (int8_t)keys_id;
+    return id;
+}
+
+int ui_layout_add_xypad(int x, int y, int w, int h, int pad_id)
+{
+    if (pad_id < 0 || pad_id >= UI_XYPAD_MAX_PADS) return -1;
+    // A pad is shown by one view at a time (two would share its touches)
+    if (s_building) {
+        for (int i = 0; i < s_building->count; i++) {
+            const ui_widget_t& o = s_building->widgets[i];
+            if (o.kind == UI_WIDGET_XYPAD && o.xypad.id == pad_id) return -1;
+        }
+    }
+    int id;
+    ui_widget_t* wd = add_widget(UI_WIDGET_XYPAD, x, y, w, h, &id);
+    if (!wd) return -1;
+    wd->xypad.id = (int8_t)pad_id;
     return id;
 }
 
