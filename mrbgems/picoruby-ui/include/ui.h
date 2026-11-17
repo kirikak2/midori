@@ -64,6 +64,8 @@ typedef struct {
     int8_t  seq_from;      /* ...pattern: the one before (else -1) */
     int8_t  seq_line;      /* ...step / edit, -1 for none (the whole pattern) */
     uint16_t seq_step;     /* ...step: grid step, or a realtime line's sixteenth */
+    uint8_t timer_kind;    /* For Timer events: 0 start / 1 tick / 2 finish / 3 stop */
+    uint16_t timer_remaining; /* ...seconds left */
 } picoruby_ui_event_t;
 
 /* Event type constants */
@@ -81,6 +83,7 @@ typedef struct {
 #define PICORUBY_UI_EVENT_KEY          11
 #define PICORUBY_UI_EVENT_MIDI_DEVICES 12
 #define PICORUBY_UI_EVENT_SEQUENCER    13
+#define PICORUBY_UI_EVENT_TIMER        14
 
 /* Platform-specific functions (implemented in ports/) */
 bool picoruby_ui_pop_event(picoruby_ui_event_t *event);
@@ -276,6 +279,17 @@ bool picoruby_ui_tempo_running(void);
 void picoruby_ui_tempo_tap(void);
 bool picoruby_ui_tempo_sync(void);
 void picoruby_ui_tempo_set_sync(bool on);
+
+/* Timer (docs/TIMER.md): a countdown that MIDI::Clock's Start starts while
+ * armed and that sends Stop at 0. state: 0 idle / 1 running / 2 stopped /
+ * 3 finished. by_script: armed for the script only (its end takes it back). */
+void picoruby_ui_timer_set_seconds(int seconds);
+int  picoruby_ui_timer_seconds(void);
+int  picoruby_ui_timer_remaining(void);
+int  picoruby_ui_timer_state(void);
+void picoruby_ui_timer_reset(void);
+void picoruby_ui_timer_set_armed(bool on, bool by_script);
+bool picoruby_ui_timer_armed(void);
 
 /* MIDI Devices (docs/UI_MIDI_DEVICES.md): the device list, the program's IN /
  * OUT and the saved patches. Devices are picoruby-midi transport bits; key

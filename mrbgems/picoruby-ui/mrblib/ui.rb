@@ -80,6 +80,7 @@ module UI
   SCREEN_KEYS      = 11
   SCREEN_SEQUENCER = 12
   SCREEN_BLUETOOTH = 13   # BLE-MIDI builds only (docs/BLE_MIDI.md)
+  SCREEN_TIMER     = 14   # Countdown from MIDI Start to Stop (docs/TIMER.md)
 
   # === Navigation (docs/UI_NAVIGATION.md) ===
   #
@@ -93,13 +94,15 @@ module UI
     pads: SCREEN_PADS, knobs: SCREEN_KNOBS, xypad: SCREEN_XYPAD,
     tombola: SCREEN_TOMBOLA, keys: SCREEN_KEYS, sequencer: SCREEN_SEQUENCER, layout: SCREEN_LAYOUT,
     midi_devices: SCREEN_MIDI_DEVICES, midi_info: SCREEN_MIDI_INFO, scripts: SCREEN_SCRIPTS,
-    logs: SCREEN_LOGS, settings: SCREEN_SETTINGS, bluetooth: SCREEN_BLUETOOTH
+    logs: SCREEN_LOGS, settings: SCREEN_SETTINGS, bluetooth: SCREEN_BLUETOOTH,
+    timer: SCREEN_TIMER
   }
 
   # Index -> Symbol. Screens 0 and 2 read back as :tempo and :midi_devices,
   # their current names.
   SCREEN_NAMES = [:tempo, :pads, :midi_devices, :logs, :scripts, :settings,
-                  :tombola, :knobs, :xypad, :layout, :home, :keys, :sequencer, :bluetooth]
+                  :tombola, :knobs, :xypad, :layout, :home, :keys, :sequencer, :bluetooth,
+                  :timer]
 
   # Internal: Symbol / SCREEN_* -> index, or nil
   def self.screen_index(screen)
@@ -185,6 +188,7 @@ module UI
   def self.keys;      show(:keys);      end
   def self.sequencer; show(:sequencer); end
   def self.bluetooth; show(:bluetooth); end
+  def self.timer;     show(:timer);     end
   def self.tombola;   show(:tombola);   end
   def self.midi_info; show(:midi_info); end
   def self.midi_devices; show(:midi_devices); end
@@ -341,6 +345,11 @@ module UI
     # Steps, pattern switches and screen edits (UI::Sequencer#on_*)
     if type == :sequencer
       Sequencer._dispatch(event)
+    end
+
+    # Start, each second down, time up, stopped (UI::Timer.on_*)
+    if type == :timer
+      Timer._dispatch(event)
     end
 
     handlers = $ui_handlers[type]

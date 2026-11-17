@@ -207,6 +207,7 @@ module UI
     KIND_TEMPO   = 5
     KIND_SEQUENCER = 6
     KIND_ENVELOPE = 7
+    KIND_TIMER   = 8
 
     # Below this a widget is hard to hit with a finger. Provisional numbers,
     # to be tuned on the hardware (docs/UI_LAYOUT_DSL.md D13): placing one
@@ -219,11 +220,12 @@ module UI
       keys:    [120, 48],
       tempo:   [120, 72],
       sequencer: [240, 96],
-      envelope: [120, 64]
+      envelope: [120, 64],
+      timer:   [120, 72]
     }
 
     # Only one of these per layout: the C side holds a single model of each
-    SINGLETONS = [:xypad, :tombola, :keys, :tempo, :sequencer]
+    SINGLETONS = [:xypad, :tombola, :keys, :tempo, :sequencer, :timer]
 
     # One grid level of a definition: its cells, its named areas, and which
     # cells are taken (overlap is an error).
@@ -372,6 +374,13 @@ module UI
       # source, Sync. Returns UI::Tempo.
       def tempo(col: nil, row: nil, area: nil, id: nil)
         add(:tempo, col, row, area, id, nil, {})
+      end
+
+      # The Timer screen in the cell: the time left, the time set, Play /
+      # Reset / Arm. Returns UI::Timer. seconds: sets the time; a block is
+      # UI::Timer.on_tick (and arms it, as on_tick does).
+      def timer(col: nil, row: nil, area: nil, id: nil, seconds: nil, &block)
+        add(:timer, col, row, area, id, block, { seconds: seconds })
       end
 
       # The Sequencer screen in the cell. sequencer: hands over an existing
@@ -600,6 +609,11 @@ module UI
       when :tempo
         UI._layout_add_view(KIND_TEMPO, x, y, w, h) if live
         UI::Tempo
+      when :timer
+        UI::Timer.seconds = pr[:seconds] if pr[:seconds]
+        UI::Timer.on_tick(&spec[:block]) if spec[:block]
+        UI._layout_add_view(KIND_TIMER, x, y, w, h) if live
+        UI::Timer
       when :sequencer
         s = pr[:instance] || (pr[:opts].empty? ? UI::Sequencer.current : UI::Sequencer.new(**pr[:opts]))
         UI._layout_add_view(KIND_SEQUENCER, x, y, w, h) if live

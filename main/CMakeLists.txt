@@ -46,6 +46,8 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/ui_midi_devices.cpp"
         "ui/ui_filters.cpp"
         "ui/ui_tempo.cpp"
+        "ui/ui_timer.cpp"
+        "ui/screen_timer.cpp"
         "ui/screen_script.cpp"
         "ui/screen_settings.cpp"
         "ui/screen_tombola.cpp"

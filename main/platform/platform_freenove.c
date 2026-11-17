@@ -929,3 +929,40 @@ void ui_tempo_set_sync(bool on)
 {
     (void)on;
 }
+
+// Timer stubs (docs/TIMER.md) - no UI, so no timer: UI::Timer reads back the
+// defaults and never counts.
+
+void ui_timer_set_seconds(int seconds)
+{
+    (void)seconds;
+}
+
+int ui_timer_seconds(void)
+{
+    return UI_TIMER_DEFAULT_SECONDS;
+}
+
+int ui_timer_remaining(void)
+{
+    return UI_TIMER_DEFAULT_SECONDS;
+}
+
+int ui_timer_state(void)
+{
+    return UI_TIMER_IDLE;
+}
+
+void ui_timer_reset(void)
+{
+}
+
+void ui_timer_set_armed(bool on, bool by_script)
+{
+    (void)on; (void)by_script;
+}
+
+bool ui_timer_armed(void)
+{
+    return false;
+}

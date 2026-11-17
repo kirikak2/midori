@@ -59,7 +59,7 @@ Main → Pads → MIDI Info → Logs → Scripts → Settings → Tombola → Kn
 | グループ | 画面（シンボル） | タイルの表示 |
 |---|---|---|
 | 演奏 | `:pads` `:knobs` `:xypad` `:tombola` `:sequencer`（将来）、スクリプトが定義したレイアウト（1 つにつき 1 枚、数の上限なし） | 画面名（レイアウトは title）+ 状態（Tombola 再生中、Knobs の現在バンクなど） |
-| テンポ / 状態 | `:tempo` `:midi_devices` | Tempo は BPM、MIDI Devices は機器の一覧とパッチ（docs/UI_MIDI_DEVICES.md） |
+| テンポ / 状態 | `:tempo` `:timer` `:midi_devices` | Tempo は BPM、Timer は残り時間（docs/TIMER.md）、MIDI Devices は機器の一覧とパッチ（docs/UI_MIDI_DEVICES.md） |
 | システム | `:scripts` `:logs` `:settings` | Scripts は実行中のスクリプト名 |
 
 ```
@@ -129,6 +129,7 @@ CoreS3 (content 320x180)                Tab5 (content 1280x620)
 | `:xypad` | XYPad | `UI::SCREEN_XYPAD` |
 | `:tombola` | Tombola | `UI::SCREEN_TOMBOLA` |
 | `:keys` | Keys（画面の鍵盤、docs/KEYS.md） | `UI::SCREEN_KEYS`（2026-10-18 追加。値 11） |
+| `:timer` | Timer（カウントダウン、docs/TIMER.md） | `UI::SCREEN_TIMER`（2026-11-17 追加。値 14） |
 | `:layout` | 現在のレイアウト | `UI::SCREEN_LAYOUT`（新設） |
 | `:midi_devices`（旧 `:midi_info` も可） | MIDI Devices | `UI::SCREEN_MIDI_DEVICES`（= `UI::SCREEN_MIDI_INFO`） |
 | `:scripts` | Scripts | `UI::SCREEN_SCRIPTS` |

@@ -54,6 +54,7 @@ static const char* screenName(ui_screen_index_t screen)
         case UI_SCREEN_KEYS:      return "Keys";
         case UI_SCREEN_SEQUENCER: return "Sequencer";
         case UI_SCREEN_BLUETOOTH: return "Bluetooth";
+        case UI_SCREEN_TIMER:     return "Timer";
         default:                  return "";
     }
 }

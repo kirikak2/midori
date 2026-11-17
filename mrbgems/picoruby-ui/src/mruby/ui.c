@@ -112,6 +112,7 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
         case PICORUBY_UI_EVENT_KEY:           type = MRB_SYM(key); break;
         case PICORUBY_UI_EVENT_MIDI_DEVICES:  type = MRB_SYM(midi_devices); break;
         case PICORUBY_UI_EVENT_SEQUENCER:     type = MRB_SYM(sequencer); break;
+        case PICORUBY_UI_EVENT_TIMER:         type = MRB_SYM(timer); break;
         default:                              type = MRB_SYM(unknown); break;
     }
 
@@ -255,6 +256,19 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
             HSET(from, event.seq_from >= 0 ? mrb_fixnum_value(event.seq_from) : mrb_nil_value());
             HSET(line, event.seq_line >= 0 ? mrb_fixnum_value(event.seq_line) : mrb_nil_value());
             HSET(step, mrb_fixnum_value(event.seq_step));
+            break;
+        }
+        case PICORUBY_UI_EVENT_TIMER: {
+            /* UI::Timer hands these to on_tick / on_start / on_finish / on_stop */
+            mrb_sym kind;
+            switch (event.timer_kind) {
+                case 0:  kind = MRB_SYM(start);  break;
+                case 1:  kind = MRB_SYM(tick);   break;
+                case 2:  kind = MRB_SYM(finish); break;
+                default: kind = MRB_SYM(stop);   break;
+            }
+            HSET(kind, mrb_symbol_value(kind));
+            HSET(remaining, mrb_fixnum_value(event.timer_remaining));
             break;
         }
         default:
@@ -1573,6 +1587,66 @@ mrb_ui_tempo_set_sync(mrb_state *mrb, mrb_value self)
 }
 
 /* ------------------------------------------------------------------------
+ * Timer (docs/TIMER.md)
+ * ------------------------------------------------------------------------ */
+
+/* UI._timer_seconds -> Integer: the time set */
+static mrb_value
+mrb_ui_timer_seconds(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_timer_seconds());
+}
+
+/* UI._timer_set_seconds(seconds) */
+static mrb_value
+mrb_ui_timer_set_seconds(mrb_state *mrb, mrb_value self)
+{
+    mrb_value seconds;
+    mrb_get_args(mrb, "o", &seconds);
+    picoruby_ui_timer_set_seconds(val_to_i(seconds));
+    return mrb_nil_value();
+}
+
+/* UI._timer_remaining -> Integer */
+static mrb_value
+mrb_ui_timer_remaining(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_timer_remaining());
+}
+
+/* UI._timer_state -> 0 idle / 1 running / 2 stopped / 3 finished */
+static mrb_value
+mrb_ui_timer_state(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_timer_state());
+}
+
+/* UI._timer_reset */
+static mrb_value
+mrb_ui_timer_reset(mrb_state *mrb, mrb_value self)
+{
+    picoruby_ui_timer_reset();
+    return mrb_nil_value();
+}
+
+/* UI._timer_set_armed(bool): armed for this script, or disarmed */
+static mrb_value
+mrb_ui_timer_set_armed(mrb_state *mrb, mrb_value self)
+{
+    mrb_value on;
+    mrb_get_args(mrb, "o", &on);
+    picoruby_ui_timer_set_armed(mrb_test(on), true);
+    return mrb_nil_value();
+}
+
+/* UI._timer_armed -> bool */
+static mrb_value
+mrb_ui_timer_armed(mrb_state *mrb, mrb_value self)
+{
+    return mrb_bool_value(picoruby_ui_timer_armed());
+}
+
+/* ------------------------------------------------------------------------
  * MIDI Devices (docs/UI_MIDI_DEVICES.md)
  * ------------------------------------------------------------------------ */
 
@@ -1865,6 +1939,15 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_tempo_tap,              mrb_ui_tempo_tap,              MRB_ARGS_NONE());
     DEF(_tempo_sync,             mrb_ui_tempo_sync,             MRB_ARGS_NONE());
     DEF(_tempo_set_sync,         mrb_ui_tempo_set_sync,         MRB_ARGS_REQ(1));
+
+    /* Timer */
+    DEF(_timer_seconds,          mrb_ui_timer_seconds,          MRB_ARGS_NONE());
+    DEF(_timer_set_seconds,      mrb_ui_timer_set_seconds,      MRB_ARGS_REQ(1));
+    DEF(_timer_remaining,        mrb_ui_timer_remaining,        MRB_ARGS_NONE());
+    DEF(_timer_state,            mrb_ui_timer_state,            MRB_ARGS_NONE());
+    DEF(_timer_reset,            mrb_ui_timer_reset,            MRB_ARGS_NONE());
+    DEF(_timer_set_armed,        mrb_ui_timer_set_armed,        MRB_ARGS_REQ(1));
+    DEF(_timer_armed,            mrb_ui_timer_armed,            MRB_ARGS_NONE());
 
     /* MIDI Devices */
     DEF(_mididev_register,       mrb_ui_mididev_register,       MRB_ARGS_REQ(5));
