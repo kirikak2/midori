@@ -104,6 +104,14 @@ a.set_color(64, [255, 0, 0])
 check "colours are per keyboard", [true, nil], [!a.color(64).nil?, b.color(64)]
 check "UI::Keys.all", [0, 1, 2], UI::Keys.all.map { |k| k.id }
 
+# --- Range -----------------------------------------------------------------------
+
+b.octaves = 7
+check "up to 7 octaves", 7, b.octaves
+check_raises("8 octaves is too many", "octaves must be 1..7") { b.octaves = 8 }
+check_raises("0 octaves is too few", "octaves must be 1..7") { b.octaves = 0 }
+b.octaves = 2
+
 # --- Events reach their own keyboard -------------------------------------------
 
 got = []

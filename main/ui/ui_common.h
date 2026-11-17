@@ -642,7 +642,7 @@ int ui_xypad_touch_move(int touch_id, int x, int y, int content_x, int content_y
 int ui_xypad_touch_up(int touch_id);
 
 // --- Keys -------------------------------------------------------------------
-// An on-screen keyboard of 1 to 4 octaves (13 to 49 keys) that is also a
+// An on-screen keyboard of 1 to 7 octaves (13 to 85 keys) that is also a
 // picoruby-midi transport (docs/KEYS.md). Implemented in ui_keys.cpp.
 //
 // As a source, a touched key sends its note on / off from the UI task, in C,
@@ -663,8 +663,8 @@ int ui_xypad_touch_up(int touch_id);
 #define UI_KEYS_MAX           8
 #define UI_KEYS_DEFAULT       0
 #define UI_KEYS_MIN_OCTAVES   1
-#define UI_KEYS_MAX_OCTAVES   4
-#define UI_KEYS_MAX_KEYS     (UI_KEYS_MAX_OCTAVES * 12 + 1)   // 49
+#define UI_KEYS_MAX_OCTAVES   7
+#define UI_KEYS_MAX_KEYS     (UI_KEYS_MAX_OCTAVES * 12 + 1)   // 85
 
 typedef enum {
     KEYS_VELOCITY_FIXED = 0,   // Always the configured velocity

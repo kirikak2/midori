@@ -65,7 +65,7 @@ export const WIDGETS = {
   keys: {
     label: 'Keys', size: [4, 1], single: true,
     props: [
-      f('octaves', 'Octaves', 'int', 2, { min: 1, max: 4 }),
+      f('octaves', 'Octaves', 'int', 2, { min: 1, max: 7 }),
       f('low', 'Lowest note', 'int', 48, { min: 0, max: 108 }),
       f('channel', 'Channel (0-15)', 'int', 0, { min: 0, max: 15 }),
       f('velocity', 'Velocity', 'choice', '100', { choices: ['100', '127', 'position'] }),

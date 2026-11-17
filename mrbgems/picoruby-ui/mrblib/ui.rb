@@ -1472,7 +1472,7 @@ module UI
 
   # Keys - an on-screen keyboard that is also a MIDI transport
   #
-  # 1 to 4 octaves (13 to 49 keys) across its area, played with up to five
+  # 1 to 7 octaves (13 to 85 keys) across its area, played with up to five
   # fingers. See docs/KEYS.md.
   #
   #   keys = UI::Keys.new(octaves: 2, low: 48, device: MIDIDevices.amy)
@@ -1500,11 +1500,11 @@ module UI
     MAX = 8            # Keyboards open at once (UI_KEYS_MAX), the default included
     DEFAULT_ID = 0
     MIN_OCTAVES = 1
-    MAX_OCTAVES = 4
+    MAX_OCTAVES = 7
     VELOCITY_FIXED    = 0
     VELOCITY_POSITION = 1
 
-    # @param octaves [Integer] 1..4 (13..49 keys)
+    # @param octaves [Integer] 1..7 (13..85 keys)
     # @param low [Integer] lowest note; moved down to a white key if black
     # @param channel [Integer] MIDI channel the keys play on (0-15)
     # @param velocity [Integer, Symbol] 1..127, or :position (softer at the

@@ -210,7 +210,9 @@ void KeysView::render(LovyanGFX* g, int ox, int oy)
         int x, y, w, h;
         keyRect(n, x, y, w, h);
         g->fillRect(x - ox, y - oy, w, h, ui_keys::key_fill(m_id, n));
-        g->drawRect(x - ox, y - oy, w, h, UI_COLOR_DARKGRAY);
+        // The outline would cover most of a narrow black key (7 octaves on
+        // CoreS3 leaves it 3px wide)
+        if (w >= 6) g->drawRect(x - ox, y - oy, w, h, UI_COLOR_DARKGRAY);
     }
 }
 

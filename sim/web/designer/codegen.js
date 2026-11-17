@@ -310,7 +310,7 @@ function instanceMethods(project, M) {
     out.push(
       `  def self.keys`,
       `    @keys ||= begin`,
-      `      k = UI::Keys.new(octaves: ${int(p.octaves, 1, 4)}, low: ${int(p.low, 0, 108)}, channel: ${int(p.channel, 0, 15)}, ` +
+      `      k = UI::Keys.new(octaves: ${int(p.octaves, 1, 7)}, low: ${int(p.low, 0, 108)}, channel: ${int(p.channel, 0, 15)}, ` +
         `velocity: ${vel}, device: ${devId(project, p.device)}_transport)`,
       ...colors.map(c => `      k.set_color(${notes(c.notes)}, ${sym(c.color || 'blue')})`),
       `      k`,

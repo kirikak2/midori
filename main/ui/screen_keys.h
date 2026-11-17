@@ -7,7 +7,7 @@
 
 #include <M5Unified.h>
 
-// One keyboard on screen (docs/KEYS.md): 1 to 4 octaves filling its area, up
+// One keyboard on screen (docs/KEYS.md): 1 to 7 octaves filling its area, up
 // to five fingers at once. The view does the geometry -- which key is under a
 // finger, where each key is drawn -- and the drawing, for the keyboard whose
 // id it is given; the model and everything MIDI is ui_keys.cpp.
