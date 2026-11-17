@@ -36,13 +36,28 @@ SRCS=(
   mrbgems/picoruby-amy/ports/esp32/amy_port.c
   "${AMY_SRCS[@]}"
 )
+# An object is rebuilt when its source or any header it included is newer.
+# The compiler lists the headers in <obj>.d (-MMD). Only comparing the source
+# left objects built against an old header in the library: when
+# UI_SCREEN_COUNT grew, a stale screen_main.cpp.o read UIManager's BPM at the
+# old offset and a swipe on the Tempo started from 20.
+stale() {
+  local o=$1 s=$2
+  [[ -f "$o" && -f "$o.d" && ! "$s" -nt "$o" ]] || return 0
+  local deps
+  deps=$(sed -e 's/^[^:]*://' -e 's/\\$//' "$o.d" | tr -s ' \t' '\n' | grep -v '^$')
+  # A header that is gone (renamed) counts as changed
+  while IFS= read -r d; do [[ -f "$d" ]] || return 0; done <<< "$deps"
+  [[ -n $(xargs -r -d '\n' -I{} find {} -maxdepth 0 -newer "$o" <<< "$deps" | head -1) ]]
+}
 OBJS=()
 for s in "${SRCS[@]}"; do
   o="$OUT/obj/$(echo "$s" | sed 's|[/.]|_|g').o"
-  if [[ ! -f "$o" || "$s" -nt "$o" ]]; then
-    if [[ "$s" == $AMY_DIR/* ]]; then emcc -std=gnu11 $OPT -w "${INC[@]}" -c "$s" -o "$o"   # third party: its own warnings
-    elif [[ "$s" == *.c ]]; then emcc -std=gnu11 $OPT "${INC[@]}" -c "$s" -o "$o"
-    else em++ -std=gnu++17 $OPT "${INC[@]}" -c "$s" -o "$o"; fi
+  if stale "$o" "$s"; then
+    DEP=(-MMD -MF "$o.d")
+    if [[ "$s" == $AMY_DIR/* ]]; then emcc -std=gnu11 $OPT -w "${INC[@]}" "${DEP[@]}" -c "$s" -o "$o"   # third party: its own warnings
+    elif [[ "$s" == *.c ]]; then emcc -std=gnu11 $OPT "${INC[@]}" "${DEP[@]}" -c "$s" -o "$o"
+    else em++ -std=gnu++17 $OPT "${INC[@]}" "${DEP[@]}" -c "$s" -o "$o"; fi
   fi
   OBJS+=("$o")
 done
