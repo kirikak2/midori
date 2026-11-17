@@ -843,10 +843,20 @@ pad.show
 
 詳細は [docs/KEYS.md](docs/KEYS.md) を参照。
 
-1〜4 オクターブ（13〜49 鍵）の鍵盤を指（最大 5 本）で弾く。`UI::Keys` は
+1〜7 オクターブ（13〜85 鍵。2026-11-18 まで 4 まで）の鍵盤を指（最大 5 本）で弾く。`UI::Keys` は
 **picoruby-midi のトランスポートでもあり**、`MIDI.route` の送信元にも宛先にもなる。
 宛先として受けたノートは鍵を光らせる（光る MIDI 鍵盤のように押下状態を表示）。
-レイアウトでは `keys`（1 レイアウトに 1 つ）。Tab5 のビルドのみ確認、**実機未確認**。
+レイアウトでは `keys`（いくつでも）。Tab5 のビルドのみ確認、**実機未確認**。
+
+- **`UI::Keys.new` のたびに別の鍵盤**（2026-11-18）。C は鍵盤のスロット表（`UI_KEYS_MAX` = 8、
+  [main/ui/ui_keys.cpp](main/ui/ui_keys.cpp)）で、`ui_keys_*` は先頭に鍵盤の id を取る。鍵盤ごとに
+  トランスポートのビットを持ち、`UI::Keys.new` が MIDI Devices にスクリプトの機器（「Keys 2」など）として
+  登録する（入力も出力も鍵盤ごとにパッチできる）。スロット 0 = `UI::Keys.default` は `main_task.rb` の
+  `setup_midi_devices` が内蔵機器 `keys` として登録（以前は C が自分で登録）。スクリプトの鍵盤は
+  `close` かスクリプトの終わりで閉じる（ビットを返す）。閉じたモデルは解放しない（UI タスクがまだ読むため）
+- 描画とタッチは `KeysView`（[main/ui/screen_keys.h](main/ui/screen_keys.h)）。Keys 画面は `ui_keys_shown()`
+  （`keys.show` で選んだ鍵盤）を映し、レイアウトは keys の部品ごとに 1 つ持つ（`ui_layout_add_keys`）。
+  レイアウトがキーワードから作った鍵盤は、定義し直し・`delete` で閉じる。ホストテスト `ruby test/keys_test.rb`
 
 - **発音は C++ 側**（[main/ui/ui_keys.cpp](main/ui/ui_keys.cpp)、UI タスク）。送信先は
   `device:`（`out_mask`）と、鍵盤のビットから張られたルートの宛先（`MIDI_route_targets()`）の OR を
@@ -854,7 +864,7 @@ pad.show
 - 送信元にするため picoruby-midi に `MIDI_route_set_source()` / `MIDI_route_sources()` /
   `MIDI_route_targets()` を追加した。`MIDI.route` は送信元を `MIDI._route_sources` で検査する
   （従来は USB Host / UART 固定の `ROUTE_SOURCES`）
-- モデルは初回使用時に calloc（約 1KB、.bss に置かない）し、そのときトランスポート登録表に載る
+- モデルはスロットの初回使用時に calloc（約 1.5KB、.bss に置かない）し、開くたびにトランスポート登録表に載る
 - 色の優先順位は 押下 > 光（チャンネル色）> 鍵ごとの色 > 白鍵 / 黒鍵の地の色。
   色は Symbol / RGB565 / `[r, g, b]`、`UI.rgb(r, g, b)` を追加
 - 画面は `UI_SCREEN_KEYS`（= 11、末尾に追加）、Ruby は `:keys` / `UI.keys` / `UI::SCREEN_KEYS`
@@ -960,7 +970,8 @@ Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-
   保存済みパッチを張り直す（スーパーバイザが切り替えのたびにルートを消すため）。NVS のキーは
   ビットではなく `usb_host` / `uart` / `usb_dev` / `amy` / `keys`（AMY と Keys のビットは起動ごとに変わる）
 - **AMY は standby**（ビット 0）で登録し、保存済みパッチ・画面で必要になったとき初めて起動する
-  （起動するとオーディオ・I2S・Tab5 の USB パッドに触るため）。画面の鍵盤は C（`ui_keys.cpp`）が自分で登録
+  （起動するとオーディオ・I2S・Tab5 の USB パッドに触るため）。画面の鍵盤（`UI::Keys.default`）も
+  `setup_midi_devices` が `register_builtin(:keys)` する
 - 画面で変えたパッチ（両端が内蔵）は即 NVS に保存。スクリプトの `patch` / `midi_in=` は
   スクリプト限り（`UI::MIDIDevices.save` で保存）
 - Ruby のホストテスト: `ruby test/midi_devices_test.rb`（picoruby-ui ディレクトリで）
@@ -1024,7 +1035,7 @@ end.show
   ヒープ確保）、画面は [main/ui/screen_layout.cpp](main/ui/screen_layout.cpp)
 - pad / knob の描画は [main/ui/ui_widgets.cpp](main/ui/ui_widgets.cpp) で Pads / Knobs 画面と共有
 - XYPad / Tombola はそれぞれの画面オブジェクトを、表示中だけ部品のセルに狭めて借りる
-  （`setArea()` / `resetArea()`）。モデルが 1 つなので 1 レイアウトに 1 つまで
+  （`setArea()` / `resetArea()`）。モデルが 1 つなので 1 レイアウトに 1 つまで。鍵盤は部品ごとに `KeysView` を持つので何個でも
 - 全画面合成中の `ui_strip::paint()` は自分の矩形にもクリップする（隣の部品へのはみ出し防止）
 - 新しい部品（Sequencer など）は `ui_widget_kind_t` に足し、`ScreenLayout` に描画とタッチを、
   `ui_layout.rb` の `Builder` にメソッドを足す

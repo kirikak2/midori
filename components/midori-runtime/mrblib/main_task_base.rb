@@ -267,7 +267,13 @@ def setup_midi_devices
     bit = ble ? ble.transport_id : 0
     md.register_builtin(:ble_dev, "BLE", bit, color: :blue) { MIDIDevices.ble_midi_device } if bit != 0
   end
-  # (The on-screen keys list themselves when their model is made.)
+  # The firmware's on-screen keyboard (UI::Keys.default, the first of them):
+  # the built-in "Keys", whose patches are saved. A script's UI::Keys.new are
+  # keyboards of their own, listed as the script's devices.
+  keys = UI::Keys.default
+  if keys.transport_id != 0
+    md.register_builtin(:keys, "Keys", keys.transport_id, color: :yellow) { keys }
+  end
   # /sd/plugins: after the built-ins, before the saved patches are routed
   load_plugins
   md.boot

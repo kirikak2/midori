@@ -16,18 +16,19 @@
 # その機器の行から Keys の列へパッチする（画面のパッチは保存される）。
 #
 # 起動時に読むファイルなので、ループも show も書かない。
-# 画面の鍵盤はモデルが 1 つなので、/sd/plugins で keys を置くのはこのファイルだけにする。
+# UI::Keys.new は毎回別の鍵盤（MIDI Devices にも別の機器として出る）。ここでは既定の鍵盤
+# （UI::Keys.default、MIDI Devices の「Keys」）を使うので、つないだパッチは保存される。
 
 require 'midi'
 require 'ui'
 
-# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad / Keys のモデルも 1 つ）
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad のモデルも 1 つ）
 return unless $midori_mode == :ui
 
 md = UI::MIDIDevices
 
 # 先に作って keys: で渡す（パッドのブロックから参照するため）
-kb = UI::Keys.new(octaves: 3, low: 48, device: md.output)
+kb = UI::Keys.default(octaves: 3, low: 48, device: md.output)
 
 UI.layout("Play", cols: 4, rows: [1, 2]) do
   knob col: 0, row: 0, label: "Cutoff", color: :cyan, value: 64 do |v|

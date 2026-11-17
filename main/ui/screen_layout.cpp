@@ -12,6 +12,7 @@
 #include <M5Unified.h>
 #include <cstring>
 #include <cstdio>
+#include <new>
 
 // Global instance
 static ScreenLayout s_screenLayout;
@@ -35,12 +36,12 @@ ScreenLayout::ScreenLayout()
     , m_version(0)
     , m_hasXYPad(false)
     , m_hasTombola(false)
-    , m_hasKeys(false)
     , m_hasTempo(false)
     , m_hasSequencer(false)
     , m_hasTimer(false)
 {
     m_title[0] = '\0';
+    for (int i = 0; i < UI_LAYOUT_MAX_WIDGETS; i++) m_keyViews[i] = nullptr;
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
         m_touchOwner[i] = -1;
         m_ownerKind[i] = 0;
@@ -60,7 +61,6 @@ void ScreenLayout::attachViews(LayoutDef* def)
 {
     m_hasXYPad = false;
     m_hasTombola = false;
-    m_hasKeys = false;
     m_hasTempo = false;
     m_hasSequencer = false;
     m_hasTimer = false;
@@ -76,10 +76,13 @@ void ScreenLayout::attachViews(LayoutDef* def)
             getScreenTombola().setArea(wd.x, wd.y, wd.w, wd.h);
             getScreenTombola().enter();
             m_hasTombola = true;
-        } else if (wd.kind == UI_WIDGET_KEYS && !m_hasKeys) {
-            getScreenKeys().setArea(wd.x, wd.y, wd.w, wd.h);
-            getScreenKeys().enter();
-            m_hasKeys = true;
+        } else if (wd.kind == UI_WIDGET_KEYS && i < UI_LAYOUT_MAX_WIDGETS) {
+            KeysView* v = new (std::nothrow) KeysView();
+            if (!v) continue;
+            v->setId(wd.keys.id);
+            v->setArea(wd.x, wd.y, wd.w, wd.h);
+            v->enter();
+            m_keyViews[i] = v;
         } else if (wd.kind == UI_WIDGET_TEMPO && !m_hasTempo) {
             getScreenMain().setArea(wd.x, wd.y, wd.w, wd.h);
             getScreenMain().enter();
@@ -110,10 +113,11 @@ void ScreenLayout::detachViews()
         getScreenTombola().resetArea();
         m_hasTombola = false;
     }
-    if (m_hasKeys) {
-        getScreenKeys().leave();
-        getScreenKeys().resetArea();
-        m_hasKeys = false;
+    for (int i = 0; i < UI_LAYOUT_MAX_WIDGETS; i++) {
+        if (!m_keyViews[i]) continue;
+        m_keyViews[i]->leave();
+        delete m_keyViews[i];
+        m_keyViews[i] = nullptr;
     }
     if (m_hasTempo) {
         getScreenMain().leave();
@@ -130,6 +134,11 @@ void ScreenLayout::detachViews()
         getScreenTimer().resetArea();
         m_hasTimer = false;
     }
+}
+
+KeysView* ScreenLayout::keyView(int id) const
+{
+    return (id >= 0 && id < UI_LAYOUT_MAX_WIDGETS) ? m_keyViews[id] : nullptr;
 }
 
 // --- Geometry & drawing -----------------------------------------------------
@@ -248,7 +257,7 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
             if (m_ownerKind[t] == UI_WIDGET_XYPAD) {
                 getScreenXYPad().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_KEYS) {
-                getScreenKeys().onTouch(t, m_lastX[t], m_lastY[t], false);
+                if (KeysView* v = keyView(id)) v->onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_SEQUENCER) {
                 getScreenSequencer().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_TIMER) {
@@ -310,7 +319,9 @@ void ScreenLayout::update()
     // The views animate on their own schedule, inside their cells
     if (m_hasXYPad) getScreenXYPad().update();
     if (m_hasTombola) getScreenTombola().update();
-    if (m_hasKeys) getScreenKeys().update();
+    for (int i = 0; i < UI_LAYOUT_MAX_WIDGETS; i++) {
+        if (m_keyViews[i]) m_keyViews[i]->update();
+    }
     if (m_hasTempo) getScreenMain().update();
     if (m_hasSequencer) getScreenSequencer().update();
     if (m_hasTimer) getScreenTimer().update();
@@ -329,7 +340,9 @@ void ScreenLayout::draw()
 
     if (m_hasXYPad) getScreenXYPad().draw();
     if (m_hasTombola) getScreenTombola().draw();
-    if (m_hasKeys) getScreenKeys().draw();
+    for (int i = 0; i < UI_LAYOUT_MAX_WIDGETS; i++) {
+        if (m_keyViews[i]) m_keyViews[i]->draw();
+    }
     if (m_hasTempo) getScreenMain().draw();
     if (m_hasSequencer) getScreenSequencer().draw();
     if (m_hasTimer) getScreenTimer().draw();
@@ -423,7 +436,9 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
 
         if (kind == UI_WIDGET_XYPAD) getScreenXYPad().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_TOMBOLA) getScreenTombola().onTouch(touchId, x, y, true);
-        if (kind == UI_WIDGET_KEYS) getScreenKeys().onTouch(touchId, x, y, true);
+        if (kind == UI_WIDGET_KEYS) {
+            if (KeysView* v = keyView(id)) v->onTouch(touchId, x, y, true);
+        }
         if (kind == UI_WIDGET_TEMPO) getScreenMain().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_SEQUENCER) getScreenSequencer().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_TIMER) getScreenTimer().onTouch(touchId, x, y, true);
@@ -444,7 +459,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         return;
     }
     if (kind == UI_WIDGET_KEYS) {
-        getScreenKeys().onTouch(touchId, x, y, false);
+        if (KeysView* v = keyView(id)) v->onTouch(touchId, x, y, false);
         return;
     }
     if (kind == UI_WIDGET_TEMPO) {
@@ -508,7 +523,7 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
     if (kind == UI_WIDGET_KEYS) {
         m_lastX[touchId] = x;
         m_lastY[touchId] = y;
-        getScreenKeys().onTouchMove(touchId, x, y);
+        if (KeysView* v = keyView(id)) v->onTouchMove(touchId, x, y);
         return;
     }
     if (kind == UI_WIDGET_TEMPO) {

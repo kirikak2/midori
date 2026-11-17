@@ -123,10 +123,17 @@ check_raises("one sequencer per layout", "only one sequencer") do
   end
 end
 
-check_raises("one keys per layout", "only one keys") do
+specs, = UI::Layout.resolve(CORES3, cols: 2) do
+  keys col: 0
+  keys col: 1, octaves: 1
+end
+check "any number of keyboards per layout", [:keys, :keys], specs.map { |sp| sp[:kind] }
+
+shared_kb = Object.new
+check_raises("the same keyboard twice", "the same keyboard twice") do
   UI::Layout.resolve(CORES3, cols: 2) do
-    keys col: 0
-    keys col: 1
+    keys col: 0, keys: shared_kb
+    keys col: 1, keys: shared_kb
   end
 end
 
@@ -266,7 +273,16 @@ module UI
     @next_id += 1
     @next_id - 1
   end
+  def self._layout_add_keys(*a); $calls << [:keys] + a; @next_id += 1; @next_id - 1; end
   def self._layout_commit; $calls << [:commit]; true; end
+  # A keyboard per UI::Keys.new, as the C side hands out
+  class Keys
+    @@next = 1
+    attr_reader :id
+    def initialize(**opts); @id = @@next; @@next += 1; @closed = false; end
+    def close; @closed = true; end
+    def closed?; @closed; end
+  end
   class Tempo; end
   def self._layout_delete(slot); $calls << [:delete, slot]; end
   def self._lw_knob_value(slot, id); $knob_values[[slot, id]] || 0.0; end
@@ -320,14 +336,16 @@ check "an unchanged value does not", false, perform[:cutoff].set_value(64)
 check "...and does not call it", [], hits
 
 $calls.clear
-given = Object.new
+given = UI::Keys.new
 played = UI.layout("Play", rows: 2, gap: 0) do
   pad row: 0, label: "Oct+"
   keys row: 1, keys: given
 end
-check "keys goes over as a view of kind 4", [:view, 4, 0, 110, 320, 90], $calls[2]
+check "keys goes over with its keyboard's id", [:keys, 0, 110, 320, 90, given.id], $calls[2]
 check "a given keyboard is used as is", true, played.widgets[1].equal?(given)
 played.delete
+check "a given keyboard stays open", false, given.closed?
+
 
 $calls.clear
 clocked = UI.layout("Clock", cols: 2, gap: 0) do
@@ -465,6 +483,18 @@ op.sent.clear
 shaped.send_all
 check "send_all sends every envelope", [[1.0, 2.0, 0.25, 4.0]], op.sent
 shaped.delete
+
+$calls.clear
+two = UI.layout("Two", cols: 2, gap: 0) do
+  keys col: 0, id: :a, octaves: 1
+  keys col: 1, id: :b
+end
+check "two keyboards, two ids", true, two[:a].id != two[:b].id
+check "...each its own add", [:keys, :keys], $calls[1, 2].map { |c| c[0] }
+first = two[:a]
+UI.layout("Two", cols: 1, gap: 0) { pad label: "x" }
+check "redefining closes the keyboards the layout made", true, first.closed?
+two.delete
 
 puts "#{$passed} passed, #{$failed} failed"
 # A bare mruby has no exit; the failure count above is the result there

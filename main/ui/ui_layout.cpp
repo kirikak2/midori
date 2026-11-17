@@ -258,7 +258,7 @@ int ui_layout_add_envelope(int x, int y, int w, int h, const char* label,
 
 int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
 {
-    if (kind != UI_WIDGET_XYPAD && kind != UI_WIDGET_TOMBOLA && kind != UI_WIDGET_KEYS
+    if (kind != UI_WIDGET_XYPAD && kind != UI_WIDGET_TOMBOLA
         && kind != UI_WIDGET_TEMPO && kind != UI_WIDGET_SEQUENCER
         && kind != UI_WIDGET_TIMER) return -1;
     // One of each per layout: there is one model behind each view
@@ -269,6 +269,23 @@ int ui_layout_add_view(uint8_t kind, int x, int y, int w, int h)
     }
     int id;
     return add_widget(kind, x, y, w, h, &id) ? id : -1;
+}
+
+int ui_layout_add_keys(int x, int y, int w, int h, int keys_id)
+{
+    if (keys_id < 0 || keys_id >= UI_KEYS_MAX) return -1;
+    // A keyboard is shown by one view at a time (its dirty bits go to one)
+    if (s_building) {
+        for (int i = 0; i < s_building->count; i++) {
+            const ui_widget_t& o = s_building->widgets[i];
+            if (o.kind == UI_WIDGET_KEYS && o.keys.id == keys_id) return -1;
+        }
+    }
+    int id;
+    ui_widget_t* wd = add_widget(UI_WIDGET_KEYS, x, y, w, h, &id);
+    if (!wd) return -1;
+    wd->keys.id = (int8_t)keys_id;
+    return id;
 }
 
 bool ui_layout_commit(void)
