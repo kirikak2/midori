@@ -62,6 +62,8 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->seq_from = -1;
     event->seq_line = -1;
     event->seq_step = 0;
+    event->timer_kind = 0;
+    event->timer_remaining = 0;
 
     /* Convert event type and data */
     switch (ui_evt.type) {
@@ -150,6 +152,11 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->seq_from = ui_evt.data.seq.from;
             event->seq_line = ui_evt.data.seq.line;
             event->seq_step = ui_evt.data.seq.step;
+            break;
+        case UI_EVENT_TIMER:
+            event->type = PICORUBY_UI_EVENT_TIMER;
+            event->timer_kind = ui_evt.data.timer.kind;
+            event->timer_remaining = ui_evt.data.timer.remaining;
             break;
         default:
             break;
@@ -874,6 +881,43 @@ bool picoruby_ui_tempo_sync(void)
 void picoruby_ui_tempo_set_sync(bool on)
 {
     ui_tempo_set_sync(on);
+}
+
+/* --- Timer --- */
+
+void picoruby_ui_timer_set_seconds(int seconds)
+{
+    ui_timer_set_seconds(seconds);
+}
+
+int picoruby_ui_timer_seconds(void)
+{
+    return ui_timer_seconds();
+}
+
+int picoruby_ui_timer_remaining(void)
+{
+    return ui_timer_remaining();
+}
+
+int picoruby_ui_timer_state(void)
+{
+    return ui_timer_state();
+}
+
+void picoruby_ui_timer_reset(void)
+{
+    ui_timer_reset();
+}
+
+void picoruby_ui_timer_set_armed(bool on, bool by_script)
+{
+    ui_timer_set_armed(on, by_script);
+}
+
+bool picoruby_ui_timer_armed(void)
+{
+    return ui_timer_armed();
 }
 
 /* --- MIDI Devices --- */

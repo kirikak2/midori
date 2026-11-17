@@ -907,6 +907,23 @@ Tab5 の実機で画面表示と Play / Stop による再生を確認（2026-10-
   （押下で TAP を数え、スワイプになったらその TAP を取り消す）
 - 画面は `setArea()` の矩形に収まるよう配置を計算し、レイアウト DSL の `tempo`（`UI_WIDGET_TEMPO`）でセルに置ける
 
+## Timer（UI::Timer / 2026-11-17）
+
+詳細は [docs/TIMER.md](docs/TIMER.md)。Tab5 のビルド・Web シミュレーター・ホストテストのみで**実機未確認**。
+
+- 時間をセットし、**`MIDI::Clock` の Start（Tempo の Play / `UI::Tempo.start`）でカウントダウン**、0 秒で
+  `MIDI_Clock_stop()`（Tempo のルートへ MIDI Stop）。0 より前の Stop はその残りで止まる。Start のたびにセットした時間から数え直す。
+  外部機器から受けた FA では始まらない
+- **arm していないと Start を無視する**（忘れたタイマーが演奏を止めないため）。画面の Arm / Play で arm（スクリプトをまたいで残る）、
+  Ruby の `on_tick` などのブロック・`armed = true` はスクリプト限り（`ui_timer_cleanup` が外す）
+- カウントダウンは [main/ui/ui_timer.cpp](main/ui/ui_timer.cpp)。Start / Stop は UI タスクの `ui_timer_tick()` が
+  `MIDI_Clock_is_running()` の変化で見て、秒は esp_timer の one-shot を開始時刻 + n 秒に張り直して刻む。状態は portMUX で守る
+- 1 秒ごとに `UI_EVENT_TIMER`（start / tick / finish / stop、残り秒数）→ Ruby の `UI::Timer.on_tick { |sec| }`（Start で
+  セットした時間、以後 0 まで）/ `on_start` / `on_finish` / `on_stop`。ブロックは 1 つずつ（呼び直すと置き換え）
+- 画面 [main/ui/screen_timer.cpp](main/ui/screen_timer.cpp)（`UI_SCREEN_TIMER` = 14、`:timer` / `UI.timer`）、
+  レイアウトの `timer`（`UI_WIDGET_TIMER` = 8、Tempo と同じく画面をセルに借りる）
+- ホストテスト: `ruby test/timer_test.rb`（picoruby-ui ディレクトリで）。サンプル [examples/timer.rb](examples/timer.rb)
+
 ## MIDI Devices 画面（UI::MIDIDevices / 2026-10-22）
 
 詳細は [docs/UI_MIDI_DEVICES.md](docs/UI_MIDI_DEVICES.md)。旧 MIDI Info 画面（`UI_SCREEN_MIDI_INFO` = 2 を

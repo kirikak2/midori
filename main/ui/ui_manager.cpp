@@ -11,6 +11,7 @@
 #include "screen_keys.h"
 #include "screen_sequencer.h"
 #include "screen_bluetooth.h"
+#include "screen_timer.h"
 #include "ble_midi_settings.h"
 #include "screen_home.h"
 #include "screen_layout.h"
@@ -145,6 +146,7 @@ void UIManager::initScreens()
     m_screens[UI_SCREEN_HOME] = &getScreenHome();
     m_screens[UI_SCREEN_KEYS] = &getScreenKeys();
     m_screens[UI_SCREEN_SEQUENCER] = &getScreenSequencer();
+    m_screens[UI_SCREEN_TIMER] = &getScreenTimer();
     // Only with BLE-MIDI in the build (a missing screen is left out of Home)
     m_screens[UI_SCREEN_BLUETOOTH] = ble_midi_settings_available() ? &getScreenBluetooth() : nullptr;
 }
@@ -237,6 +239,7 @@ void UIManager::update()
     ui_tombola_tick();
     ui_mididev_tick();
     ui_tempo_tick();
+    ui_timer_tick();     // After the tempo: Start / Stop of the clock start / halt it
 
     // The loading box changed (or came and went): repaint it with the rest
     if (m_loadingSerial != m_loadingDrawn) {
@@ -476,6 +479,7 @@ static const struct { ui_screen_index_t screen; uint8_t group; } MENU_ORDER[] = 
     { UI_SCREEN_TOMBOLA,   MENU_GROUP_PERFORM },
     { UI_SCREEN_LAYOUT,    MENU_GROUP_PERFORM },
     { UI_SCREEN_MAIN,      MENU_GROUP_STATE },
+    { UI_SCREEN_TIMER,     MENU_GROUP_STATE },
     { UI_SCREEN_MIDI_INFO, MENU_GROUP_STATE },
     { UI_SCREEN_BLUETOOTH, MENU_GROUP_STATE },
     { UI_SCREEN_SCRIPTS,   MENU_GROUP_SYSTEM },
@@ -715,6 +719,7 @@ void UIManager::scriptCleanup()
     ui_keys_cleanup();
     ui_seq_cleanup();
     ui_mididev_cleanup();
+    ui_timer_cleanup();
     // A VM that died loading /sd must not leave the screen locked
     if (m_loading) setLoading(nullptr, 0, 0);
     m_needsRedraw = true;

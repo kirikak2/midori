@@ -172,7 +172,7 @@ extern "C" {
 #endif
 
 // Screen count
-#define UI_SCREEN_COUNT         14
+#define UI_SCREEN_COUNT         15
 
 // Screen indices
 // New screens must be appended: Ruby's UI::SCREEN_* constants mirror these
@@ -192,6 +192,7 @@ typedef enum {
     UI_SCREEN_KEYS,       // On-screen keyboard (docs/KEYS.md)
     UI_SCREEN_SEQUENCER,  // Step / realtime sequencer (docs/SEQUENCER.md)
     UI_SCREEN_BLUETOOTH,  // BLE-MIDI device / host (docs/BLE_MIDI.md); BLE builds only
+    UI_SCREEN_TIMER,      // Countdown started by MIDI Start, ends with Stop (docs/TIMER.md)
 } ui_screen_index_t;
 
 // What caused a screen switch, reported with UI_EVENT_SCREEN_CHANGE
@@ -379,6 +380,7 @@ typedef enum {
     UI_EVENT_KEY,             // A key of the on-screen keyboard went down / up
     UI_EVENT_MIDI_DEVICES,    // MIDI Devices: selection, patch or connection changed
     UI_EVENT_SEQUENCER,       // Sequencer: a step, a pattern switch, an edit on its screen
+    UI_EVENT_TIMER,           // Timer: started, a second down, finished, stopped (ui_timer_event_t)
 } ui_event_type_t;
 
 typedef enum {
@@ -466,6 +468,10 @@ typedef struct {
             int8_t  line;    // Step / edit (-1: the whole pattern)
             uint16_t step;   // Step: grid step, or a realtime line's sixteenth
         } seq;
+        struct {
+            uint8_t kind;        // For UI_EVENT_TIMER: ui_timer_event_t
+            uint16_t remaining;  // Seconds left after this event
+        } timer;
     } data;
 } ui_event_t;
 
@@ -813,6 +819,7 @@ typedef enum {
     UI_WIDGET_TEMPO,      // Likewise the Tempo screen's
     UI_WIDGET_SEQUENCER,  // Likewise the Sequencer's
     UI_WIDGET_ENVELOPE,   // ADSR editor (docs/ENVELOPE.md)
+    UI_WIDGET_TIMER,      // The Timer screen's view (docs/TIMER.md)
 } ui_widget_kind_t;
 
 // An ADSR envelope edited by dragging its breakpoints (docs/ENVELOPE.md).
@@ -1102,6 +1109,45 @@ void    ui_tempo_tap(void);           // One tap of TAP tempo
 void    ui_tempo_tap_reset(void);     // Forget the taps so far
 bool    ui_tempo_sync(void);          // Following the external clock
 void    ui_tempo_set_sync(bool on);   // Only takes when an external clock is there
+
+// --- Timer ------------------------------------------------------------------------
+// A countdown (docs/TIMER.md). While armed, MIDI::Clock's Start (the Tempo
+// screen's Play, UI::Tempo.start, MIDI::Clock.start) starts it from the time
+// set; every second down is a UI_EVENT_TIMER for Ruby, and at 0 it stops the
+// clock (MIDI Stop to wherever the tempo is routed). A Stop before that halts
+// it where it is. One per process. Implemented in ui_timer.cpp.
+#define UI_TIMER_MAX_SECONDS  5999   // 99:59
+#define UI_TIMER_DEFAULT_SECONDS 60
+
+typedef enum {
+    UI_TIMER_IDLE = 0,        // Showing the time set, waiting for Start
+    UI_TIMER_RUNNING,         // Counting down
+    UI_TIMER_STOPPED,         // A Stop came before 0: halted at the time left
+    UI_TIMER_FINISHED,        // Reached 0 (and sent Stop)
+} ui_timer_state_t;
+
+typedef enum {
+    UI_TIMER_EVENT_START = 0, // Counting from the time set (remaining = it)
+    UI_TIMER_EVENT_TICK,      // One second down (remaining = what is left, 0 last)
+    UI_TIMER_EVENT_FINISH,    // Reached 0; Stop has been sent
+    UI_TIMER_EVENT_STOP,      // Stopped by a Stop before 0
+} ui_timer_event_t;
+
+void ui_timer_tick(void);             // UI task, every pass: watches the clock's Start / Stop
+void ui_timer_set_seconds(int seconds);   // 1..UI_TIMER_MAX_SECONDS; the next run if one is going
+int  ui_timer_seconds(void);
+int  ui_timer_remaining(void);
+int  ui_timer_state(void);            // ui_timer_state_t
+// Back to the time set. While counting, starts the countdown over (the clock
+// keeps running).
+void ui_timer_reset(void);
+// Armed: Start starts the countdown. by_script: armed from Ruby, which a
+// script's end takes back; the screen's Arm button is the user's and stays.
+// Disarming clears both.
+void ui_timer_set_armed(bool on, bool by_script);
+bool ui_timer_armed(void);
+uint32_t ui_timer_serial(void);       // Changes with anything the screen shows
+void ui_timer_cleanup(void);          // A script ended
 
 // UI Event queue functions (for Ruby hooks)
 void ui_event_init(void);

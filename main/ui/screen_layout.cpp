@@ -5,6 +5,7 @@
 #include "screen_keys.h"
 #include "screen_sequencer.h"
 #include "screen_main.h"
+#include "screen_timer.h"
 #include "ui_layout.h"
 #include "ui_strip.h"
 #include "ui_widgets.h"
@@ -25,7 +26,7 @@ static constexpr float SWEEP_RAD = UI_KNOB_ANGLE_SWEEP * 3.14159265f / 180.0f;
 static bool isView(uint8_t kind)
 {
     return kind == UI_WIDGET_XYPAD || kind == UI_WIDGET_TOMBOLA || kind == UI_WIDGET_KEYS
-        || kind == UI_WIDGET_TEMPO || kind == UI_WIDGET_SEQUENCER;
+        || kind == UI_WIDGET_TEMPO || kind == UI_WIDGET_SEQUENCER || kind == UI_WIDGET_TIMER;
 }
 
 ScreenLayout::ScreenLayout()
@@ -37,6 +38,7 @@ ScreenLayout::ScreenLayout()
     , m_hasKeys(false)
     , m_hasTempo(false)
     , m_hasSequencer(false)
+    , m_hasTimer(false)
 {
     m_title[0] = '\0';
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
@@ -61,6 +63,7 @@ void ScreenLayout::attachViews(LayoutDef* def)
     m_hasKeys = false;
     m_hasTempo = false;
     m_hasSequencer = false;
+    m_hasTimer = false;
     if (!def) return;
 
     for (int i = 0; i < def->count; i++) {
@@ -85,6 +88,10 @@ void ScreenLayout::attachViews(LayoutDef* def)
             getScreenSequencer().setArea(wd.x, wd.y, wd.w, wd.h);
             getScreenSequencer().enter();
             m_hasSequencer = true;
+        } else if (wd.kind == UI_WIDGET_TIMER && !m_hasTimer) {
+            getScreenTimer().setArea(wd.x, wd.y, wd.w, wd.h);
+            getScreenTimer().enter();
+            m_hasTimer = true;
         }
     }
 }
@@ -117,6 +124,11 @@ void ScreenLayout::detachViews()
         getScreenSequencer().leave();
         getScreenSequencer().resetArea();
         m_hasSequencer = false;
+    }
+    if (m_hasTimer) {
+        getScreenTimer().leave();
+        getScreenTimer().resetArea();
+        m_hasTimer = false;
     }
 }
 
@@ -239,6 +251,8 @@ void ScreenLayout::releaseTouches(LayoutDef* def, bool notify)
                 getScreenKeys().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_SEQUENCER) {
                 getScreenSequencer().onTouch(t, m_lastX[t], m_lastY[t], false);
+            } else if (m_ownerKind[t] == UI_WIDGET_TIMER) {
+                getScreenTimer().onTouch(t, m_lastX[t], m_lastY[t], false);
             } else if (m_ownerKind[t] == UI_WIDGET_TEMPO) {
                 // Acts on press only: nothing held
             } else {
@@ -299,6 +313,7 @@ void ScreenLayout::update()
     if (m_hasKeys) getScreenKeys().update();
     if (m_hasTempo) getScreenMain().update();
     if (m_hasSequencer) getScreenSequencer().update();
+    if (m_hasTimer) getScreenTimer().update();
 }
 
 void ScreenLayout::draw()
@@ -317,6 +332,7 @@ void ScreenLayout::draw()
     if (m_hasKeys) getScreenKeys().draw();
     if (m_hasTempo) getScreenMain().draw();
     if (m_hasSequencer) getScreenSequencer().draw();
+    if (m_hasTimer) getScreenTimer().draw();
 }
 
 // --- Touch ------------------------------------------------------------------
@@ -410,6 +426,7 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
         if (kind == UI_WIDGET_KEYS) getScreenKeys().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_TEMPO) getScreenMain().onTouch(touchId, x, y, true);
         if (kind == UI_WIDGET_SEQUENCER) getScreenSequencer().onTouch(touchId, x, y, true);
+        if (kind == UI_WIDGET_TIMER) getScreenTimer().onTouch(touchId, x, y, true);
         return;
     }
 
@@ -436,6 +453,10 @@ void ScreenLayout::onTouch(int touchId, int x, int y, bool pressed)
     }
     if (kind == UI_WIDGET_SEQUENCER) {
         getScreenSequencer().onTouch(touchId, x, y, false);
+        return;
+    }
+    if (kind == UI_WIDGET_TIMER) {
+        getScreenTimer().onTouch(touchId, x, y, false);
         return;
     }
 
@@ -500,6 +521,11 @@ void ScreenLayout::onTouchMove(int touchId, int x, int y)
         m_lastX[touchId] = x;
         m_lastY[touchId] = y;
         getScreenSequencer().onTouchMove(touchId, x, y);
+        return;
+    }
+    if (kind == UI_WIDGET_TIMER) {
+        m_lastX[touchId] = x;
+        m_lastY[touchId] = y;
         return;
     }
     if (kind == UI_WIDGET_ENVELOPE) {

@@ -241,6 +241,7 @@ end
 | `tombola` | **1** | 96x96px | 物理モデルがシングルトン |
 | `keys` | **1** | 120x48px | 鍵盤のモデルがシングルトン（docs/KEYS.md） |
 | `tempo` | **1** | 120x72px | Tempo 画面（docs/TEMPO.md）をセルに。画面オブジェクトが 1 つ |
+| `timer` | **1** | 120x72px | Timer 画面（docs/TIMER.md）をセルに。カウントダウンはプロセスに 1 つ |
 | `sequencer` | 未定（当面 1） | 未定 | 7 章 |
 | `label`（追加候補） | 任意 | — | 静的テキスト / 値の表示用 |
 
@@ -297,6 +298,7 @@ xypad col:, row:, **UI::XYPad.new と同じキーワード          # => UI::XYP
 tombola col:, row:, **UI::Tombola.new と同じキーワード      # => UI::Tombola
 keys  col:, row:, **UI::Keys.new と同じキーワード（keys: で既存を渡す）  # => UI::Keys
 tempo col:, row:                                                       # => UI::Tempo
+timer col:, row:, seconds: { |sec| }   # ブロックは UI::Timer.on_tick   # => UI::Timer
 grid  col:, row:, cols:, rows:, gap:, padding: { ... }       # 入れ子
 ```
 
@@ -328,6 +330,7 @@ kick.state               # => true / false
 | `tombola` | 既存の `UI::Tombola` インスタンスそのもの |
 | `keys` | 既存の `UI::Keys` インスタンスそのもの（`set_color` / `octave_up` / `on_note` …） |
 | `tempo` | `UI::Tempo`（クラスそのもの。`bpm` / `start` / `stop` …） |
+| `timer` | `UI::Timer`（クラスそのもの。`seconds=` / `remaining` / `on_tick` …） |
 
 `layout.widgets` は定義順のハンドルの配列。
 
