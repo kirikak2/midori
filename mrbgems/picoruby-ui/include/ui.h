@@ -52,6 +52,7 @@ typedef struct {
     uint8_t key_velocity;  /* ...0 on release */
     uint8_t key_channel;
     bool key_on;
+    uint8_t key_keyboard;  /* ...which keyboard (UI::Keys id) */
     uint8_t mididev_kind;  /* For MIDI Devices events: 0 select_in / 1 select_out /
                               2 patch / 3 unpatch / 4 connect / 5 disconnect */
     uint16_t mididev_from; /* ...transport bit (the device for select / connect) */
@@ -153,6 +154,7 @@ int   picoruby_ui_layout_add_envelope(int x, int y, int w, int h, const char *la
                                       float sustain, float release, float max_time,
                                       bool notify);
 int   picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h);
+int   picoruby_ui_layout_add_keys(int x, int y, int w, int h, int keys_id);
 bool  picoruby_ui_layout_commit(void);
 void  picoruby_ui_layout_delete(int slot);
 bool  picoruby_ui_layout_pad_state(int slot, int id);
@@ -218,17 +220,21 @@ void    picoruby_ui_xypad_dispatch(int route, int cin, int b1, int b2, int b3);
 /* Keys: the on-screen keyboard, also a picoruby-midi transport
  * (docs/KEYS.md). Parameters are string-keyed like Tombola's; see
  * ui_common.h for the accepted names. Colours are RGB565, -1 to clear. */
-void picoruby_ui_keys_reset(void);
-bool picoruby_ui_keys_set_i(const char *name, int value);
-int  picoruby_ui_keys_get_i(const char *name);
-void picoruby_ui_keys_set_key_color(int note, int color);
-int  picoruby_ui_keys_get_key_color(int note);
-void picoruby_ui_keys_clear_key_colors(void);
-void picoruby_ui_keys_set_channel_color(int channel, int color);
-void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3);
-void picoruby_ui_keys_clear_lights(void);
-bool picoruby_ui_keys_is_lit(int note);
-bool picoruby_ui_keys_is_pressed(int note);
+int  picoruby_ui_keys_default(void);
+int  picoruby_ui_keys_create(void);
+void picoruby_ui_keys_destroy(int id);
+void picoruby_ui_keys_set_shown(int id);
+void picoruby_ui_keys_reset(int id);
+bool picoruby_ui_keys_set_i(int id, const char *name, int value);
+int  picoruby_ui_keys_get_i(int id, const char *name);
+void picoruby_ui_keys_set_key_color(int id, int note, int color);
+int  picoruby_ui_keys_get_key_color(int id, int note);
+void picoruby_ui_keys_clear_key_colors(int id);
+void picoruby_ui_keys_set_channel_color(int id, int channel, int color);
+void picoruby_ui_keys_receive(int id, int cin, int b1, int b2, int b3);
+void picoruby_ui_keys_clear_lights(int id);
+bool picoruby_ui_keys_is_lit(int id, int note);
+bool picoruby_ui_keys_is_pressed(int id, int note);
 
 /* Sequencer (docs/SEQUENCER.md): a step / realtime sequencer, also a
  * picoruby-midi transport. Named parameters as ui_common.h lists them;

@@ -225,7 +225,7 @@ module UI
     }
 
     # Only one of these per layout: the C side holds a single model of each
-    SINGLETONS = [:xypad, :tombola, :keys, :tempo, :sequencer, :timer]
+    SINGLETONS = [:xypad, :tombola, :tempo, :sequencer, :timer]
 
     # One grid level of a definition: its cells, its named areas, and which
     # cells are taken (overlap is an error).
@@ -365,8 +365,15 @@ module UI
         add(:tombola, col, row, area, id, nil, { instance: tombola, opts: opts })
       end
 
-      # Keywords are UI::Keys.new's; keys: hands over an existing one.
+      # Keywords are UI::Keys.new's (a keyboard of the layout's own, closed
+      # when the layout is redefined or deleted); keys: hands over an existing
+      # one. Any number per layout, each a different keyboard.
       def keys(col: nil, row: nil, area: nil, id: nil, keys: nil, **opts)
+        if keys
+          @keys_given ||= []
+          raise ArgumentError, "the same keyboard twice in one layout" if @keys_given.any? { |k| k.equal?(keys) }
+          @keys_given << keys
+        end
         add(:keys, col, row, area, id, nil, { instance: keys, opts: opts })
       end
 
@@ -498,6 +505,7 @@ module UI
     # just is not showable.
     def commit(specs)
       clear_callbacks
+      close_owned_keys
       @widgets = []
       @ids = {}
       live = UI._layout_begin(@slot, @title)
@@ -540,12 +548,20 @@ module UI
     def delete
       UI._layout_delete(@slot) if @live
       clear_callbacks
+      close_owned_keys
       @live = false
       $ui_layouts.delete(@title)
       nil
     end
 
     private
+
+    # The keyboards made from keys keywords (not handed over with keys:) go
+    # with the definition that made them
+    def close_owned_keys
+      (@owned_keys || []).each { |k| k.close }
+      @owned_keys = []
+    end
 
     def clear_callbacks
       base = @slot * KEY_STRIDE
@@ -603,8 +619,12 @@ module UI
         UI._layout_add_view(KIND_TOMBOLA, x, y, w, h) if live
         t
       when :keys
-        k = pr[:instance] || UI::Keys.new(**pr[:opts])
-        UI._layout_add_view(KIND_KEYS, x, y, w, h) if live
+        k = pr[:instance]
+        unless k
+          k = UI::Keys.new(**pr[:opts])
+          @owned_keys << k
+        end
+        UI._layout_add_keys(x, y, w, h, k.id) if live
         k
       when :tempo
         UI._layout_add_view(KIND_TEMPO, x, y, w, h) if live

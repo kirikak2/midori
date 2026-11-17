@@ -514,69 +514,110 @@ bool ui_layout_envelope_reset(int slot, int id)
     return false;
 }
 
-// Keys stubs (docs/KEYS.md) - no screen to play. The keyboard never joins the
+// Keys stubs (docs/KEYS.md) - no screen to play. A keyboard never joins the
 // transport registry here, so UI::Keys#transport_id is 0 and MIDI.route
-// refuses it like any unregistered transport.
+// refuses it like any unregistered transport. The ids are handed out all the
+// same, so UI::Keys.new works (and does nothing).
 
-void ui_keys_reset(void)
+int ui_keys_default(void)
 {
+    return UI_KEYS_DEFAULT;
 }
 
-bool ui_keys_set_i(const char *name, int value)
+int ui_keys_create(void)
 {
-    (void)name; (void)value;
+    return UI_KEYS_DEFAULT + 1;
+}
+
+void ui_keys_destroy(int id)
+{
+    (void)id;
+}
+
+bool ui_keys_alive(int id)
+{
+    (void)id;
     return false;
 }
 
-int ui_keys_get_i(const char *name)
+void ui_keys_set_shown(int id)
 {
-    (void)name;
+    (void)id;
+}
+
+int ui_keys_shown(void)
+{
+    return UI_KEYS_DEFAULT;
+}
+
+void ui_keys_reset(int id)
+{
+    (void)id;
+}
+
+bool ui_keys_set_i(int id, const char *name, int value)
+{
+    (void)id; (void)name; (void)value;
+    return false;
+}
+
+int ui_keys_get_i(int id, const char *name)
+{
+    (void)id; (void)name;
     return 0;
 }
 
-void ui_keys_set_key_color(int note, int color)
+void ui_keys_set_key_color(int id, int note, int color)
 {
-    (void)note; (void)color;
+    (void)id; (void)note; (void)color;
 }
 
-int ui_keys_get_key_color(int note)
+int ui_keys_get_key_color(int id, int note)
 {
-    (void)note;
+    (void)id; (void)note;
     return -1;
 }
 
-void ui_keys_clear_key_colors(void)
+void ui_keys_clear_key_colors(int id)
 {
+    (void)id;
 }
 
-void ui_keys_set_channel_color(int channel, int color)
+void ui_keys_set_channel_color(int id, int channel, int color)
 {
-    (void)channel; (void)color;
+    (void)id; (void)channel; (void)color;
 }
 
-void ui_keys_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+void ui_keys_receive(int id, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
 {
-    (void)cin; (void)b1; (void)b2; (void)b3;
+    (void)id; (void)cin; (void)b1; (void)b2; (void)b3;
 }
 
-void ui_keys_clear_lights(void)
+void ui_keys_clear_lights(int id)
 {
+    (void)id;
 }
 
-bool ui_keys_is_lit(int note)
+bool ui_keys_is_lit(int id, int note)
 {
-    (void)note;
+    (void)id; (void)note;
     return false;
 }
 
-bool ui_keys_is_pressed(int note)
+bool ui_keys_is_pressed(int id, int note)
 {
-    (void)note;
+    (void)id; (void)note;
     return false;
 }
 
 void ui_keys_cleanup(void)
 {
+}
+
+int ui_layout_add_keys(int x, int y, int w, int h, int keys_id)
+{
+    (void)x; (void)y; (void)w; (void)h; (void)keys_id;
+    return -1;
 }
 
 // Sequencer stubs (docs/SEQUENCER.md) - no screen, no sequencer task. It never

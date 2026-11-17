@@ -243,7 +243,7 @@ md.midi_in  ||= MIDIDevices.usb_midi_host
 | `uart` | SAM2695 | ○ | ○ | 0x02 | |
 | `usb_dev` | USB-MIDI Device | ○ | ○ | 0x04 | 表示名 "PC" |
 | `amy` | AMY | — | ○ | 起動時に決まる | standby で登録 |
-| `keys` | UI::Keys | ○ | ○ | 起動時に決まる | 鍵盤のモデルが作られたとき C 側（`ui_keys.cpp`）が自分で登録 |
+| `keys` | UI::Keys.default | ○ | ○ | 起動時に決まる | `main_task.rb` の `setup_midi_devices` が既定の鍵盤を登録（2026-11-18 まで C が自分で登録）。スクリプトの `UI::Keys.new` はそれぞれスクリプトの機器（「Keys 2」など） |
 | `tempo` | UI::Tempo | ○ | — | 起動時に決まる | MIDI クロックを送る（docs/TEMPO.md）。UI の初期化時に C 側（`ui_tempo.cpp`）が登録。OUT の列は出さない（`UI_MIDIDEV_NO_OUT`） |
 | `tombola` | UI::Tombola | ○ | ○ | 起動時に決まる | 衝突のノートを送り、受けたノートをボールにする（docs/TOMBOLA.md）。UI の初期化時に C 側（`screen_tombola.cpp`）が登録 |
 | `xypad` | UI::XYPad | ○ | — | 起動時に決まる | Ruby の内蔵ハンドラが鳴らすメッセージをルートへも流す（docs/XYPAD.md）。UI の初期化時に C 側（`ui_common.cpp`）が登録。送るだけ（`UI_MIDIDEV_NO_OUT`） |

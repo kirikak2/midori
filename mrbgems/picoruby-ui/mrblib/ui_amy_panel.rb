@@ -286,7 +286,7 @@ module UI
       @confirm_delete = false
       if @part && @keys.nil?
         @keys = UI::Keys.new(octaves: 1, low: @low, channel: @part.channel || 0,
-                             device: engine)
+                             device: engine, name: "AMY Keys")
       end
       @keys.channel = @part.channel || 0 if @part && @keys
       @layout = UI.layout(@title, rows: [1, 1, 4, 2]) { |l| build_page(l) }

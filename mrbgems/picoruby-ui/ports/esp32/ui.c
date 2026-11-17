@@ -52,6 +52,7 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
     event->key_velocity = 0;
     event->key_channel = 0;
     event->key_on = false;
+    event->key_keyboard = 0;
     event->mididev_kind = 0;
     event->mididev_from = 0;
     event->mididev_to = 0;
@@ -136,6 +137,7 @@ bool picoruby_ui_pop_event(picoruby_ui_event_t *event)
             event->key_velocity = ui_evt.data.key.velocity;
             event->key_channel = ui_evt.data.key.channel;
             event->key_on = ui_evt.data.key.on;
+            event->key_keyboard = ui_evt.data.key.keys;
             break;
         case UI_EVENT_MIDI_DEVICES:
             event->type = PICORUBY_UI_EVENT_MIDI_DEVICES;
@@ -430,6 +432,11 @@ int picoruby_ui_layout_add_view(int kind, int x, int y, int w, int h)
     return ui_layout_add_view((uint8_t)kind, x, y, w, h);
 }
 
+int picoruby_ui_layout_add_keys(int x, int y, int w, int h, int keys_id)
+{
+    return ui_layout_add_keys(x, y, w, h, keys_id);
+}
+
 bool picoruby_ui_layout_commit(void)
 {
     return ui_layout_commit();
@@ -613,39 +620,59 @@ int picoruby_ui_xypad_get_scale(int index, uint8_t *out, int max_len)
 
 /* Keys */
 
-void picoruby_ui_keys_reset(void)
+int picoruby_ui_keys_default(void)
 {
-    ui_keys_reset();
+    return ui_keys_default();
 }
 
-bool picoruby_ui_keys_set_i(const char *name, int value)
+int picoruby_ui_keys_create(void)
 {
-    return ui_keys_set_i(name, value);
+    return ui_keys_create();
 }
 
-int picoruby_ui_keys_get_i(const char *name)
+void picoruby_ui_keys_destroy(int id)
 {
-    return ui_keys_get_i(name);
+    ui_keys_destroy(id);
 }
 
-void picoruby_ui_keys_set_key_color(int note, int color)
+void picoruby_ui_keys_set_shown(int id)
 {
-    ui_keys_set_key_color(note, color);
+    ui_keys_set_shown(id);
 }
 
-int picoruby_ui_keys_get_key_color(int note)
+void picoruby_ui_keys_reset(int id)
 {
-    return ui_keys_get_key_color(note);
+    ui_keys_reset(id);
 }
 
-void picoruby_ui_keys_clear_key_colors(void)
+bool picoruby_ui_keys_set_i(int id, const char *name, int value)
 {
-    ui_keys_clear_key_colors();
+    return ui_keys_set_i(id, name, value);
 }
 
-void picoruby_ui_keys_set_channel_color(int channel, int color)
+int picoruby_ui_keys_get_i(int id, const char *name)
 {
-    ui_keys_set_channel_color(channel, color);
+    return ui_keys_get_i(id, name);
+}
+
+void picoruby_ui_keys_set_key_color(int id, int note, int color)
+{
+    ui_keys_set_key_color(id, note, color);
+}
+
+int picoruby_ui_keys_get_key_color(int id, int note)
+{
+    return ui_keys_get_key_color(id, note);
+}
+
+void picoruby_ui_keys_clear_key_colors(int id)
+{
+    ui_keys_clear_key_colors(id);
+}
+
+void picoruby_ui_keys_set_channel_color(int id, int channel, int color)
+{
+    ui_keys_set_channel_color(id, channel, color);
 }
 
 void picoruby_ui_tombola_receive(int cin, int b1, int b2, int b3)
@@ -668,24 +695,24 @@ void picoruby_ui_xypad_dispatch(int route, int cin, int b1, int b2, int b3)
     ui_xypad_dispatch((midi_tmask_t)route, (uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
 }
 
-void picoruby_ui_keys_receive(int cin, int b1, int b2, int b3)
+void picoruby_ui_keys_receive(int id, int cin, int b1, int b2, int b3)
 {
-    ui_keys_receive((uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
+    ui_keys_receive(id, (uint8_t)cin, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
 }
 
-void picoruby_ui_keys_clear_lights(void)
+void picoruby_ui_keys_clear_lights(int id)
 {
-    ui_keys_clear_lights();
+    ui_keys_clear_lights(id);
 }
 
-bool picoruby_ui_keys_is_lit(int note)
+bool picoruby_ui_keys_is_lit(int id, int note)
 {
-    return ui_keys_is_lit(note);
+    return ui_keys_is_lit(id, note);
 }
 
-bool picoruby_ui_keys_is_pressed(int note)
+bool picoruby_ui_keys_is_pressed(int id, int note)
 {
-    return ui_keys_is_pressed(note);
+    return ui_keys_is_pressed(id, note);
 }
 
 /* --- Sequencer --- */

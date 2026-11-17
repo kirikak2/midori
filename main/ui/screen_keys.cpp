@@ -47,15 +47,16 @@ static uint16_t labelColorOn(uint16_t fill)
     return luma > 32000 ? UI_COLOR_DARKGRAY : UI_COLOR_WHITE;
 }
 
-ScreenKeys::ScreenKeys()
-    : m_isActive(false)
+KeysView::KeysView()
+    : m_id(UI_KEYS_DEFAULT)
+    , m_areaX(0), m_areaY(UI_CONTENT_Y), m_areaW(UI_SCREEN_WIDTH), m_areaH(UI_CONTENT_HEIGHT)
+    , m_isActive(false)
     , m_gen(0)
 {
     memset(&m_geom, 0, sizeof(m_geom));
-    resetArea();
 }
 
-void ScreenKeys::setArea(int x, int y, int w, int h)
+void KeysView::setArea(int x, int y, int w, int h)
 {
     m_areaX = x;
     m_areaY = y;
@@ -63,22 +64,17 @@ void ScreenKeys::setArea(int x, int y, int w, int h)
     m_areaH = h;
 }
 
-void ScreenKeys::resetArea()
-{
-    setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
-}
-
 // --- Geometry ----------------------------------------------------------------
 
-void ScreenKeys::computeGeom()
+void KeysView::computeGeom()
 {
     Geom& g = m_geom;
     g.x = m_areaX;
     g.y = m_areaY;
     g.w = m_areaW;
     g.h = m_areaH;
-    g.low = ui_keys::low();
-    g.top = ui_keys::top();
+    g.low = ui_keys::low(m_id);
+    g.top = ui_keys::top(m_id);
     g.whites = 0;
     for (int n = g.low; n <= g.top; n++) {
         if (!ui_keys::is_black(n)) g.whites++;
@@ -91,7 +87,7 @@ void ScreenKeys::computeGeom()
     g.blackH = g.h * 62 / 100;
 }
 
-int ScreenKeys::whiteIndex(int note) const
+int KeysView::whiteIndex(int note) const
 {
     int i = 0;
     for (int n = m_geom.low; n < note; n++) {
@@ -102,12 +98,12 @@ int ScreenKeys::whiteIndex(int note) const
 
 // Whole pixels per key, the remainder spread across the keyboard, so the
 // white keys fill the area exactly.
-int ScreenKeys::whiteX(int index) const
+int KeysView::whiteX(int index) const
 {
     return m_geom.x + index * m_geom.w / m_geom.whites;
 }
 
-void ScreenKeys::keyRect(int note, int& x, int& y, int& w, int& h) const
+void KeysView::keyRect(int note, int& x, int& y, int& w, int& h) const
 {
     int i = whiteIndex(note);
     if (ui_keys::is_black(note)) {
@@ -124,10 +120,10 @@ void ScreenKeys::keyRect(int note, int& x, int& y, int& w, int& h) const
     }
 }
 
-int ScreenKeys::hitTest(int x, int y, int& velocity) const
+int KeysView::hitTest(int x, int y, int& velocity) const
 {
     const Geom& g = m_geom;
-    velocity = ui_keys::velocity();
+    velocity = ui_keys::velocity(m_id);
     if (x < g.x || x >= g.x + g.w || y < g.y || y >= g.y + g.h) return -1;
 
     int note = -1;
@@ -160,7 +156,7 @@ int ScreenKeys::hitTest(int x, int y, int& velocity) const
         }
     }
 
-    if (note >= 0 && ui_keys::velocity_by_position() && keyH > 1) {
+    if (note >= 0 && ui_keys::velocity_by_position(m_id) && keyH > 1) {
         int rel = (y - keyTop) * 1000 / (keyH - 1);
         if (rel > 1000) rel = 1000;
         velocity = VELOCITY_TOP + (127 - VELOCITY_TOP) * rel / 1000;
@@ -170,11 +166,14 @@ int ScreenKeys::hitTest(int x, int y, int& velocity) const
 
 // --- Drawing -----------------------------------------------------------------
 
-void ScreenKeys::render(LovyanGFX* g, int ox, int oy)
+void KeysView::render(LovyanGFX* g, int ox, int oy)
 {
     const Geom& geo = m_geom;
-    bool labels = ui_keys::labels();
+    bool labels = ui_keys::labels(m_id);
     char label[8];
+    // A label past the right edge of a narrow strip would otherwise wrap onto
+    // the next line, at the strip's left edge
+    g->setTextWrap(false, false);
 
     // White keys first, then the black keys over them
     int i = 0;
@@ -183,7 +182,7 @@ void ScreenKeys::render(LovyanGFX* g, int ox, int oy)
         int x = whiteX(i);
         int w = whiteX(i + 1) - x;
         i++;
-        uint16_t fill = ui_keys::key_fill(n);
+        uint16_t fill = ui_keys::key_fill(m_id, n);
         int gap = (w > KEY_GAP * 4) ? KEY_GAP : 0;
         g->fillRect(x - ox, geo.y - oy, w - gap, geo.h, fill);
 
@@ -210,12 +209,12 @@ void ScreenKeys::render(LovyanGFX* g, int ox, int oy)
         if (!ui_keys::is_black(n)) continue;
         int x, y, w, h;
         keyRect(n, x, y, w, h);
-        g->fillRect(x - ox, y - oy, w, h, ui_keys::key_fill(n));
+        g->fillRect(x - ox, y - oy, w, h, ui_keys::key_fill(m_id, n));
         g->drawRect(x - ox, y - oy, w, h, UI_COLOR_DARKGRAY);
     }
 }
 
-void ScreenKeys::paintRect(int x, int y, int w, int h)
+void KeysView::paintRect(int x, int y, int w, int h)
 {
     // Keep inside the keyboard (a black key at the edge of the range pokes
     // half a key past it)
@@ -237,7 +236,7 @@ void ScreenKeys::paintRect(int x, int y, int w, int h)
 
 // Repaints the dirty keys of the range. Keys next to each other are merged
 // into one rectangle, so a chord costs a few paints rather than one per key.
-void ScreenKeys::paintDirty(const uint32_t dirty[4])
+void KeysView::paintDirty(const uint32_t dirty[4])
 {
     int spanX = 0, spanEnd = -1;
     for (int n = m_geom.low; n <= m_geom.top; n++) {
@@ -257,42 +256,42 @@ void ScreenKeys::paintDirty(const uint32_t dirty[4])
     if (spanEnd > spanX) paintRect(spanX, m_geom.y, spanEnd - spanX, m_geom.h);
 }
 
-// --- Screen lifecycle --------------------------------------------------------
+// --- Lifecycle ---------------------------------------------------------------
 
-void ScreenKeys::enter()
+void KeysView::enter()
 {
     m_isActive = true;
-    m_gen = ui_keys::generation();
+    m_gen = ui_keys::generation(m_id);
     computeGeom();
-    // UIManager (or the layout) paints everything right after this
+    // The caller paints everything right after this
     uint32_t dirty[4];
     bool full;
-    ui_keys::take_dirty(dirty, full);
+    ui_keys::take_dirty(m_id, dirty, full);
 }
 
-void ScreenKeys::leave()
+void KeysView::leave()
 {
     // Fingers cannot reach a keyboard that is not showing
-    ui_keys::release_all();
+    ui_keys::release_all(m_id);
     m_isActive = false;
 }
 
-void ScreenKeys::update()
+void KeysView::update()
 {
     if (!m_isActive) return;
 
-    uint32_t gen = ui_keys::generation();
+    uint32_t gen = ui_keys::generation(m_id);
     if (gen != m_gen) {
-        // A script reset the keyboard: whatever the fingers hold goes off
-        // where it was sent
+        // The keyboard was reset or closed: whatever the fingers hold goes
+        // off where it was sent
         m_gen = gen;
-        ui_keys::release_all();
+        ui_keys::release_all(m_id);
     }
 
     uint32_t dirty[4];
     bool full;
-    ui_keys::take_dirty(dirty, full);
-    if (full || m_geom.low != ui_keys::low() || m_geom.top != ui_keys::top()) {
+    ui_keys::take_dirty(m_id, dirty, full);
+    if (full || m_geom.low != ui_keys::low(m_id) || m_geom.top != ui_keys::top(m_id)) {
         computeGeom();
         paintRect(m_geom.x, m_geom.y, m_geom.w, m_geom.h);
         return;
@@ -300,41 +299,102 @@ void ScreenKeys::update()
     if (dirty[0] | dirty[1] | dirty[2] | dirty[3]) paintDirty(dirty);
 }
 
-void ScreenKeys::draw()
+void KeysView::draw()
 {
     computeGeom();
     paintRect(m_geom.x, m_geom.y, m_geom.w, m_geom.h);
 }
 
-void ScreenKeys::onTouch(int touchId, int x, int y, bool pressed)
+void KeysView::onTouch(int touchId, int x, int y, bool pressed)
 {
     if (!m_isActive) return;
     if (pressed) {
         int velocity;
         int note = hitTest(x, y, velocity);
-        ui_keys::touch_down(touchId, note, velocity);
+        ui_keys::touch_down(m_id, touchId, note, velocity);
     } else {
-        ui_keys::touch_up(touchId);
+        ui_keys::touch_up(m_id, touchId);
     }
+}
+
+void KeysView::onTouchMove(int touchId, int x, int y)
+{
+    if (!m_isActive) return;
+    int velocity;
+    int note = hitTest(x, y, velocity);
+    ui_keys::touch_move(m_id, touchId, note, velocity);
+}
+
+// --- The Keys screen -----------------------------------------------------------
+
+ScreenKeys::ScreenKeys()
+    : m_isActive(false)
+{
+    m_title[0] = '\0';
+}
+
+void ScreenKeys::enter()
+{
+    m_isActive = true;
+    int id = ui_keys_shown();
+    m_view.setId(id < 0 ? UI_KEYS_DEFAULT : id);
+    m_view.setArea(0, UI_CONTENT_Y, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
+    m_view.enter();
+}
+
+void ScreenKeys::leave()
+{
+    m_view.leave();
+    m_isActive = false;
+}
+
+void ScreenKeys::update()
+{
+    if (!m_isActive) return;
+    // A script showed another keyboard, or the one shown was closed
+    int id = ui_keys_shown();
+    if (id >= 0 && id != m_view.id()) {
+        m_view.leave();
+        m_view.setId(id);
+        m_view.enter();
+        ui_request_redraw();
+        return;
+    }
+    m_view.update();
+}
+
+void ScreenKeys::draw()
+{
+    m_view.draw();
+}
+
+void ScreenKeys::onTouch(int touchId, int x, int y, bool pressed)
+{
+    if (!m_isActive) return;
+    m_view.onTouch(touchId, x, y, pressed);
 }
 
 void ScreenKeys::onTouchMove(int touchId, int x, int y)
 {
     if (!m_isActive) return;
-    int velocity;
-    int note = hitTest(x, y, velocity);
-    ui_keys::touch_move(touchId, note, velocity);
+    m_view.onTouchMove(touchId, x, y);
 }
 
 const char* ScreenKeys::getTitle()
 {
-    return "Keys";
+    // "Keys" for the default keyboard, "Keys 2" .. for the scripts' (as the
+    // MIDI Devices screen names them)
+    int id = m_isActive ? m_view.id() : ui_keys_shown();
+    if (id <= UI_KEYS_DEFAULT) return "Keys";
+    snprintf(m_title, sizeof(m_title), "Keys %d", id + 1);
+    return m_title;
 }
 
 void ScreenKeys::getTileStatus(char* buf, int len)
 {
+    int id = ui_keys_shown();
     char lo[8], hi[8];
-    noteName((uint8_t)ui_keys::low(), lo, sizeof(lo));
-    noteName((uint8_t)ui_keys::top(), hi, sizeof(hi));
+    noteName((uint8_t)ui_keys::low(id), lo, sizeof(lo));
+    noteName((uint8_t)ui_keys::top(id), hi, sizeof(hi));
     snprintf(buf, len, "%s-%s", lo, hi);
 }

@@ -20,8 +20,8 @@ $ui_tombola_handler = nil
 # know about.
 $ui_xypad_instance = nil
 
-# The live UI::Keys instance (single instance: one keyboard model in C).
-$ui_keys_instance = nil
+# The open UI::Keys by keyboard id (UI.dispatch_event finds on_note's here)
+$ui_keys_instances = {}
 
 module UI
   # MIDI Clock constant: 24 Pulses Per Quarter Note
@@ -333,7 +333,7 @@ module UI
 
     # Handle on-screen keyboard keys (UI::Keys#on_note)
     if type == :key
-      keys = $ui_keys_instance
+      keys = $ui_keys_instances[event[:keys]]
       keys.dispatch(event) if keys
     end
 
@@ -1481,6 +1481,13 @@ module UI
   #   keys.set_color([48, 52, 55], :blue)                # mark a chord / scale
   #   keys.show
   #
+  # Every UI::Keys.new is a keyboard of its own (up to MAX at once): its own
+  # settings, colours and lights, and its own transport bit -- a device of its
+  # own on the MIDI Devices screen ("Keys 2", ...), patched in and out like any
+  # other. The script's keyboards close when it ends (or with #close).
+  # UI::Keys.default is the firmware's keyboard, the built-in "Keys" device
+  # (main_task.rb makes it at every start) whose patches are saved.
+  #
   # A touched key sends its note on / off from C, on the UI task, to device:
   # and to every MIDI.route from the keyboard -- Ruby is not in the path, so
   # how often the script calls UI.process does not matter. on_note sees the
@@ -1490,6 +1497,8 @@ module UI
   # notes sent to it light their keys: the way a light-up keyboard shows what
   # is being played.
   class Keys
+    MAX = 8            # Keyboards open at once (UI_KEYS_MAX), the default included
+    DEFAULT_ID = 0
     MIN_OCTAVES = 1
     MAX_OCTAVES = 4
     VELOCITY_FIXED    = 0
@@ -1511,13 +1520,15 @@ module UI
     # @param light [Symbol, Integer, Array] a key lit by incoming MIDI
     def initialize(octaves: 2, low: 48, channel: 0, velocity: 100, slide: true,
                    labels: true, device: nil, colors: nil,
-                   white: nil, black: nil, press: nil, light: nil)
-      # Lets go of the previous instance's keys (their note offs go where
-      # their note ons went) and clears its colours and lights
-      UI._keys_reset
-      $ui_keys_instance = self
+                   white: nil, black: nil, press: nil, light: nil, name: nil,
+                   _default: false)
+      @id = _default ? UI._keys_default : UI._keys_create
+      raise "UI::Keys: no free keyboard (at most #{MAX} at once)" if @id < 0
+      @closed = false
       @on_note = nil
       @devices = []
+      @name = (name || (_default ? "Keys" : "Keys #{@id + 1}")).to_s
+      $ui_keys_instances[@id] = self
 
       self.octaves = octaves
       self.low = low
@@ -1531,6 +1542,98 @@ module UI
       self.press_color = press unless press.nil?
       self.light_color = light unless light.nil?
       colors.each { |note, color| set_color(note, color) } if colors
+      # A device of its own on the MIDI Devices screen. The default keyboard
+      # is the built-in "Keys", which main_task.rb registers.
+      _register unless _default
+    end
+
+    # The firmware's keyboard: the built-in "Keys" on the MIDI Devices screen,
+    # the one the Keys screen shows unless another is shown. Keywords are
+    # applied when given (as UI::Keys.new's); it is put back to its defaults
+    # when the script ends.
+    def self.default(**opts)
+      kb = $ui_keys_instances[DEFAULT_ID]
+      if kb.nil?
+        opts[:_default] = true
+        return new(**opts)
+      end
+      kb.configure(**opts) unless opts.empty?
+      kb
+    end
+
+    # The open keyboards, the default first
+    def self.all
+      $ui_keys_instances.keys.sort.map { |id| $ui_keys_instances[id] }
+    end
+
+    # Its id (0 for the default keyboard, 1.. for the others)
+    attr_reader :id
+
+    # Its name on the MIDI Devices screen
+    attr_reader :name
+
+    def default?
+      @id == DEFAULT_ID
+    end
+
+    def closed?
+      @closed
+    end
+
+    # Changes several settings at once, with UI::Keys.new's keywords
+    def configure(octaves: nil, low: nil, channel: nil, velocity: nil, slide: nil,
+                  labels: nil, device: :keep, colors: nil,
+                  white: nil, black: nil, press: nil, light: nil)
+      self.octaves = octaves unless octaves.nil?
+      self.low = low unless low.nil?
+      self.channel = channel unless channel.nil?
+      self.velocity = velocity unless velocity.nil?
+      self.slide = slide unless slide.nil?
+      self.labels = labels unless labels.nil?
+      self.device = device unless device == :keep
+      self.white_color = white unless white.nil?
+      self.black_color = black unless black.nil?
+      self.press_color = press unless press.nil?
+      self.light_color = light unless light.nil?
+      colors.each { |note, color| set_color(note, color) } if colors
+      self
+    end
+
+    # Closes the keyboard: off the MIDI Devices screen with its patches, its
+    # transport bit freed, its keys let go (their note offs go where their
+    # note ons went). The default keyboard is not closed, only reset.
+    def close
+      return nil if @closed
+      if default?
+        UI._keys_reset(@id)
+        return nil
+      end
+      if transport_id != 0 && UI.const_defined?(:MIDIDevices)
+        begin
+          UI::MIDIDevices.unregister(self)
+        rescue => e
+          UI.log("UI::Keys#close: " + e.message)
+        end
+      end
+      UI._keys_destroy(@id)
+      $ui_keys_instances.delete(@id) if $ui_keys_instances[@id].equal?(self)
+      @closed = true
+      nil
+    end
+
+    # Internal: its id, for the C side; a closed keyboard's slot may already
+    # be another keyboard's
+    def _id
+      raise "UI::Keys: the keyboard is closed" if @closed
+      @id
+    end
+
+    # Internal: on the MIDI Devices screen as a device of the script's
+    def _register
+      return if transport_id == 0 || !UI.const_defined?(:MIDIDevices)
+      UI::MIDIDevices.register(self, name: @name, color: :yellow)
+    rescue => e
+      UI.log("UI::Keys: not on the MIDI Devices screen: " + e.message)
     end
 
     # --- Transport (picoruby-midi) ---
@@ -1538,12 +1641,12 @@ module UI
     # This keyboard's bit in picoruby-midi's transport registry (0 on a board
     # without a display, where it is no transport).
     def transport_id
-      UI._keys_get_i(:transport_bit)
+      (@closed ? 0 : UI._keys_get_i(@id, :transport_bit))
     end
 
     # A packet sent to the keyboard: note on / off light / unlight keys
     def send_packet(cable, cin, midi1, midi2, midi3)
-      UI._keys_receive(cin, midi1, midi2, midi3)
+      UI._keys_receive(_id, cin, midi1, midi2, midi3)
     end
 
     # What the keys play is pushed to its destinations, never read
@@ -1560,13 +1663,13 @@ module UI
     end
 
     def device_info
-      "On-screen keyboard"
+      @name
     end
 
     # --- Range ---
 
     def octaves
-      UI._keys_get_i(:octaves)
+      UI._keys_get_i(_id, :octaves)
     end
 
     def octaves=(n)
@@ -1574,17 +1677,17 @@ module UI
       if n < MIN_OCTAVES || n > MAX_OCTAVES
         raise ArgumentError, "octaves must be #{MIN_OCTAVES}..#{MAX_OCTAVES}"
       end
-      UI._keys_set_i(:octaves, n)
+      UI._keys_set_i(_id, :octaves, n)
     end
 
     # Lowest key. Black keys move down to the white key below; the range is
     # kept inside 0..127.
     def low
-      UI._keys_get_i(:low)
+      UI._keys_get_i(_id, :low)
     end
 
     def low=(note)
-      UI._keys_set_i(:low, note.to_i)
+      UI._keys_set_i(_id, :low, note.to_i)
     end
 
     # Highest key
@@ -1609,41 +1712,41 @@ module UI
     # --- Playing ---
 
     def channel
-      UI._keys_get_i(:channel)
+      UI._keys_get_i(_id, :channel)
     end
 
     def channel=(ch)
-      UI._keys_set_i(:channel, ch.to_i)
+      UI._keys_set_i(_id, :channel, ch.to_i)
     end
 
     # Integer, or :position
     def velocity
-      if UI._keys_get_i(:velocity_mode) == VELOCITY_POSITION
+      if UI._keys_get_i(_id, :velocity_mode) == VELOCITY_POSITION
         :position
       else
-        UI._keys_get_i(:velocity)
+        UI._keys_get_i(_id, :velocity)
       end
     end
 
     def velocity=(v)
       if v == :position
-        UI._keys_set_i(:velocity_mode, VELOCITY_POSITION)
+        UI._keys_set_i(_id, :velocity_mode, VELOCITY_POSITION)
       else
-        UI._keys_set_i(:velocity_mode, VELOCITY_FIXED)
-        UI._keys_set_i(:velocity, v.to_i)
+        UI._keys_set_i(_id, :velocity_mode, VELOCITY_FIXED)
+        UI._keys_set_i(_id, :velocity, v.to_i)
       end
     end
 
     def slide?
-      UI._keys_get_i(:slide) != 0
+      UI._keys_get_i(_id, :slide) != 0
     end
 
     def slide=(on)
-      UI._keys_set_i(:slide, on ? 1 : 0)
+      UI._keys_set_i(_id, :slide, on ? 1 : 0)
     end
 
     def labels=(on)
-      UI._keys_set_i(:labels, on ? 1 : 0)
+      UI._keys_set_i(_id, :labels, on ? 1 : 0)
     end
 
     # The destination(s) the keys play besides the routes, as given
@@ -1656,7 +1759,7 @@ module UI
       @devices = dev.nil? ? [] : (dev.is_a?(Array) ? dev : [dev])
       mask = 0
       @devices.each { |d| mask |= UI::Tombola.transport_mask_for(d) }
-      UI._keys_set_i(:out_mask, mask)
+      UI._keys_set_i(_id, :out_mask, mask)
     end
 
     # Called with { note:, velocity:, channel:, state: } for every key a
@@ -1664,7 +1767,7 @@ module UI
     # Nothing is queued for Ruby until a block is given.
     def on_note(&block)
       @on_note = block
-      UI._keys_set_i(:notify, block ? 1 : 0)
+      UI._keys_set_i(_id, :notify, block ? 1 : 0)
       nil
     end
 
@@ -1683,9 +1786,9 @@ module UI
     def set_color(notes, color)
       code = Keys.color_code(color)
       if notes.is_a?(Integer)
-        UI._keys_set_key_color(notes, code)
+        UI._keys_set_key_color(_id, notes, code)
       else
-        notes.each { |n| UI._keys_set_key_color(n.to_i, code) }
+        notes.each { |n| UI._keys_set_key_color(_id, n.to_i, code) }
       end
       nil
     end
@@ -1696,7 +1799,7 @@ module UI
 
     # A key's own colour as RGB565, or nil
     def color(note)
-      code = UI._keys_key_color(note.to_i)
+      code = UI._keys_key_color(_id, note.to_i)
       code < 0 ? nil : code
     end
 
@@ -1705,54 +1808,55 @@ module UI
     end
 
     def clear_colors
-      UI._keys_clear_key_colors
+      UI._keys_clear_key_colors(_id)
     end
 
     def white_color=(c)
-      UI._keys_set_i(:white_color, Keys.color_code(c, UI::PAD_COLOR_WHITE))
+      UI._keys_set_i(_id, :white_color, Keys.color_code(c, UI::PAD_COLOR_WHITE))
     end
 
     def black_color=(c)
-      UI._keys_set_i(:black_color, Keys.color_code(c, 0))
+      UI._keys_set_i(_id, :black_color, Keys.color_code(c, 0))
     end
 
     def press_color=(c)
-      UI._keys_set_i(:press_color, Keys.color_code(c, UI::PAD_COLOR_CYAN))
+      UI._keys_set_i(_id, :press_color, Keys.color_code(c, UI::PAD_COLOR_CYAN))
     end
 
     def light_color=(c)
-      UI._keys_set_i(:light_color, Keys.color_code(c, UI::PAD_COLOR_ORANGE))
+      UI._keys_set_i(_id, :light_color, Keys.color_code(c, UI::PAD_COLOR_ORANGE))
     end
 
     # Colour incoming notes on one channel light their keys with, instead of
     # light_color. nil goes back to light_color.
     def channel_color(channel, color)
-      UI._keys_set_channel_color(channel.to_i, Keys.color_code(color))
+      UI._keys_set_channel_color(_id, channel.to_i, Keys.color_code(color))
     end
 
     # --- State ---
 
     # Lit by MIDI sent to the keyboard
     def lit?(note)
-      UI._keys_lit(note.to_i)
+      UI._keys_lit(_id, note.to_i)
     end
 
     # Held down by a finger
     def pressed?(note)
-      UI._keys_pressed(note.to_i)
+      UI._keys_pressed(_id, note.to_i)
     end
 
     def pressed_notes
-      range.select { |n| UI._keys_pressed(n) }
+      range.select { |n| UI._keys_pressed(_id, n) }
     end
 
     # Turns every light off (as All Notes Off on each channel would)
     def clear_lights
-      UI._keys_clear_lights
+      UI._keys_clear_lights(_id)
     end
 
-    # Bring the Keys screen to the front
+    # The Keys screen, showing this keyboard
     def show
+      UI._keys_show(_id)
       UI.show(:keys)
     end
 
