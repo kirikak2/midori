@@ -7,35 +7,38 @@
 
 #include <M5Unified.h>
 
-// A touch surface where each of up to five simultaneous fingers is its own
-// independently configured "slot" (see the ui_xypad_* API in ui_common.h and
-// docs/XYPAD.md). This class turns touches into ui_xypad_touch_* calls and
+// One XYPad on screen: a touch surface where each of up to five simultaneous
+// fingers is its own independently configured "slot" (see the ui_xypad_* API
+// in ui_common.h and docs/XYPAD.md), for the pad whose id it is given. The
+// XYPad screen has one view; a layout has one per xypad widget.
+//
+// This class turns touches into ui_xypad_touch_* calls and
 // composites the result -- an expanding ripple on touchdown, a fading trail
 // behind a moving finger, and the current dot/label -- off-screen through the
 // shared strip (ui_strip.h) every frame. Same technique Tombola uses for its play area
 // (see screen_tombola.h/.cpp): the model only knows values, not pixels or
 // timing, so all of this animation state lives here.
-class ScreenXYPad : public Screen {
+class XYPadView {
 public:
-    ScreenXYPad();
-    ~ScreenXYPad() override = default;
+    XYPadView();
 
-    void enter() override;
-    void leave() override;
-    void update() override;
-    void draw() override;
-    void onTouch(int touchId, int x, int y, bool pressed) override;
-    void onTouchMove(int touchId, int x, int y) override;
-    const char* getTitle() override;
-
-    // Where the pad is drawn and touched. The whole content area by default;
-    // a layout narrows it to its widget's cell while it shows, and puts it
-    // back (resetArea) before anything else can show this screen.
+    // Another pad: the trails and ripples of the one before go
+    void setPad(int pad);
+    int pad() const { return m_pad; }
+    // Where the pad is drawn and touched
     void setArea(int x, int y, int w, int h);
-    void resetArea();
+
+    void enter();
+    void leave();            // Lets go of the fingers on it
+    void update();
+    void draw();
+    void onTouch(int touchId, int x, int y, bool pressed);
+    void onTouchMove(int touchId, int x, int y);
 
 private:
+    int m_pad;
     int m_areaX, m_areaY, m_areaW, m_areaH;
+    uint32_t m_gen;
 
     bool m_isActive;
     int64_t m_lastDrawUs;
@@ -91,6 +94,28 @@ private:
     void fallbackEraseSlot(int index);
     void fallbackPaintSlot(int index, int x, int y);
     void fallbackRefresh(int index, int x, int y);
+};
+
+// The XYPad screen: the whole content area, showing the pad ui_xypad_shown()
+// names (the default one unless a script showed another).
+class ScreenXYPad : public Screen {
+public:
+    ScreenXYPad();
+    ~ScreenXYPad() override = default;
+
+    void enter() override;
+    void leave() override;
+    void update() override;
+    void draw() override;
+    void onTouch(int touchId, int x, int y, bool pressed) override;
+    void onTouchMove(int touchId, int x, int y) override;
+    const char* getTitle() override;
+
+private:
+    XYPadView* m_view;       // Heap: its trails are a few KB
+    bool m_isActive;
+    char m_title[24];
+    XYPadView* view();
 };
 
 // Global instance

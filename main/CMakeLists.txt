@@ -53,6 +53,7 @@ if(CONFIG_USB_MIDI_UI_ENABLED)
         "ui/screen_tombola.cpp"
         "ui/screen_knob.cpp"
         "ui/screen_xypad.cpp"
+        "ui/ui_xypad.cpp"
         "ui/screen_keys.cpp"
         "ui/ui_keys.cpp"
         "ui/seq_engine.c"

@@ -821,9 +821,17 @@ Knobs が持続パラメータ、Tombola が自動発音だとすると、XYPad 
 
 最大 5 本の同時タッチはそれぞれ独立した**スロット**を持つ。X の意味づけ
 （スケールへスナップ + グライドか、Y と同じ生の CC か）・CC 番号・チャンネル・
-Hold・送信先まで、**指ごとに丸ごと別の設定**にできる。C++ 側（`ui_common.cpp`
+Hold・送信先まで、**指ごとに丸ごと別の設定**にできる。C++ 側（`ui_xypad.cpp`
 の `ui_xypad_*`）はタッチ追跡とスケールへのスナップ・グライド計算だけを持ち、
 MIDI を送るのは Ruby（`UI::XYPad` 内蔵ハンドラ、または `on_touch` で自前実装）。
+
+- **`UI::XYPad.new` のたびに別のパッド**（2026-11-18、Keys と同じ作り）。C はパッド表（`UI_XYPAD_MAX_PADS` = 4、
+  [main/ui/ui_xypad.cpp](main/ui/ui_xypad.cpp)）で、`ui_xypad_*` は先頭にパッドの id を取る。パッドごとにトランスポートの
+  ビットを持ち、`UI::XYPad.new` が MIDI Devices にスクリプトの機器（「XYPad 2」など、IN の行だけ。
+  `UI::MIDIDevices.register(..., output: false)`）として登録する。id 0 = `UI::XYPad.default` は `main_task.rb` の
+  `setup_midi_devices` が内蔵機器 `xypad` として登録（以前は C の `ui_xypad_init()`）。スクリプトのパッドは `close` か
+  スクリプトの終わり（Supervisor の `ui_xypad_cleanup()`）で閉じる。描画は `XYPadView`（XYPad 画面に 1 つ、レイアウトは
+  部品ごとに 1 つ、`ui_layout_add_xypad`）。タッチのイベントにパッドの id が載る。ホストテスト `ruby test/xypad_test.rb`
 
 ```ruby
 pad = UI::XYPad.new(scale: [36, 38, 40, 41, 43, 45, 47, 48],
@@ -1034,8 +1042,9 @@ end.show
   `commit`）。保持は [main/ui/ui_layout.cpp](main/ui/ui_layout.cpp)（再帰ミューテックス、
   ヒープ確保）、画面は [main/ui/screen_layout.cpp](main/ui/screen_layout.cpp)
 - pad / knob の描画は [main/ui/ui_widgets.cpp](main/ui/ui_widgets.cpp) で Pads / Knobs 画面と共有
-- XYPad / Tombola はそれぞれの画面オブジェクトを、表示中だけ部品のセルに狭めて借りる
-  （`setArea()` / `resetArea()`）。モデルが 1 つなので 1 レイアウトに 1 つまで。鍵盤は部品ごとに `KeysView` を持つので何個でも
+- Tombola は画面オブジェクトを、表示中だけ部品のセルに狭めて借りる
+  （`setArea()` / `resetArea()`）。モデルが 1 つなので 1 レイアウトに 1 つまで。鍵盤と XYPad は部品ごとに
+  `KeysView` / `XYPadView` を持つので何個でも
 - 全画面合成中の `ui_strip::paint()` は自分の矩形にもクリップする（隣の部品へのはみ出し防止）
 - 新しい部品（Sequencer など）は `ui_widget_kind_t` に足し、`ScreenLayout` に描画とタッチを、
   `ui_layout.rb` の `Builder` にメソッドを足す

@@ -79,7 +79,7 @@ public:
 private:
     KeysView m_view;
     bool m_isActive;
-    char m_title[16];
+    char m_title[24];
 };
 
 ScreenKeys& getScreenKeys();

@@ -305,104 +305,111 @@ void ui_tombola_receive(uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
     (void)cin; (void)b1; (void)b2; (void)b3;
 }
 
-void ui_xypad_init(void)
+// XYPad stubs (docs/XYPAD.md) - no screen to touch. A pad never joins the
+// transport registry here (transport_id 0); the ids are handed out all the
+// same so UI::XYPad.new works (and does nothing).
+
+int ui_xypad_default(void)
 {
+    return UI_XYPAD_DEFAULT;
 }
 
-midi_tmask_t ui_xypad_transport_bit(void)
+int ui_xypad_create(void)
 {
-    return 0;
+    return UI_XYPAD_DEFAULT + 1;
 }
 
-midi_tmask_t ui_xypad_targets(uint8_t cin, uint8_t b1)
+void ui_xypad_destroy(int pad)
 {
-    (void)cin; (void)b1;
-    return 0;
+    (void)pad;
 }
 
-void ui_xypad_dispatch(midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+bool ui_xypad_alive(int pad)
 {
-    (void)route; (void)cin; (void)b1; (void)b2; (void)b3;
-}
-
-// XYPad stubs - the touch surface lives in ui/screen_xypad.cpp and its model
-// in ui/ui_common.cpp, neither of which is built for a board without a
-// display. Scripts that touch UI::XYPad here get silent no-ops.
-
-void ui_xypad_reset(void)
-{
-}
-
-void ui_xypad_set_max_touches(uint8_t n)
-{
-    (void)n;
-}
-
-uint8_t ui_xypad_get_max_touches(void)
-{
-    return 0;
-}
-
-bool ui_xypad_set_f(uint8_t index, const char *name, float value)
-{
-    (void)index; (void)name; (void)value;
+    (void)pad;
     return false;
 }
 
-bool ui_xypad_set_i(uint8_t index, const char *name, int value)
+void ui_xypad_set_shown(int pad)
 {
-    (void)index; (void)name; (void)value;
+    (void)pad;
+}
+
+void ui_xypad_cleanup(void)
+{
+}
+
+midi_tmask_t ui_xypad_transport_bit(int pad)
+{
+    (void)pad;
+    return 0;
+}
+
+midi_tmask_t ui_xypad_targets(int pad, uint8_t cin, uint8_t b1)
+{
+    (void)pad; (void)cin; (void)b1;
+    return 0;
+}
+
+void ui_xypad_dispatch(int pad, midi_tmask_t route, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)pad; (void)route; (void)cin; (void)b1; (void)b2; (void)b3;
+}
+
+void ui_xypad_reset(int pad)
+{
+    (void)pad;
+}
+
+void ui_xypad_set_max_touches(int pad, uint8_t n)
+{
+    (void)pad; (void)n;
+}
+
+uint8_t ui_xypad_get_max_touches(int pad)
+{
+    (void)pad;
+    return UI_XYPAD_MAX_TOUCHES;
+}
+
+bool ui_xypad_set_f(int pad, uint8_t index, const char *name, float value)
+{
+    (void)pad; (void)index; (void)name; (void)value;
     return false;
 }
 
-float ui_xypad_get_f(uint8_t index, const char *name)
+bool ui_xypad_set_i(int pad, uint8_t index, const char *name, int value)
 {
-    (void)index; (void)name;
+    (void)pad; (void)index; (void)name; (void)value;
+    return false;
+}
+
+float ui_xypad_get_f(int pad, uint8_t index, const char *name)
+{
+    (void)pad; (void)index; (void)name;
     return 0.0f;
 }
 
-int ui_xypad_get_i(uint8_t index, const char *name)
+int ui_xypad_get_i(int pad, uint8_t index, const char *name)
 {
-    (void)index; (void)name;
+    (void)pad; (void)index; (void)name;
     return 0;
 }
 
-void ui_xypad_set_scale(uint8_t index, const uint8_t *notes, uint8_t len)
+void ui_xypad_set_scale(int pad, uint8_t index, const uint8_t *notes, uint8_t len)
 {
-    (void)index; (void)notes; (void)len;
+    (void)pad; (void)index; (void)notes; (void)len;
 }
 
-uint8_t ui_xypad_get_scale(uint8_t index, uint8_t *out, uint8_t max_len)
+uint8_t ui_xypad_get_scale(int pad, uint8_t index, uint8_t *out, uint8_t max_len)
 {
-    (void)index; (void)out; (void)max_len;
+    (void)pad; (void)index; (void)out; (void)max_len;
     return 0;
 }
 
-const xypad_slot_t *ui_xypad_get_slot(uint8_t index)
+int ui_layout_add_xypad(int x, int y, int w, int h, int pad_id)
 {
-    (void)index;
-    return NULL;
-}
-
-int ui_xypad_touch_down(int touch_id, int x, int y,
-                        int content_x, int content_y, int content_w, int content_h)
-{
-    (void)touch_id; (void)x; (void)y;
-    (void)content_x; (void)content_y; (void)content_w; (void)content_h;
-    return -1;
-}
-
-int ui_xypad_touch_move(int touch_id, int x, int y,
-                        int content_x, int content_y, int content_w, int content_h)
-{
-    (void)touch_id; (void)x; (void)y;
-    (void)content_x; (void)content_y; (void)content_w; (void)content_h;
-    return -1;
-}
-
-int ui_xypad_touch_up(int touch_id)
-{
-    (void)touch_id;
+    (void)x; (void)y; (void)w; (void)h; (void)pad_id;
     return -1;
 }
 
@@ -828,6 +835,11 @@ bool ui_mididev_activate(const char *key, midi_tmask_t bit)
 {
     (void)key; (void)bit;
     return false;
+}
+
+void ui_mididev_set_no_out_bit(midi_tmask_t bit)
+{
+    (void)bit;
 }
 
 void ui_mididev_set_no_out(const char *key)

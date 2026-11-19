@@ -22,7 +22,7 @@
 require 'midi'
 require 'ui'
 
-# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの。XYPad のモデルも 1 つ）
+# レイアウトは UI モードだけ（スクリプトの画面はスクリプトのもの）
 return unless $midori_mode == :ui
 
 md = UI::MIDIDevices

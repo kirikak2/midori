@@ -171,6 +171,8 @@ mrb_ui_pop_event(mrb_state *mrb, mrb_value self)
                 default: phase = MRB_SYM(up);   break;
             }
             HSET(slot, mrb_fixnum_value(event.xypad_slot + 1));
+            /* The pad's id: UI.dispatch_event finds its UI::XYPad */
+            HSET(pad, mrb_fixnum_value(event.xypad_pad));
             HSET(phase, mrb_symbol_value(phase));
             HSET(channel, mrb_fixnum_value(event.xypad_channel));
             HSET(note, mrb_fixnum_value(event.xypad_note));
@@ -727,100 +729,142 @@ mrb_ui_knob_set_bank(mrb_state *mrb, mrb_value self)
  * here (Ruby's slot numbers are 1-based and converted in mrblib).
  * ------------------------------------------------------------------------ */
 
+/* UI._xypad_default -> the default pad's id (-1: none) */
 static mrb_value
-mrb_ui_xypad_reset(mrb_state *mrb, mrb_value self)
+mrb_ui_xypad_default(mrb_state *mrb, mrb_value self)
 {
-    picoruby_ui_xypad_reset();
+    return mrb_fixnum_value(picoruby_ui_xypad_default());
+}
+
+/* UI._xypad_create -> a new pad's id, or -1 when none is free */
+static mrb_value
+mrb_ui_xypad_create(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(picoruby_ui_xypad_create());
+}
+
+/* UI._xypad_destroy(pad) */
+static mrb_value
+mrb_ui_xypad_destroy(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pad;
+    mrb_get_args(mrb, "o", &pad);
+    picoruby_ui_xypad_destroy(val_to_i(pad));
     return mrb_nil_value();
 }
 
+/* UI._xypad_show(pad): the pad the XYPad screen shows */
+static mrb_value
+mrb_ui_xypad_set_shown(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pad;
+    mrb_get_args(mrb, "o", &pad);
+    picoruby_ui_xypad_set_shown(val_to_i(pad));
+    return mrb_nil_value();
+}
+
+/* UI._xypad_reset(pad) */
+static mrb_value
+mrb_ui_xypad_reset(mrb_state *mrb, mrb_value self)
+{
+    mrb_value pad;
+    mrb_get_args(mrb, "o", &pad);
+    picoruby_ui_xypad_reset(val_to_i(pad));
+    return mrb_nil_value();
+}
+
+/* UI._xypad_set_max_touches(pad, n) */
 static mrb_value
 mrb_ui_xypad_set_max_touches(mrb_state *mrb, mrb_value self)
 {
-    mrb_value n;
-    mrb_get_args(mrb, "o", &n);
+    mrb_value pad, n;
+    mrb_get_args(mrb, "oo", &pad, &n);
     if (mrb_integer_p(n)) {
-        picoruby_ui_xypad_set_max_touches((int)mrb_integer(n));
+        picoruby_ui_xypad_set_max_touches(val_to_i(pad), (int)mrb_integer(n));
     }
     return mrb_nil_value();
 }
 
+/* UI._xypad_get_max_touches(pad) */
 static mrb_value
 mrb_ui_xypad_get_max_touches(mrb_state *mrb, mrb_value self)
 {
-    return mrb_fixnum_value(picoruby_ui_xypad_get_max_touches());
+    mrb_value pad;
+    mrb_get_args(mrb, "o", &pad);
+    return mrb_fixnum_value(picoruby_ui_xypad_get_max_touches(val_to_i(pad)));
 }
 
-/* UI._xypad_set_f(index, name, value) / UI._xypad_set_i(index, name, value) */
+/* UI._xypad_set_f(pad, index, name, value) / UI._xypad_set_i(pad, index, name, value) */
 static mrb_value
 mrb_ui_xypad_set_f(mrb_state *mrb, mrb_value self)
 {
-    mrb_value index, name_v, value;
-    mrb_get_args(mrb, "ooo", &index, &name_v, &value);
+    mrb_value pad, index, name_v, value;
+    mrb_get_args(mrb, "oooo", &pad, &index, &name_v, &value);
     const char *name = param_name(mrb, name_v);
     if (!mrb_integer_p(index) || name == NULL) return mrb_false_value();
-    return mrb_bool_value(picoruby_ui_xypad_set_f((int)mrb_integer(index), name,
+    return mrb_bool_value(picoruby_ui_xypad_set_f(val_to_i(pad), (int)mrb_integer(index), name,
                                                   val_to_f(value)));
 }
 
 static mrb_value
 mrb_ui_xypad_set_i(mrb_state *mrb, mrb_value self)
 {
-    mrb_value index, name_v, value;
+    mrb_value pad, index, name_v, value;
     int i;
-    mrb_get_args(mrb, "ooo", &index, &name_v, &value);
+    mrb_get_args(mrb, "oooo", &pad, &index, &name_v, &value);
     const char *name = param_name(mrb, name_v);
     if (!mrb_integer_p(index) || name == NULL || !val_to_flag_i(value, &i)) {
         return mrb_false_value();
     }
-    return mrb_bool_value(picoruby_ui_xypad_set_i((int)mrb_integer(index), name, i));
+    return mrb_bool_value(picoruby_ui_xypad_set_i(val_to_i(pad), (int)mrb_integer(index), name, i));
 }
 
-/* UI._xypad_get_f(index, name) / UI._xypad_get_i(index, name) */
+/* UI._xypad_get_f(pad, index, name) / UI._xypad_get_i(pad, index, name) */
 static mrb_value
 mrb_ui_xypad_get_f(mrb_state *mrb, mrb_value self)
 {
-    mrb_value index, name_v;
-    mrb_get_args(mrb, "oo", &index, &name_v);
+    mrb_value pad, index, name_v;
+    mrb_get_args(mrb, "ooo", &pad, &index, &name_v);
     const char *name = param_name(mrb, name_v);
     if (!mrb_integer_p(index) || name == NULL) return mrb_float_value(mrb, 0.0);
-    return mrb_float_value(mrb, picoruby_ui_xypad_get_f((int)mrb_integer(index), name));
+    return mrb_float_value(mrb, picoruby_ui_xypad_get_f(val_to_i(pad), (int)mrb_integer(index), name));
 }
 
 static mrb_value
 mrb_ui_xypad_get_i(mrb_state *mrb, mrb_value self)
 {
-    mrb_value index, name_v;
-    mrb_get_args(mrb, "oo", &index, &name_v);
+    mrb_value pad, index, name_v;
+    mrb_get_args(mrb, "ooo", &pad, &index, &name_v);
     const char *name = param_name(mrb, name_v);
     if (!mrb_integer_p(index) || name == NULL) return mrb_fixnum_value(0);
-    return mrb_fixnum_value(picoruby_ui_xypad_get_i((int)mrb_integer(index), name));
+    return mrb_fixnum_value(picoruby_ui_xypad_get_i(val_to_i(pad), (int)mrb_integer(index), name));
 }
 
-/* UI._xypad_set_scale(index, array_of_note_numbers) */
+/* UI._xypad_set_scale(pad, index, array_of_note_numbers) */
 static mrb_value
 mrb_ui_xypad_set_scale(mrb_state *mrb, mrb_value self)
 {
-    mrb_value index, ary;
-    mrb_get_args(mrb, "oo", &index, &ary);
+    mrb_value pad, index, ary;
+    mrb_get_args(mrb, "ooo", &pad, &index, &ary);
     if (!mrb_integer_p(index) || !mrb_array_p(ary)) return mrb_nil_value();
 
     uint8_t notes[16];
     int count = collect_notes(ary, notes, (int)sizeof(notes));
-    picoruby_ui_xypad_set_scale((int)mrb_integer(index), notes, count);
+    picoruby_ui_xypad_set_scale(val_to_i(pad), (int)mrb_integer(index), notes, count);
     return mrb_nil_value();
 }
 
-/* UI._xypad_get_scale(index) -> Array */
+/* UI._xypad_get_scale(pad, index) -> Array */
 static mrb_value
 mrb_ui_xypad_get_scale(mrb_state *mrb, mrb_value self)
 {
-    mrb_value index;
-    mrb_get_args(mrb, "o", &index);
+    mrb_value pad, index;
+    mrb_get_args(mrb, "oo", &pad, &index);
     if (!mrb_integer_p(index)) return mrb_ary_new(mrb);
 
     uint8_t notes[16];
-    int count = picoruby_ui_xypad_get_scale((int)mrb_integer(index), notes, (int)sizeof(notes));
+    int count = picoruby_ui_xypad_get_scale(val_to_i(pad), (int)mrb_integer(index), notes,
+                                            (int)sizeof(notes));
     mrb_value ary = mrb_ary_new_capa(mrb, count);
     for (int i = 0; i < count; i++) {
         mrb_ary_push(mrb, ary, mrb_fixnum_value(notes[i]));
@@ -906,6 +950,16 @@ mrb_ui_layout_add_keys(mrb_state *mrb, mrb_value self)
     mrb_value a[5];
     mrb_get_args(mrb, "ooooo", &a[0], &a[1], &a[2], &a[3], &a[4]);
     return mrb_fixnum_value(picoruby_ui_layout_add_keys(
+        val_to_i(a[0]), val_to_i(a[1]), val_to_i(a[2]), val_to_i(a[3]), val_to_i(a[4])));
+}
+
+/* UI._layout_add_xypad(x, y, w, h, pad_id) -> id or -1 */
+static mrb_value
+mrb_ui_layout_add_xypad(mrb_state *mrb, mrb_value self)
+{
+    mrb_value a[5];
+    mrb_get_args(mrb, "ooooo", &a[0], &a[1], &a[2], &a[3], &a[4]);
+    return mrb_fixnum_value(picoruby_ui_layout_add_xypad(
         val_to_i(a[0]), val_to_i(a[1]), val_to_i(a[2]), val_to_i(a[3]), val_to_i(a[4])));
 }
 
@@ -1148,29 +1202,31 @@ mrb_ui_tombola_receive(mrb_state *mrb, mrb_value self)
     return mrb_fixnum_value(0);
 }
 
-/* UI._xypad_transport_bit -> the XYPad's transport bit (0: none) */
+/* UI._xypad_transport_bit(pad) -> the pad's transport bit (0: none) */
 static mrb_value
 mrb_ui_xypad_transport_bit(mrb_state *mrb, mrb_value self)
 {
-    return mrb_fixnum_value(picoruby_ui_xypad_transport_bit());
+    mrb_value pad;
+    mrb_get_args(mrb, "o", &pad);
+    return mrb_fixnum_value(picoruby_ui_xypad_transport_bit(val_to_i(pad)));
 }
 
-/* UI._xypad_targets(cin, status) -> where a message from the XYPad is routed */
+/* UI._xypad_targets(pad, cin, status) -> where a message from the pad is routed */
 static mrb_value
 mrb_ui_xypad_targets(mrb_state *mrb, mrb_value self)
 {
-    mrb_value cin, b1;
-    mrb_get_args(mrb, "oo", &cin, &b1);
-    return mrb_fixnum_value(picoruby_ui_xypad_targets(val_to_i(cin), val_to_i(b1)));
+    mrb_value pad, cin, b1;
+    mrb_get_args(mrb, "ooo", &pad, &cin, &b1);
+    return mrb_fixnum_value(picoruby_ui_xypad_targets(val_to_i(pad), val_to_i(cin), val_to_i(b1)));
 }
 
-/* UI._xypad_dispatch(route, cin, b1, b2, b3): one message along those routes */
+/* UI._xypad_dispatch(pad, route, cin, b1, b2, b3): one message along those routes */
 static mrb_value
 mrb_ui_xypad_dispatch(mrb_state *mrb, mrb_value self)
 {
-    mrb_value route, cin, b1, b2, b3;
-    mrb_get_args(mrb, "ooooo", &route, &cin, &b1, &b2, &b3);
-    picoruby_ui_xypad_dispatch(val_to_i(route), val_to_i(cin), val_to_i(b1),
+    mrb_value pad, route, cin, b1, b2, b3;
+    mrb_get_args(mrb, "oooooo", &pad, &route, &cin, &b1, &b2, &b3);
+    picoruby_ui_xypad_dispatch(val_to_i(pad), val_to_i(route), val_to_i(cin), val_to_i(b1),
                                val_to_i(b2), val_to_i(b3));
     return mrb_nil_value();
 }
@@ -1719,6 +1775,16 @@ mrb_ui_mididev_register(mrb_state *mrb, mrb_value self)
                                                          mrb_test(builtin)));
 }
 
+/* UI._mididev_no_out_bit(bit): a listed device only sends (no MIDI OUT column) */
+static mrb_value
+mrb_ui_mididev_no_out_bit(mrb_state *mrb, mrb_value self)
+{
+    mrb_value bit;
+    mrb_get_args(mrb, "o", &bit);
+    picoruby_ui_mididev_set_no_out_bit(val_to_i(bit));
+    return mrb_nil_value();
+}
+
 /* UI._mididev_no_out(key): the built-in only sends (no MIDI OUT column) */
 static mrb_value
 mrb_ui_mididev_no_out(mrb_state *mrb, mrb_value self)
@@ -1929,15 +1995,19 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_tombola_running,     mrb_ui_tombola_running,     MRB_ARGS_NONE());
 
     /* XYPad */
-    DEF(_xypad_reset,           mrb_ui_xypad_reset,           MRB_ARGS_NONE());
-    DEF(_xypad_set_max_touches, mrb_ui_xypad_set_max_touches, MRB_ARGS_REQ(1));
-    DEF(_xypad_get_max_touches, mrb_ui_xypad_get_max_touches, MRB_ARGS_NONE());
-    DEF(_xypad_set_f,           mrb_ui_xypad_set_f,           MRB_ARGS_REQ(3));
-    DEF(_xypad_set_i,           mrb_ui_xypad_set_i,           MRB_ARGS_REQ(3));
-    DEF(_xypad_get_f,           mrb_ui_xypad_get_f,           MRB_ARGS_REQ(2));
-    DEF(_xypad_get_i,           mrb_ui_xypad_get_i,           MRB_ARGS_REQ(2));
-    DEF(_xypad_set_scale,       mrb_ui_xypad_set_scale,       MRB_ARGS_REQ(2));
-    DEF(_xypad_get_scale,       mrb_ui_xypad_get_scale,       MRB_ARGS_REQ(1));
+    DEF(_xypad_default,         mrb_ui_xypad_default,         MRB_ARGS_NONE());
+    DEF(_xypad_create,          mrb_ui_xypad_create,          MRB_ARGS_NONE());
+    DEF(_xypad_destroy,         mrb_ui_xypad_destroy,         MRB_ARGS_REQ(1));
+    DEF(_xypad_show,            mrb_ui_xypad_set_shown,       MRB_ARGS_REQ(1));
+    DEF(_xypad_reset,           mrb_ui_xypad_reset,           MRB_ARGS_REQ(1));
+    DEF(_xypad_set_max_touches, mrb_ui_xypad_set_max_touches, MRB_ARGS_REQ(2));
+    DEF(_xypad_get_max_touches, mrb_ui_xypad_get_max_touches, MRB_ARGS_REQ(1));
+    DEF(_xypad_set_f,           mrb_ui_xypad_set_f,           MRB_ARGS_REQ(4));
+    DEF(_xypad_set_i,           mrb_ui_xypad_set_i,           MRB_ARGS_REQ(4));
+    DEF(_xypad_get_f,           mrb_ui_xypad_get_f,           MRB_ARGS_REQ(3));
+    DEF(_xypad_get_i,           mrb_ui_xypad_get_i,           MRB_ARGS_REQ(3));
+    DEF(_xypad_set_scale,       mrb_ui_xypad_set_scale,       MRB_ARGS_REQ(3));
+    DEF(_xypad_get_scale,       mrb_ui_xypad_get_scale,       MRB_ARGS_REQ(2));
 
     /* Keys */
     DEF(_keys_default,           mrb_ui_keys_default,           MRB_ARGS_NONE());
@@ -1953,9 +2023,9 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_keys_set_channel_color, mrb_ui_keys_set_channel_color, MRB_ARGS_REQ(3));
     DEF(_keys_receive,           mrb_ui_keys_receive,           MRB_ARGS_REQ(5));
     DEF(_tombola_receive,        mrb_ui_tombola_receive,        MRB_ARGS_REQ(4));
-    DEF(_xypad_transport_bit,    mrb_ui_xypad_transport_bit,    MRB_ARGS_NONE());
-    DEF(_xypad_targets,          mrb_ui_xypad_targets,          MRB_ARGS_REQ(2));
-    DEF(_xypad_dispatch,         mrb_ui_xypad_dispatch,         MRB_ARGS_REQ(5));
+    DEF(_xypad_transport_bit,    mrb_ui_xypad_transport_bit,    MRB_ARGS_REQ(1));
+    DEF(_xypad_targets,          mrb_ui_xypad_targets,          MRB_ARGS_REQ(3));
+    DEF(_xypad_dispatch,         mrb_ui_xypad_dispatch,         MRB_ARGS_REQ(6));
     DEF(_keys_clear_lights,      mrb_ui_keys_clear_lights,      MRB_ARGS_REQ(1));
     DEF(_keys_lit,               mrb_ui_keys_is_lit,            MRB_ARGS_REQ(2));
     DEF(_keys_pressed,           mrb_ui_keys_is_pressed,        MRB_ARGS_REQ(2));
@@ -2014,6 +2084,7 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     /* MIDI Devices */
     DEF(_mididev_register,       mrb_ui_mididev_register,       MRB_ARGS_REQ(5));
     DEF(_mididev_no_out,         mrb_ui_mididev_no_out,         MRB_ARGS_REQ(1));
+    DEF(_mididev_no_out_bit,     mrb_ui_mididev_no_out_bit,     MRB_ARGS_REQ(1));
     DEF(_mididev_unregister,     mrb_ui_mididev_unregister,     MRB_ARGS_REQ(1));
     DEF(_mididev_activate,       mrb_ui_mididev_activate,       MRB_ARGS_REQ(2));
     DEF(_mididev_count,          mrb_ui_mididev_count,          MRB_ARGS_NONE());
@@ -2037,6 +2108,7 @@ mrb_picoruby_ui_gem_init(mrb_state *mrb)
     DEF(_layout_add_envelope, mrb_ui_layout_add_envelope, MRB_ARGS_REQ(12));
     DEF(_layout_add_view,  mrb_ui_layout_add_view,  MRB_ARGS_REQ(5));
     DEF(_layout_add_keys,  mrb_ui_layout_add_keys,  MRB_ARGS_REQ(5));
+    DEF(_layout_add_xypad, mrb_ui_layout_add_xypad, MRB_ARGS_REQ(5));
     DEF(_layout_commit,    mrb_ui_layout_commit,    MRB_ARGS_NONE());
     DEF(_layout_delete,    mrb_ui_layout_delete,    MRB_ARGS_REQ(1));
     DEF(_lw_pad_state,     mrb_ui_lw_pad_state,     MRB_ARGS_REQ(2));

@@ -442,6 +442,16 @@ void ui_mididev_set_no_out(const char* key)
     bump();
 }
 
+void ui_mididev_set_no_out_bit(midi_tmask_t bit)
+{
+    if (bit == 0) return;
+    portENTER_CRITICAL(&s_mux);
+    int i = find_bit_locked(bit);
+    if (i >= 0) s_devs[i].pub.flags |= UI_MIDIDEV_NO_OUT;
+    portEXIT_CRITICAL(&s_mux);
+    bump();
+}
+
 // --- Reading -----------------------------------------------------------------------
 
 int ui_mididev_count(void)

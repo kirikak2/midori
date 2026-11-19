@@ -104,7 +104,7 @@ esp_err_t UIManager::init()
     ui_seq_init();
     // So are the Tombola and the XYPad (route sources; notes sent to the Tombola are balls)
     ui_tombola_init();
-    ui_xypad_init();
+    ui_xypad_default();   // The default pad (main_task.rb lists it on MIDI Devices)
 
     // Initialize screens (placeholders for now)
     initScreens();

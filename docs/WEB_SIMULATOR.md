@@ -324,7 +324,7 @@ MyStage.run
 - ループは `ScriptManager#stop_requested?` を見て抜ける（Scripts 画面の Stop で協調停止できるように）
 - モジュール名（`MyStage`）はプロジェクト名から作る定数
 - デバイスや XYPad / Tombola / Keys のインスタンスはメソッドで参照するので、定義を 1 つだけ評価し直しても動く。
-  XYPad / Tombola / Keys はモデルが 1 つなので（UI_LAYOUT_DSL.md の実装メモ）、1 つのファイルで全レイアウトを
+  Tombola はモデルが 1 つで、XYPad / Keys は new のたびに別のパッド・鍵盤（MIDI Devices の機器も別）なので、1 つのファイルで全レイアウトを
   管理する形にしておけば、複数のレイアウトに同じインスタンスを安全に置ける。デザイナーは他の部品と同じく
   「プロジェクト内で 1 つ」を検証する。プラグインのレイアウトは `$midori_mode == :ui` でしか定義されないので、
   スクリプトの実行中にぶつかることはない

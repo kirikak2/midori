@@ -8,10 +8,52 @@ Pads がワンショット、Knobs が持続パラメータ、Tombola が
 
 - 対応ボード: M5Stack CoreS3 / M5Stack Tab5（画面が必要）。Freenove は他の画面と
   同じく no-op スタブ（[main/platform/platform_freenove.c](../main/platform/platform_freenove.c)）
-- 画面: [main/ui/screen_xypad.cpp](../main/ui/screen_xypad.cpp)（描画とタッチ）
-- モデル: `ui_xypad_*`（[main/ui/ui_common.cpp](../main/ui/ui_common.cpp)）
+- 画面: [main/ui/screen_xypad.cpp](../main/ui/screen_xypad.cpp)（描画とタッチ。`XYPadView`）
+- モデル: `ui_xypad_*`（[main/ui/ui_xypad.cpp](../main/ui/ui_xypad.cpp)。2026-11-18 まで ui_common.cpp）
 - Ruby API: `UI::XYPad`（[mrbgems/picoruby-ui/mrblib/ui.rb](../mrbgems/picoruby-ui/mrblib/ui.rb)）
 - サンプル: [examples/xypad.rb](../examples/xypad.rb)
+
+## パッドごとのインスタンス（2026-11-18）
+
+**`UI::XYPad.new` のたびに別のパッドになる**（それまでは C のモデルが 1 つで、new はそれをリセットして
+使い回していた）。パッドごとにスロット（指 5 本ぶんの設定）と**トランスポートのビット**を持つので、
+MIDI Devices 画面にもそれぞれ別の機器（IN の行だけ）として並び、出力をパッドごとにパッチできる。
+Keys（docs/KEYS.md）と同じ作り。Tab5 のビルド・Web シミュレーター・ホストテスト
+（`ruby test/xypad_test.rb`、picoruby-ui ディレクトリで）まで。**実機は未確認**。
+
+```ruby
+xy0  = UI::XYPad.default                        # ファームウェアのパッド（id 0、MIDI Devices の「XYPad」）
+lead = UI::XYPad.new(scale: [60, 62, 64, 67])   # 新しいパッド（id 1..、MIDI Devices の「XYPad 2」）
+fx   = UI::XYPad.new(x_mode: :cc, name: "FX")   # name: で MIDI Devices の名前
+MIDI.route(lead, MIDIDevices.amy)               # パッドごとに別のルート
+MIDI.route(fx, MIDIDevices.sam2695)
+lead.show                                       # XYPad 画面にこのパッドを出す
+fx.close                                        # 閉じる（MIDI Devices からも消える）
+
+UI.layout("Two pads", cols: 2) do               # レイアウトにいくつでも
+  xypad col: 0, pad: lead
+  xypad col: 1, pad: fx
+end.show
+```
+
+| | `UI::XYPad.default` | `UI::XYPad.new` |
+|---|---|---|
+| id | 0 | 1..3（空いている一番小さいもの。`UI::XYPad::MAX` = 4、既定を含む） |
+| MIDI Devices | 内蔵機器「XYPad」（`main_task.rb` の `setup_midi_devices` が `register_builtin(:xypad, output: false)`）。画面のパッチは保存される | スクリプトの機器（`name:`、既定は「XYPad N」、IN の行だけ）。パッチはスクリプト限り |
+| スクリプトの終わり | 既定値に戻る（閉じない） | 閉じる（ビットを返し、MIDI Devices から消える） |
+| `close` | Hold を外してリセット | Hold を外し（ラッチ中のノートを止める）、閉じる。以後の設定は例外 |
+| XYPad 画面 | 既定で映る | `show` で映す。閉じると既定のパッドに戻る |
+
+- `UI::XYPad.default(**kw)` はキーワードがあれば全スロットに適用する（`configure`）。同じ VM では毎回同じインスタンス
+- パッドごとにトランスポート登録表のビットを 1 つ使う。表が埋まっていると `transport_id` が 0 になり、
+  `device:` へは送れるがルートと MIDI Devices には出ない
+- C は `UI_XYPAD_MAX_PADS`（4）のパッド表で、`ui_xypad_*` は先頭にパッドの id を取る。モデルはパッドを初めて
+  使うときに calloc し、閉じても解放しない（UI タスクがまだ描いているかもしれないため）。タッチのイベントにパッドの
+  id が載り（`UI_EVENT_XYPAD_TOUCH` の `pad`）、Ruby はそのパッドの内蔵ハンドラと `on_touch` へ渡す
+- 描画とタッチは `XYPadView`（波紋・軌跡のアニメーション状態を持つ）。XYPad 画面が 1 つ（ヒープ）、レイアウトは
+  xypad の部品ごとに 1 つ持つ（`ui_layout_add_xypad`、部品はパッドの id を持つ）。同じパッドを 1 つのレイアウトに
+  2 回は置けない（`ArgumentError`）。レイアウトがキーワードから作ったパッドは定義し直し・`delete` で閉じる
+- スクリプト終了時は Supervisor が `ui_xypad_cleanup()`（スクリプトのパッドを閉じ、既定のパッドを既定値に戻す）
 
 ## 実装状況（2026-08-15）
 
@@ -32,14 +74,13 @@ Pads がワンショット、Knobs が持続パラメータ、Tombola が
 | 値 | bool | 連続値 1 個 | — (物理シム) | 連続値 2 個（X, Y）+ ゲート |
 | 操作 | タップ | 円周ドラッグ | 多角形をドラッグ回転 | 平面をタッチ＆ドラッグ |
 | MIDI を送るのは | Ruby のブロック | Ruby のブロック | C++ 側（既定） | Ruby のブロック（既定は内蔵ハンドラ） |
-| 個数 | CoreS3 6 / Tab5 12 | 同 × 4 バンク | 同時 1 台（シングルトン） | 同時 1 台、**最大 5 スロット** |
+| 個数 | CoreS3 6 / Tab5 12 | 同 × 4 バンク | 同時 1 台（シングルトン） | **最大 4 台**（2026-11-18 まで 1 台）、各**最大 5 スロット** |
 | 同時発音 | — | — | ボール数ぶん | 最大 5（スロット数の上限） |
 | スロットごとの独立設定 | — | ノブごとに独立（Knobs はもともとこの形） | ボールごとに一部独立 | **X/Y の意味づけ・送信先まで全部独立** |
 
-Tombola と同じく **C++ 側の状態はグローバルなシングルトン**なので、XYPad も
-同時に 1 つ。ただしその中身は Knobs のバンクに近く、**5 本の指それぞれに
-対応する「スロット」が独立した設定を持つ**（後述）。`UI::XYPad.new` は
-既定値へリセットしてから引数を全スロットへ適用する。
+パッドは何台か持てる（上の「パッドごとのインスタンス」）。1 台の中身は Knobs のバンクに近く、
+**5 本の指それぞれに対応する「スロット」が独立した設定を持つ**（後述）。`UI::XYPad.new` は
+新しいパッドを既定値で開き、引数を全スロットへ適用する。
 
 ## なぜこの設計か（前提の整理）
 
@@ -397,7 +438,8 @@ Knobs / Tombola と同じく、値が変わった範囲だけ差分描画する�
 ## MIDI トランスポートとして（2026-11-01）
 
 XYPad は**送るだけ**の picoruby-midi のトランスポートで、MIDI Devices 画面に `XYPad`（IN の行のみ、
-`UI_MIDIDEV_NO_OUT`）として出る（UI の初期化時に `ui_xypad_init()` が登録する。キー `xypad`）。
+`UI_MIDIDEV_NO_OUT`）として出る（既定のパッドは `main_task.rb` が `register_builtin(:xypad)` する。
+スクリプトのパッドは `UI::XYPad.new` が `UI::MIDIDevices.register(..., output: false)` する）。
 **実機未確認**。
 
 ```ruby
