@@ -8,3 +8,7 @@ version.txt
 dist/
 site/firmware/
 site/simulator/
+
+# Built by tools/bundle_plugins.rb (and the release zip), not kept in the repository
+examples/bundle.mrb
+examples/plugins/bundle.mrb

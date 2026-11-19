@@ -1321,12 +1321,13 @@ MIDI.bpm_loop(120, sync_from: kb) { |c| ... }
   モードで分けるプラグインは `$midori_mode`（`:ui` / `:script` / `:irb`）を見る（レイアウトは `return unless $midori_mode == :ui`）。
   SD 再読み込み（Scripts 画面）では読み直さない（デバイスを作るプラグインを 2 回読まないため。UI モードはスクリプトのたびに起動し直す）
 - サンプルは [examples/plugins/](examples/plugins/)（filter: chord / arp / channel / lumi、レイアウト: perform / keys / clock。
-  `.rb` のみで、まとめてコンパイルしたものが examples/bundle.mrb）。レイアウトはループ・`show`・選択やルートの書き換えを書かない
+  `.rb` のみ。まとめてコンパイルした bundle.mrb はリポジトリに置かない（2026-11-19 に削除。`.gitignore` 済み）。レイアウトはループ・`show`・選択やルートの書き換えを書かない
   （書き方は docs/UI_LAYOUT_DSL.md §10）。レイアウトの表示中は UI モードのループが 10 ms 周期
 - **1 つの .mrb にまとめる**: `ruby tools/bundle_plugins.rb [dir] [out]`（既定 examples/plugins → examples/bundle.mrb）。
   `lib/*.rb` を先に、続けて `*.rb` を名前順につなぐ。ファイルごとに `lambda do ... end.call` で包むので、
   トップレベルの `return` とローカル変数はファイルごと、例外もファイルごとに報告して続ける。
-  `/sd/plugins/` には bundle.mrb だけを置く（元のファイルもあると二重に読まれる）。lib を load するプラグインは
+  `/sd/plugins/` には bundle.mrb だけを置く（元のファイルもあると二重に読まれる。古い bundle.mrb が残っていると
+  変更前のプラグインが動く）。lib を load するプラグインは
   bundle 内では飛ばす（`lumi.rb` の `unless Object.const_defined?(:Lumi)`）
 - 読み込みの間は**画面をロック**する: `UI._loading(label, done, total)`（label nil で解除）→
   `UIManager::setLoading()`。ロック中はコンテンツ中央にロード中の枠（件数・ファイル名・プログレスバー）を
